@@ -6,7 +6,7 @@
 #
 
 
-import sys, os, time, string, urllib, cv2, PIL.Image
+import sys, os, time, urllib, cv2, PIL.Image
 from packaging import version as pkg_version
 from contextlib import contextmanager
 
@@ -140,7 +140,7 @@ def connect_model_zoo(inference_option=CloudInference):
 
     else:
         raise Exception(
-            f"Invalid value of inference_option parameter. Should be one of CloudInference, AIServerInference, or LocalHWInference"
+            "Invalid value of inference_option parameter. Should be one of CloudInference, AIServerInference, or LocalHWInference"
         )
 
     return zoo
@@ -313,12 +313,12 @@ def open_audio_stream(sampling_rate_hz, buffer_size):
     Returns context manager yielding audio stream object and closing it on exit
     """
 
-    import numpy as np, queue
+    import queue
 
     pyaudio = import_optional_package("pyaudio")
 
     audio = pyaudio.PyAudio()
-    result_queue = queue.Queue()
+    result_queue = queue.Queue()  # type: queue.Queue
 
     def callback(
         in_data,  # recorded data if input=True; else None
@@ -433,7 +433,7 @@ class FPSMeter:
             self._count = min(self._count + 1, self._avg_len)
             self._duration_ns = (
                 self._duration_ns * (self._count - 1) + cur_dur_ns
-            ) / self._count
+            ) // self._count
         self._timestamp_ns = t
         return self.fps()
 
@@ -471,10 +471,12 @@ class Display:
             cv2.destroyWindow(self._capt)  # close OpenCV window
         return exc_type is KeyboardInterrupt  # ignore KeyboardInterrupt errors
 
+    @staticmethod
     def crop(img, bbox):
         """Crop and return OpenCV image to given bbox"""
-        return img[int(bbox[1]) : int(bbox[3]), int(bbox[0]) : int(bbox[2])]
+        return img[int(bbox[1]): int(bbox[3]), int(bbox[0]): int(bbox[2])]
 
+    @staticmethod
     def put_text(
         img,
         text,
@@ -513,6 +515,7 @@ class Display:
             text_color,
         )
 
+    @staticmethod
     def _check_gui():
         """Check if graphical display is supported
 
@@ -524,6 +527,7 @@ class Display:
             return os.environ.get("DISPLAY") is not None
         return True
 
+    @staticmethod
     def _show_fps(img, fps):
         """Helper method to display FPS"""
         Display.put_text(img, f"{fps:5.1f} FPS", (0, 0), (0, 0, 0), (255, 255, 255))
@@ -615,7 +619,7 @@ class Progress:
         self._step = self._start_step
         self._percent = 0.0
         self._last_updated_percent = self._percent
-        self._last_update_time = 0
+        self._last_update_time = 0.0
         self._tip_phase = 0
         self._update()
 
