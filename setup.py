@@ -14,7 +14,7 @@ setup(name='dgtools',
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License"
       ],
-      install_requires=["numpy", "pillow", "opencv-python",],
+      install_requires=["degirum>=0.9.2", "numpy", "pillow", "opencv-python",],
       python_requires='>=3.8',
       extras_require={
         'linting': [

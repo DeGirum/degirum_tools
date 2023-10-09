@@ -33,8 +33,8 @@ def _check_pysdk_ver():
 
     if pkg_version.parse(dg.__version__) < min_compatible_pysdk_ver:
         raise Exception(
-            f"Currently installed Degirum PySDK version {dg.__version__} is not compatible with this script. "
-            + f"Please install PySDK version {min_compatible_pysdk_ver} or higher."
+            f"Currently installed Degirum PySDK version {dg.__version__} is not compatible with dgtools. "
+            + f"Please install PySDK version >={min_compatible_pysdk_ver}."
         )
 
 
@@ -169,7 +169,7 @@ def import_optional_package(pkg_name, is_long=False):
         return ret
     except ModuleNotFoundError as e:
         print(
-            f"\n*** Error loading '{pkg_name}' package: {e}. May be it is not installed?\n"
+            f"\n*** Error loading '{pkg_name}' package: {e}. Not installed?\n"
         )
         return None
 
