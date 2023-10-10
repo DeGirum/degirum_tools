@@ -255,9 +255,9 @@ def open_video_writer(fname, w, h, fps=30):
     """
 
     codec = (
-        cv2.VideoWriter_fourcc(*"vp09")
+        cv2.VideoWriter_fourcc(*"vp09")  # type: ignore
         if get_test_mode() or sys.platform != "win32"
-        else cv2.VideoWriter_fourcc(*"mp4v")
+        else cv2.VideoWriter_fourcc(*"mp4v")  # type: ignore
     )
 
     writer = cv2.VideoWriter()  # create stream writer

@@ -1,0 +1,8 @@
+[tool.mypy]
+warn_unused_configs = true
+files = "dgtools"
+ignore_missing_imports = true
+check_untyped_defs = true
+explicit_package_bases = true
+warn_unreachable = true
+
