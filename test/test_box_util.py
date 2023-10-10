@@ -1,5 +1,5 @@
 import numpy as np
-from dgtools.dgtools import area, intersection
+from dgtools import area, intersection
 
 
 def test_area():
