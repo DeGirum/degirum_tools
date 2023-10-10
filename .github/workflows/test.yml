@@ -1,0 +1,47 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+    branches: [main]
+    types: [opened, edited, reopen, synchronize, ready_for_review]
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: Linters/Type Checkers
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.9
+      - name: Install
+        run: pip install -e '.[linting]'
+      - name: Run flake8
+        run: python3 -m flake8 .
+      - name: Run mypy
+        run: python3 -m mypy
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+        python-version: 3.9
+      - name: Install
+        run: pip install -e '.[testing]'
+      - name: Run pytest (with coverage)
+        run: python3 -m coverage run -m pytest test/
+      - name: Display coverage report
+        run: python3 -m coverage report --omit=config*
+
