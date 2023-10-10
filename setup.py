@@ -2,12 +2,16 @@
 
 from setuptools import setup
 
+from pathlib import Path
+with open(Path(__file__).resolve().parent / 'README.md', encoding='utf-8') as f:
+  readme = f.read()
+
 setup(name='dgtools',
       version='0.0.1',
       description='Tools for PySDK',
       author='DeGirum',
       license='',
-      long_description='# dgtools\n## Tools for PySDK',
+      long_description=readme,
       long_description_content_type='text/markdown',
       packages=[
         'dgtools',
