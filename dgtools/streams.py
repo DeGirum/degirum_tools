@@ -50,7 +50,7 @@ class Stream(queue.Queue):
     _poison = None
 
     def put(
-        self, item: Any, block: bool = False, timeout: Optional[float] = None
+        self, item: Any, block: bool = True, timeout: Optional[float] = None
     ) -> None:
         """Put an item into the stream
 
