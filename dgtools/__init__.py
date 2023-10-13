@@ -168,9 +168,7 @@ def import_optional_package(pkg_name, is_long=False):
             print(f"...done; '{pkg_name}' version: {ret.__version__}")
         return ret
     except ModuleNotFoundError as e:
-        print(
-            f"\n*** Error loading '{pkg_name}' package: {e}. Not installed?\n"
-        )
+        print(f"\n*** Error loading '{pkg_name}' package: {e}. Not installed?\n")
         return None
 
 
@@ -232,7 +230,9 @@ def video_source(stream):
 
     # do not report errors for files and in test mode;
     # report errors only for camera streams
-    report_error = False if get_test_mode() or stream.get(cv2.CAP_PROP_FRAME_COUNT) > 0 else True
+    report_error = (
+        False if get_test_mode() or stream.get(cv2.CAP_PROP_FRAME_COUNT) > 0 else True
+    )
 
     while True:
         ret, frame = stream.read()
@@ -474,7 +474,7 @@ class Display:
     @staticmethod
     def crop(img, bbox):
         """Crop and return OpenCV image to given bbox"""
-        return img[int(bbox[1]): int(bbox[3]), int(bbox[0]): int(bbox[2])]
+        return img[int(bbox[1]) : int(bbox[3]), int(bbox[0]) : int(bbox[2])]
 
     @staticmethod
     def put_text(
