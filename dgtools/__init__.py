@@ -71,7 +71,7 @@ def _get_var(var, default_val=None):
     return ret
 
 
-def get_test_mode():
+def _get_test_mode():
     """Returns enable status of test mode from .env file"""
     _reload_env()  # reload environment variables from file
     return _get_var(_var_TestMode, False)
@@ -92,8 +92,12 @@ def get_ai_server_hostname():
 def get_cloud_zoo_url():
     """Returns a cloud zoo URL from .env file"""
     _reload_env()  # reload environment variables from file
-    url = _get_var(_var_CloudZoo, "")
-    return "https://cs.degirum.com" + ("/" + url if url else "")
+
+    cloud_url = "https://" + _get_var(_var_CloudUrl, "cs.degirum.com")
+    zoo_url = _get_var(_var_CloudZoo, "")
+    if zoo_url:
+        cloud_url += "/" + zoo_url
+    return cloud_url
 
 
 def connect_model_zoo(inference_option=CloudInference):
@@ -109,34 +113,20 @@ def connect_model_zoo(inference_option=CloudInference):
 
     if inference_option == CloudInference:
         # inference on cloud platform
-        token = _get_var(_var_Token)
-        zoo_url = _get_var(_var_CloudZoo, "")
-        cloud_url = "dgcps://" + _get_var(_var_CloudUrl, "cs.degirum.com")
-        if zoo_url:
-            cloud_url += "/" + zoo_url
-        zoo = dg.connect_model_zoo(cloud_url, token)
+        zoo = dg.connect(dg.CLOUD, get_cloud_zoo_url(), _get_var(_var_Token))
 
     elif inference_option == AIServerInference:
         # inference on AI server
         hostname = _get_var(_var_AiServer)
-        zoo_url = _get_var(_var_CloudZoo, "")
-        if zoo_url:
-            token = _get_var(_var_Token)
-            cloud_url = "https://" + _get_var(_var_CloudUrl, "cs.degirum.com")
-            cloud_url += "/" + zoo_url
+        if _get_var(_var_CloudZoo, ""):
             # use cloud zoo
-            zoo = dg.connect_model_zoo((hostname, cloud_url), token)
+            zoo = dg.connect(hostname, get_cloud_zoo_url(), _get_var(_var_Token))
         else:
             # use local zoo
-            zoo = dg.connect_model_zoo(hostname)
+            zoo = dg.connect(hostname)
 
     elif inference_option == LocalHWInference:
-        token = _get_var(_var_Token)
-        zoo_url = _get_var(_var_CloudZoo, "")
-        cloud_url = "https://" + _get_var(_var_CloudUrl, "cs.degirum.com")
-        if zoo_url:
-            cloud_url += "/" + zoo_url
-        zoo = dg.connect_model_zoo(cloud_url, token)
+        zoo = dg.connect(dg.LOCAL, get_cloud_zoo_url(), _get_var(_var_Token))
 
     else:
         raise Exception(
@@ -146,7 +136,7 @@ def connect_model_zoo(inference_option=CloudInference):
     return zoo
 
 
-def in_notebook():
+def _in_notebook():
     """Returns `True` if the module is running in IPython kernel,
     `False` if in IPython shell or other Python shell.
     """
@@ -172,14 +162,6 @@ def import_optional_package(pkg_name, is_long=False):
         return None
 
 
-def import_fiftyone():
-    """Import 'fiftyone' package for dataset management
-    Returns the package.
-    Prints error message if the package is not installed"""
-
-    return import_optional_package("fiftyone", is_long=True)
-
-
 @contextmanager
 def open_video_stream(camera_id=None):
     """Open OpenCV video stream from camera with given identifier.
@@ -192,7 +174,7 @@ def open_video_stream(camera_id=None):
     Returns context manager yielding video stream object and closing it on exit
     """
 
-    if camera_id is None or get_test_mode():
+    if camera_id is None or _get_test_mode():
         _reload_env()  # reload environment variables from file
         camera_id = _get_var(_var_CameraID, 0)
         if isinstance(camera_id, str) and camera_id.isnumeric():
@@ -231,7 +213,7 @@ def video_source(stream):
     # do not report errors for files and in test mode;
     # report errors only for camera streams
     report_error = (
-        False if get_test_mode() or stream.get(cv2.CAP_PROP_FRAME_COUNT) > 0 else True
+        False if _get_test_mode() or stream.get(cv2.CAP_PROP_FRAME_COUNT) > 0 else True
     )
 
     while True:
@@ -256,7 +238,7 @@ def open_video_writer(fname, w, h, fps=30):
 
     codec = (
         cv2.VideoWriter_fourcc(*"vp09")  # type: ignore
-        if get_test_mode() or sys.platform != "win32"
+        if _get_test_mode() or sys.platform != "win32"
         else cv2.VideoWriter_fourcc(*"mp4v")  # type: ignore
     )
 
@@ -455,11 +437,11 @@ class Display:
         show_embedded - True to show graph embedded into the notebook when possible
         w, h - initial window width/hight in pixels; None for autoscale
         """
-        self._fps = FPSMeter() if show_fps and not get_test_mode() else None
+        self._fps = FPSMeter() if show_fps and not _get_test_mode() else None
         self._capt = capt
         self._window_created = False
         self._show_embedded = show_embedded
-        self._no_gui = not Display._check_gui() or get_test_mode()
+        self._no_gui = not Display._check_gui() or _get_test_mode()
         self._w = w
         self._h = h
 
@@ -551,7 +533,7 @@ class Display:
                     Display._show_fps(img, fps)
 
             if self._show_embedded or self._no_gui:
-                if in_notebook():
+                if _in_notebook():
                     import IPython.display
 
                     IPython.display.display(
@@ -695,7 +677,7 @@ class Progress:
 
         prog_str = printer(prog_str)
 
-        if in_notebook():
+        if _in_notebook():
             import IPython.display
 
             if self._display_id is None:

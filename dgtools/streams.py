@@ -244,7 +244,7 @@ class Composition:
         print("Composition started")
 
         # test mode has limited inputs
-        if dgtools.get_test_mode():
+        if dgtools._get_test_mode():
             self.wait()
 
     def get_bottlenecks(self) -> List[dict]:
@@ -397,7 +397,7 @@ class VideoDisplayGizmo(Gizmo):
 
                     for ii, input in enumerate(self.get_inputs()):  # ii is input index
                         try:
-                            if ninputs > 1 and not dgtools.get_test_mode():
+                            if ninputs > 1 and not dgtools._get_test_mode():
                                 # non-multiplexing multi-input case (do not use it in test mode to avoid race conditions)
                                 data = input.get_nowait()
                             else:
@@ -603,7 +603,7 @@ class AiGizmoBase(Gizmo):
 
             self.on_result(result)
             # finish processing all frames for tests
-            if self._abort and not dgtools.get_test_mode():
+            if self._abort and not dgtools._get_test_mode():
                 break
 
     @abstractmethod
