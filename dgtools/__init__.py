@@ -43,13 +43,17 @@ _check_pysdk_ver()
 
 def _reload_env(custom_file="env.ini"):
     """Reload environment variables from file
-    custom_file - name of the custom env file to try first; if it is None or does not exist, `.env` file is loaded
+    custom_file - name of the custom env file to try first;
+        CWD, and ../CWD are searched for the file;
+        if it is None or does not exist, `.env` file is loaded
     """
     from pathlib import Path
     import dotenv
 
-    if not Path(custom_file).exists():
+    custom_file = dotenv.find_dotenv(custom_file)
+    if not custom_file:
         custom_file = None
+
     dotenv.load_dotenv(
         dotenv_path=custom_file, override=True
     )  # load environment variables from file
