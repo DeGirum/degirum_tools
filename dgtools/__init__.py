@@ -47,7 +47,6 @@ def _reload_env(custom_file="env.ini"):
         CWD, and ../CWD are searched for the file;
         if it is None or does not exist, `.env` file is loaded
     """
-    from pathlib import Path
     import dotenv
 
     custom_file = dotenv.find_dotenv(custom_file)
