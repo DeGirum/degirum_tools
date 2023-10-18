@@ -8,7 +8,7 @@
 
 import sys, os, time, urllib, cv2, PIL.Image
 from packaging import version as pkg_version
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 
 # minimum compatible PySDK version
 min_compatible_pysdk_ver = pkg_version.parse("0.9.2")
@@ -742,19 +742,60 @@ def intersection(boxA, boxB):
     return dx * dy
 
 
-def predict_stream(model, camera_id):
+def predict_stream(model, input_video_id):
     """Run a model on a video stream
     model - model to run
-    camera_id - 0-based index for local cameras
-       or IP camera URL in the format "rtsp://<user>:<password>@<ip or hostname>",
-       or URL to mp4 video file,
-       or YouTube video URL
+    input_video_id - identifier of input video stream. It can be:
+       - 0-based index for local cameras
+       - IP camera URL in the format "rtsp://<user>:<password>@<ip or hostname>",
+       - local path or URL to mp4 video file,
+       - YouTube video URL
+    Returns generator object yielding model prediction results
     """
 
     # select OpenCV backend and matching colorspace
     model.image_backend = "opencv"
     model.input_numpy_colorspace = "BGR"
 
-    with open_video_stream(camera_id) as stream:
+    with open_video_stream(input_video_id) as stream:
         for res in model.predict_batch(video_source(stream)):
             yield res
+
+
+def annotate_video(
+    model, input_video_id, output_video_path, *, show_progress=True, visual_display=True
+):
+    """Annotate video stream by running a model and saving results to video file
+    model - model to run
+    input_video_id - identifier of input video stream. It can be:
+       - 0-based index for local cameras
+       - IP camera URL in the format "rtsp://<user>:<password>@<ip or hostname>",
+       - local path or URL to mp4 video file,
+       - YouTube video URL
+    show_progress - when True, show text progress indicator
+    visual_display - when True, show interactive video display with annotated video stream
+    """
+
+    with ExitStack() as stack:
+        if visual_display:
+            display = stack.enter_context(Display(f"Annotating {input_video_id}"))
+
+        stream = stack.enter_context(open_video_stream(str(input_video_id)))
+        writer = stack.enter_context(
+            open_video_writer(
+                str(output_video_path),
+                stream.get(cv2.CAP_PROP_FRAME_WIDTH),
+                stream.get(cv2.CAP_PROP_FRAME_HEIGHT),
+            )
+        )
+
+        if show_progress:
+            progress = Progress(int(stream.get(cv2.CAP_PROP_FRAME_COUNT)))
+
+        for res in model.predict_batch(video_source(stream)):
+            img = res.image_overlay
+            writer.write(img)
+            if visual_display:
+                display.show(img)
+            if show_progress:
+                progress.step()
