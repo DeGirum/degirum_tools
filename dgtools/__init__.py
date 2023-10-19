@@ -9,6 +9,7 @@
 import sys, os, time, urllib, cv2, PIL.Image
 from packaging import version as pkg_version
 from contextlib import contextmanager, ExitStack
+from pathlib import Path
 
 # minimum compatible PySDK version
 min_compatible_pysdk_ver = pkg_version.parse("0.9.2")
@@ -244,6 +245,10 @@ def open_video_writer(fname, w, h, fps=30):
         if _get_test_mode() or sys.platform != "win32"
         else cv2.VideoWriter_fourcc(*"mp4v")  # type: ignore
     )
+
+    directory = Path(fname).parent
+    if not directory.is_dir():
+        directory.mkdir(parents=True)
 
     writer = cv2.VideoWriter()  # create stream writer
     if not writer.open(str(fname), codec, fps, (int(w), int(h))):
