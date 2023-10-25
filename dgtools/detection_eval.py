@@ -8,6 +8,7 @@
 import yaml
 import json
 import os
+from typing import List
 import numpy as np
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
@@ -167,11 +168,11 @@ class ObjectDetectionModelEvaluator:
 
         Returns the mAP statistics.
         """
-        jdict = []
+        jdict : List[dict]  = []
         anno = COCO(ground_truth_annotations_path)
         num_images = len(anno.dataset["images"])
         files_dict = anno.dataset["images"][0:num_images]
-        path_list = []
+        path_list : List[str]  = []
         for image_number in range(0, num_images):
             image_id = files_dict[image_number]["id"]
             path = os.path.join(
