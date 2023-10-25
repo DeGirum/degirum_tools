@@ -41,6 +41,7 @@ setup(
             "flake8",
             "pre-commit",
             "types-Pillow",
+            "types-PyYAML"
         ],
         "testing": [
             "pytest",
