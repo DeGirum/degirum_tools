@@ -147,7 +147,7 @@ class ObjectDetectionModelEvaluator:
             input_pad_method=args["input_pad_method"],
             image_backend=args["image_backend"],
             input_img_fmt=args["input_img_fmt"],
-            input_letterbox_fill_color=args["input_letterbox_fill_color"],
+            input_letterbox_fill_color=tuple(args["input_letterbox_fill_color"]),
             input_numpy_colorspace=args["input_numpy_colorspace"],
         )
 
