@@ -34,7 +34,7 @@ def _reload_env(custom_file="env.ini"):
     """
     import dotenv
 
-    custom_file = dotenv.find_dotenv(custom_file)
+    custom_file = dotenv.find_dotenv(custom_file, usecwd=True)
     if not custom_file:
         custom_file = None
 

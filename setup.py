@@ -30,6 +30,8 @@ setup(
         "jupyterlab",
         "pafy",
         "youtube-dl==2020.12.2",
+        "pycocotools",
+        "pyyaml"
     ],
     python_requires=">=3.8",
     extras_require={
@@ -39,6 +41,7 @@ setup(
             "flake8",
             "pre-commit",
             "types-Pillow",
+            "types-PyYAML"
         ],
         "testing": [
             "pytest",

@@ -1,4 +1,4 @@
 *.pyc
 *.swp
-build/
-**egg-info/
+build/*
+dgtools.egg-info/*
