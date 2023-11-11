@@ -7,10 +7,9 @@
 
 
 import sys, os, time, urllib, cv2, PIL.Image
-from packaging import version as pkg_version
 from contextlib import contextmanager, ExitStack
 from pathlib import Path
-from .compound_models import *
+from .compound_models import *  # noqa
 
 # Inference options: parameters for connect_model_zoo
 CloudInference = 1  # use DeGirum cloud server for inference

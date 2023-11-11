@@ -156,7 +156,7 @@ class CroppingCompoundModel(CompoundModelBase):
         Args:
             result1: prediction result of the first model
         """
-        if len(result1.results) == 0 or not "bbox" in result1.results[0]:
+        if len(result1.results) == 0 or "bbox" not in result1.results[0]:
             self.queue.put((result1.image, result1))
         else:
             for obj in result1.results:
@@ -188,10 +188,11 @@ class CroppingCompoundModel(CompoundModelBase):
             results: list of inference results of the first model
             image_shape: image shape to find matching bbox
         """
-        cond = lambda v: image_shape[:2] == (
-            int(v["bbox"][3]) - int(v["bbox"][1]),
-            int(v["bbox"][2]) - int(v["bbox"][0]),
-        )
+        def cond(v):
+            return image_shape[:2] == (
+                int(v["bbox"][3]) - int(v["bbox"][1]),
+                int(v["bbox"][2]) - int(v["bbox"][0]),
+            )
         return next((i for i, v in enumerate(results) if cond(v)), -1)
 
 
