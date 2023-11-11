@@ -9,7 +9,7 @@ with open(Path(__file__).resolve().parent / "README.md", encoding="utf-8") as f:
 
 setup(
     name="dgtools",
-    version="0.0.1",
+    version="0.1.0",
     description="Tools for PySDK",
     author="DeGirum",
     license="",

@@ -10,9 +10,7 @@ import sys, os, time, urllib, cv2, PIL.Image
 from packaging import version as pkg_version
 from contextlib import contextmanager, ExitStack
 from pathlib import Path
-
-# minimum compatible PySDK version
-min_compatible_pysdk_ver = pkg_version.parse("0.9.2")
+from .compound_models import *
 
 # Inference options: parameters for connect_model_zoo
 CloudInference = 1  # use DeGirum cloud server for inference
@@ -26,20 +24,6 @@ _var_CloudUrl = "DEGIRUM_CLOUD_PLATFORM_URL"
 _var_AiServer = "AISERVER_HOSTNAME_OR_IP"
 _var_CloudZoo = "CLOUD_ZOO_URL"
 _var_CameraID = "CAMERA_ID"
-
-
-def _check_pysdk_ver():
-    """Check that PySDK version is compatible with this script"""
-    import degirum as dg  # import DeGirum PySDK
-
-    if pkg_version.parse(dg.__version__) < min_compatible_pysdk_ver:
-        raise Exception(
-            f"Currently installed Degirum PySDK version {dg.__version__} is not compatible with dgtools. "
-            + f"Please install PySDK version >={min_compatible_pysdk_ver}."
-        )
-
-
-_check_pysdk_ver()
 
 
 def _reload_env(custom_file="env.ini"):

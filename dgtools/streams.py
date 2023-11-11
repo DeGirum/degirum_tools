@@ -4,7 +4,7 @@
 # Copyright DeGirum Corporation 2023
 # All rights reserved
 #
-# Please refer to `mystreamDemo.ipynb` notebook for examples of toolkit usage.
+# Please refer to `dgstreams_demo.ipynb` PySDKExamples notebook for examples of toolkit usage.
 #
 
 import threading
