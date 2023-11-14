@@ -506,17 +506,18 @@ class Display:
         """Helper method to display FPS"""
         Display.put_text(img, f"{fps:5.1f} FPS", (0, 0), (0, 0, 0), (255, 255, 255))
 
-    def show(self, img):
+    def show(self, img, waitkey_delay=1):
         """Show OpenCV image or model result
 
-        img - numpy array with valid OpenCV image or model result object
+        img - numpy array with valid OpenCV image, or PIL image, or model result object
+        waitkey_delay - delay in ms for waitKey() call; use 0 to show still images, use 1 for streaming video
         """
 
         import degirum as dg  # import DeGirum PySDK
         import numpy as np
 
         if isinstance(img, dg.postprocessor.InferenceResults):
-            self.show(img.image_overlay)
+            self.show(img.image_overlay, waitkey_delay)
 
         elif isinstance(img, np.ndarray):
             if self._fps:
@@ -542,7 +543,7 @@ class Display:
 
                 cv2.imshow(self._capt, img)
                 self._window_created = True
-                key = cv2.waitKey(1) & 0xFF
+                key = cv2.waitKey(waitkey_delay) & 0xFF
                 if key == ord("x") or key == ord("q"):
                     if self._fps:
                         self._fps.reset()
@@ -553,8 +554,22 @@ class Display:
                     new_w = max(100, int(w * factor))
                     new_h = int(new_w * img.shape[0] / img.shape[1])
                     cv2.resizeWindow(self._capt, new_w, new_h)
+
+        elif isinstance(img, PIL.Image.Image):
+            if _in_notebook():
+                import IPython.display
+
+                IPython.display.display(img, clear=True)
+
         else:
             raise Exception("Unsupported image type")
+
+    def show_image(self, img):
+        """Show OpenCV image or model result
+
+        img - numpy array with valid OpenCV image, or PIL image, or model result object
+        """
+        self.show(img, 0)
 
 
 class Timer:
