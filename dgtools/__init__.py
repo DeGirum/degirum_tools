@@ -787,3 +787,75 @@ def annotate_video(
                 display.show(img)
             if show_progress:
                 progress.step()
+
+
+def model_time_profile(model, iterations=100):
+    """
+    Perform time profiling of a given model
+
+    Args:
+        model: PySDK model to profile
+        iterations: number of iterations to run
+
+    Returns:
+        dictionary with the following keys:
+            "elapsed": elapsed time in seconds
+            "iterations": number of iterations made
+            "observed_fps": observed inference performance, frames per second
+            "max_possible_fps": maximum possible inference performance, frames per second
+            "parameters": copy of model parameters
+            "time_stats": model time statistics dictionary
+    """
+
+    import numpy as np
+
+    # skip non-image type models
+    if model.model_info.InputType[0] != "Image":
+        raise NotImplementedError
+
+    saved_params = {
+        "input_image_format": model.input_image_format,
+        "measure_time": model.measure_time,
+        "image_backend": model.image_backend,
+    }
+
+    elapsed = 0
+    try:
+        
+        # configure model
+        model.input_image_format = "JPEG"
+        model.measure_time = True
+        model.image_backend = "opencv"
+
+        # prepare black input frame
+        frame = model._preprocessor.forward(np.zeros((10, 10, 3), dtype=np.uint8))[0]
+
+        # define source of frames
+        def source():
+            for fi in range(iterations):
+                yield frame
+
+        with model:
+            model(frame)  # run model once to warm up the system
+
+            # run batch prediction
+            t = Timer()
+            for res in model.predict_batch(source()):
+                pass
+            elapsed = t()
+
+    finally:
+        # restore model parameters
+        for k, v in saved_params.items():
+            setattr(model, k, v)
+
+    stats = model.time_stats()
+
+    return {
+        "elapsed": elapsed,
+        "iterations": iterations,
+        "observed_fps": iterations / elapsed,
+        "max_possible_fps": 1e3 / stats["CoreInferenceDuration_ms"].avg,
+        "parameters": model.model_info,        
+        "time_stats": stats,
+    }
