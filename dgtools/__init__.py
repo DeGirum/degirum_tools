@@ -6,6 +6,7 @@
 #
 
 
+from dataclasses import dataclass
 import sys, os, time, urllib, cv2, PIL.Image
 from contextlib import contextmanager, ExitStack
 from pathlib import Path
@@ -789,7 +790,19 @@ def annotate_video(
                 progress.step()
 
 
-def model_time_profile(model, iterations=100):
+@dataclass
+class ModelTimeProfile:
+    """Class to hold model time profiling results"""
+
+    elapsed: float  # elapsed time in seconds
+    iterations: int  # number of iterations made
+    observed_fps: float  # observed inference performance, frames per second
+    max_possible_fps: float  # maximum possible inference performance, frames per second
+    parameters: dict  # copy of model parameters
+    time_stats: dict  # model time statistics dictionary
+
+
+def model_time_profile(model, iterations=100) -> ModelTimeProfile:
     """
     Perform time profiling of a given model
 
@@ -798,13 +811,7 @@ def model_time_profile(model, iterations=100):
         iterations: number of iterations to run
 
     Returns:
-        dictionary with the following keys:
-            "elapsed": elapsed time in seconds
-            "iterations": number of iterations made
-            "observed_fps": observed inference performance, frames per second
-            "max_possible_fps": maximum possible inference performance, frames per second
-            "parameters": copy of model parameters
-            "time_stats": model time statistics dictionary
+        ModelTimeProfile object
     """
 
     import numpy as np
@@ -821,7 +828,6 @@ def model_time_profile(model, iterations=100):
 
     elapsed = 0
     try:
-        
         # configure model
         model.input_image_format = "JPEG"
         model.measure_time = True
@@ -851,11 +857,11 @@ def model_time_profile(model, iterations=100):
 
     stats = model.time_stats()
 
-    return {
-        "elapsed": elapsed,
-        "iterations": iterations,
-        "observed_fps": iterations / elapsed,
-        "max_possible_fps": 1e3 / stats["CoreInferenceDuration_ms"].avg,
-        "parameters": model.model_info,        
-        "time_stats": stats,
-    }
+    return ModelTimeProfile(
+        elapsed=elapsed,
+        iterations=iterations,
+        observed_fps=iterations / elapsed,
+        max_possible_fps=1e3 / stats["CoreInferenceDuration_ms"].avg,
+        parameters=model.model_info,
+        time_stats=stats,
+    )
