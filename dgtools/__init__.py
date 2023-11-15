@@ -6,6 +6,7 @@
 #
 
 
+from dataclasses import dataclass
 import sys, os, time, urllib, cv2, PIL.Image
 from contextlib import contextmanager, ExitStack
 from pathlib import Path
@@ -505,17 +506,18 @@ class Display:
         """Helper method to display FPS"""
         Display.put_text(img, f"{fps:5.1f} FPS", (0, 0), (0, 0, 0), (255, 255, 255))
 
-    def show(self, img):
+    def show(self, img, waitkey_delay=1):
         """Show OpenCV image or model result
 
-        img - numpy array with valid OpenCV image or model result object
+        img - numpy array with valid OpenCV image, or PIL image, or model result object
+        waitkey_delay - delay in ms for waitKey() call; use 0 to show still images, use 1 for streaming video
         """
 
         import degirum as dg  # import DeGirum PySDK
         import numpy as np
 
         if isinstance(img, dg.postprocessor.InferenceResults):
-            self.show(img.image_overlay)
+            self.show(img.image_overlay, waitkey_delay)
 
         elif isinstance(img, np.ndarray):
             if self._fps:
@@ -541,7 +543,7 @@ class Display:
 
                 cv2.imshow(self._capt, img)
                 self._window_created = True
-                key = cv2.waitKey(1) & 0xFF
+                key = cv2.waitKey(waitkey_delay) & 0xFF
                 if key == ord("x") or key == ord("q"):
                     if self._fps:
                         self._fps.reset()
@@ -552,8 +554,22 @@ class Display:
                     new_w = max(100, int(w * factor))
                     new_h = int(new_w * img.shape[0] / img.shape[1])
                     cv2.resizeWindow(self._capt, new_w, new_h)
+
+        elif isinstance(img, PIL.Image.Image):
+            if _in_notebook():
+                import IPython.display
+
+                IPython.display.display(img, clear=True)
+
         else:
             raise Exception("Unsupported image type")
+
+    def show_image(self, img):
+        """Show OpenCV image or model result
+
+        img - numpy array with valid OpenCV image, or PIL image, or model result object
+        """
+        self.show(img, 0)
 
 
 class Timer:
@@ -787,3 +803,80 @@ def annotate_video(
                 display.show(img)
             if show_progress:
                 progress.step()
+
+
+@dataclass
+class ModelTimeProfile:
+    """Class to hold model time profiling results"""
+
+    elapsed: float  # elapsed time in seconds
+    iterations: int  # number of iterations made
+    observed_fps: float  # observed inference performance, frames per second
+    max_possible_fps: float  # maximum possible inference performance, frames per second
+    parameters: dict  # copy of model parameters
+    time_stats: dict  # model time statistics dictionary
+
+
+def model_time_profile(model, iterations=100) -> ModelTimeProfile:
+    """
+    Perform time profiling of a given model
+
+    Args:
+        model: PySDK model to profile
+        iterations: number of iterations to run
+
+    Returns:
+        ModelTimeProfile object
+    """
+
+    import numpy as np
+
+    # skip non-image type models
+    if model.model_info.InputType[0] != "Image":
+        raise NotImplementedError
+
+    saved_params = {
+        "input_image_format": model.input_image_format,
+        "measure_time": model.measure_time,
+        "image_backend": model.image_backend,
+    }
+
+    elapsed = 0
+    try:
+        # configure model
+        model.input_image_format = "JPEG"
+        model.measure_time = True
+        model.image_backend = "opencv"
+
+        # prepare black input frame
+        frame = model._preprocessor.forward(np.zeros((10, 10, 3), dtype=np.uint8))[0]
+
+        # define source of frames
+        def source():
+            for fi in range(iterations):
+                yield frame
+
+        with model:
+            model(frame)  # run model once to warm up the system
+
+            # run batch prediction
+            t = Timer()
+            for res in model.predict_batch(source()):
+                pass
+            elapsed = t()
+
+    finally:
+        # restore model parameters
+        for k, v in saved_params.items():
+            setattr(model, k, v)
+
+    stats = model.time_stats()
+
+    return ModelTimeProfile(
+        elapsed=elapsed,
+        iterations=iterations,
+        observed_fps=iterations / elapsed,
+        max_possible_fps=1e3 / stats["CoreInferenceDuration_ms"].avg,
+        parameters=model.model_info,
+        time_stats=stats,
+    )
