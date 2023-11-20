@@ -43,7 +43,7 @@ def get_keypoints(keypoints_res):
     Returns:
         keypoints: The list of keypoint results in pycocotools format.
     """
-    keypoints = []
+    keypoints: List[dict] = []
     for ldmks in keypoints_res:
         kypts = ldmks["landmark"]
         kypts_score = ldmks["score"]
@@ -79,7 +79,7 @@ def save_results_coco_json(results, jdict, image_id, class_map=None):
 
 
 def evaluate_coco(
-    anno: COCO, pred: COCO, mAP_type: str = "bbox", img_id_list: List[str] = None
+    anno: COCO, pred: COCO, mAP_type: str = "bbox", img_id_list: List[str] = []
 ):
     """Evaluation process based on the annotation COCO object and the predic
 
