@@ -33,7 +33,7 @@ def xyxy2xywh(x):
     return y
 
 
-def get_keypoints(keypoints_res):
+def process_keypoints(keypoints_res: List[dict]) -> List[float]:
     """
     Convert PySDK keypoint results format to pycocotools keypoint format
 
@@ -43,7 +43,7 @@ def get_keypoints(keypoints_res):
     Returns:
         keypoints: The list of keypoint results in pycocotools format.
     """
-    keypoints: List[dict] = []
+    keypoints: List[float] = []
     for ldmks in keypoints_res:
         kypts = ldmks["landmark"]
         kypts_score = ldmks["score"]
@@ -71,7 +71,7 @@ def save_results_coco_json(results, jdict, image_id, class_map=None):
         }
         # pose model addition
         if "landmarks" in result:
-            detected_elem["keypoints"] = get_keypoints(result["landmarks"])
+            detected_elem["keypoints"] = process_keypoints(result["landmarks"])
         #
         jdict.append(detected_elem)
         max_category_id = max(max_category_id, category_id)
