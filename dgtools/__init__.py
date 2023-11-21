@@ -175,7 +175,7 @@ def configure_colab():
     if not os.path.exists(repo_dir):
         # request API token in advance
         def token_request():
-            return input("Enter cloud API access token from cs.degirum.com: ")
+            return input("\n\nEnter cloud API access token from cs.degirum.com:\n")
 
         token = token_request()
 
@@ -303,7 +303,7 @@ def video_source(stream):
         yield frame
 
 
-def create_video_writer(fname, w, h, fps=30, codec=None):
+def create_video_writer(fname, w, h, fps=30, codec_string=None):
     """Create, open, and return OpenCV video stream writer
 
     fname - filename to save video
@@ -312,10 +312,10 @@ def create_video_writer(fname, w, h, fps=30, codec=None):
     codec - fourcc codec string or None for default codec
     """
 
-    if codec is None:
+    if codec_string is None:
         codec = cv2.VideoWriter_fourcc(*"mp4v")
     else:
-        codec = cv2.VideoWriter_fourcc(*codec)
+        codec = cv2.VideoWriter_fourcc(*codec_string)
 
     directory = Path(fname).parent
     if not directory.is_dir():
@@ -516,6 +516,10 @@ class FPSMeter:
         """Return current average FPS"""
         return 1e9 / self._duration_ns if self._duration_ns > 0 else 0
 
+    @property
+    def count(self):
+        return self._count
+
 
 class Display:
     """Class to handle OpenCV image display"""
@@ -528,12 +532,13 @@ class Display:
         show_embedded - True to show graph embedded into the notebook when possible
         w, h - initial window width/hight in pixels; None for autoscale
         """
-        self._fps = FPSMeter() if show_fps and not _get_test_mode() else None
+        self._fps = FPSMeter()
 
         if not capt:
             raise Exception("Window title must be non-empty")
 
         self._capt = capt
+        self._show_fps = show_fps
         self._window_created = False
         self._no_gui = not Display._check_gui() or _get_test_mode()
         self._w = w
@@ -618,7 +623,7 @@ class Display:
         return True
 
     @staticmethod
-    def _show_fps(img, fps):
+    def _display_fps(img, fps):
         """Helper method to display FPS"""
         Display.put_text(img, f"{fps:5.1f} FPS", (0, 0), (0, 0, 0), (255, 255, 255))
 
@@ -648,8 +653,8 @@ class Display:
 
         if isinstance(img, np.ndarray):
             fps = self._fps.record()
-            if self._fps and fps > 0:
-                Display._show_fps(img, fps)
+            if self._show_fps and fps > 0:
+                Display._display_fps(img, fps)
 
             if _in_colab():
                 # special case for Colab environment
