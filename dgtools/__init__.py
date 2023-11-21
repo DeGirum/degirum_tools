@@ -197,7 +197,7 @@ def configure_colab():
         os.chdir(colab_root_dir)
         run_cmd(
             "Cloning DeGirum/PySDKExamples repo",
-            f"git clone https://github.com/DeGirum/PySDKExamples",
+            f"git clone https://github.com/DeGirum/{repo}",
         )
 
         # make repo root dir as CWD
@@ -228,7 +228,7 @@ def configure_colab():
         print(f"Configuring {env_file} file...", end="")
         with open(env_file, "a") as file:
             file.write(f'DEGIRUM_CLOUD_TOKEN = "{token}"\n')
-            file.write(f'CAMERA_ID = "../../images/Traffic.mp4"\n')
+            file.write('CAMERA_ID = "../../images/Traffic.mp4"\n')
         print("DONE!")
 
     # make working dir as CWD

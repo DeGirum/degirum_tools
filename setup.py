@@ -27,7 +27,7 @@ setup(
         "numpy",
         "pillow",
         "opencv-python",
-        "jupyterlab",
+        "ipython",
         "pafy",
         "youtube-dl==2020.12.2",
         "pycocotools",
