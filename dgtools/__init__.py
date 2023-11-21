@@ -316,7 +316,7 @@ def create_video_writer(fname, w, h, fps=30, codec_string=None):
     """
 
     if codec_string is None:
-        codec_string = "H264"    
+        codec_string = "H264" if sys.platform == "win32" else "XVID"
 
     codec = cv2.VideoWriter_fourcc(*codec_string)  # type: ignore
 
@@ -332,7 +332,7 @@ def create_video_writer(fname, w, h, fps=30, codec_string=None):
 
 
 @contextmanager
-def open_video_writer(fname, w, h, fps=30, codec=None):
+def open_video_writer(fname, w, h, *, fps=30, codec=None):
     """Create, open, and yield OpenCV video stream writer; release on exit
 
     fname - filename to save video
@@ -916,7 +916,13 @@ def predict_stream(model, input_video_id):
 
 
 def annotate_video(
-    model, input_video_id, output_video_path, *, show_progress=True, visual_display=True
+    model,
+    input_video_id,
+    output_video_path,
+    *,
+    show_progress=True,
+    visual_display=True,
+    codec=None,
 ):
     """Annotate video stream by running a model and saving results to video file
     model - model to run
@@ -927,6 +933,7 @@ def annotate_video(
        - YouTube video URL
     show_progress - when True, show text progress indicator
     visual_display - when True, show interactive video display with annotated video stream
+    codec - fourcc codec string or None for default codec
     """
 
     with ExitStack() as stack:
@@ -939,6 +946,7 @@ def annotate_video(
                 str(output_video_path),
                 stream.get(cv2.CAP_PROP_FRAME_WIDTH),
                 stream.get(cv2.CAP_PROP_FRAME_HEIGHT),
+                codec=codec,
             )
         )
 
