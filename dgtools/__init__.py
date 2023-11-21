@@ -131,6 +131,11 @@ def _in_notebook():
     return "ipykernel" in sys.modules
 
 
+def _in_colab():
+    """Returns `True` if the module is running in Google Colab environment"""
+    return "google.colab" in sys.modules
+
+
 def import_optional_package(pkg_name, is_long=False):
     """Import package with given name.
     Returns the package object.
@@ -148,6 +153,88 @@ def import_optional_package(pkg_name, is_long=False):
     except ModuleNotFoundError as e:
         print(f"\n*** Error loading '{pkg_name}' package: {e}. Not installed?\n")
         return None
+
+
+def configure_colab():
+    """
+    Configure Google Colab environment
+    """
+
+    # check if running under Colab
+    if not _in_colab():
+        return
+
+    import os, subprocess
+
+    # define directories
+    repo = "PySDKExamples"
+    colab_root_dir = "/content"
+    repo_dir = f"{colab_root_dir}/{repo}"
+    work_dir = f"{repo_dir}/examples/workarea"
+
+    if not os.path.exists(repo_dir):
+        # request API token in advance
+        def token_request():
+            return input("Enter cloud API access token from cs.degirum.com: ")
+
+        token = token_request()
+
+        def run_cmd(prompt, cmd):
+            print(prompt + "... ", end="")
+            result = subprocess.run(
+                [cmd],
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            if result.returncode != 0:
+                print(result.stdout)
+                raise Exception(f"{prompt} FAILS")
+            print("DONE!")
+
+        # clone PySDKExamples repo if not done yet
+        os.chdir(colab_root_dir)
+        run_cmd(
+            "Cloning DeGirum/PySDKExamples repo",
+            f"git clone https://github.com/DeGirum/PySDKExamples",
+        )
+
+        # make repo root dir as CWD
+        os.chdir(repo_dir)
+
+        # install PySDKExamples requirements
+        req_file = "requirements.txt"
+        run_cmd(
+            "Installing requirements (this will take a while)",
+            f"pip install -r {req_file}",
+        )
+
+        # validate token
+        print("Validating token...", end="")
+        import degirum as dg
+
+        while True:
+            try:
+                dg.connect(dg.CLOUD, "https://cs.degirum.com", token)
+                break
+            except Exception:
+                print("\nProvided token is not valid!\n")
+                token = token_request()
+        print("DONE!")
+
+        # configure env.ini
+        env_file = "env.ini"
+        print(f"Configuring {env_file} file...", end="")
+        with open(env_file, "a") as file:
+            file.write(f'DEGIRUM_CLOUD_TOKEN = "{token}"\n')
+            file.write(f'CAMERA_ID = "../../images/Traffic.mp4"\n')
+        print("DONE!")
+
+    # make working dir as CWD
+    if not os.path.exists(work_dir):
+        os.makedirs(work_dir)
+    os.chdir(work_dir)
 
 
 @contextmanager
@@ -216,19 +303,19 @@ def video_source(stream):
         yield frame
 
 
-@contextmanager
-def open_video_writer(fname, w, h, fps=30):
+def create_video_writer(fname, w, h, fps=30, codec=None):
     """Create, open, and return OpenCV video stream writer
 
     fname - filename to save video
     w, h - frame width/height
+    fps - frames per second
+    codec - fourcc codec string or None for default codec
     """
 
-    codec = (
-        cv2.VideoWriter_fourcc(*"vp09")  # type: ignore
-        if _get_test_mode() or sys.platform != "win32"
-        else cv2.VideoWriter_fourcc(*"mp4v")  # type: ignore
-    )
+    if codec is None:
+        codec = cv2.VideoWriter_fourcc(*"mp4v")
+    else:
+        codec = cv2.VideoWriter_fourcc(*codec)
 
     directory = Path(fname).parent
     if not directory.is_dir():
@@ -238,6 +325,20 @@ def open_video_writer(fname, w, h, fps=30):
     if not writer.open(str(fname), codec, fps, (int(w), int(h))):
         raise Exception(f"Fail to open '{str(fname)}'")
 
+    return writer
+
+
+@contextmanager
+def open_video_writer(fname, w, h, fps=30, codec=None):
+    """Create, open, and yield OpenCV video stream writer; release on exit
+
+    fname - filename to save video
+    w, h - frame width/height
+    fps - frames per second
+    codec - fourcc codec string or None for default codec
+    """
+
+    writer = create_video_writer(fname, w, h, fps, codec)
     try:
         yield writer
     finally:
@@ -419,9 +520,7 @@ class FPSMeter:
 class Display:
     """Class to handle OpenCV image display"""
 
-    def __init__(
-        self, capt="<image>", show_fps=True, show_embedded=False, w=None, h=None
-    ):
+    def __init__(self, capt="<image>", show_fps=True, w=None, h=None):
         """Constructor
 
         capt - window title
@@ -430,19 +529,36 @@ class Display:
         w, h - initial window width/hight in pixels; None for autoscale
         """
         self._fps = FPSMeter() if show_fps and not _get_test_mode() else None
+
+        if not capt:
+            raise Exception("Window title must be non-empty")
+
         self._capt = capt
         self._window_created = False
-        self._show_embedded = show_embedded
         self._no_gui = not Display._check_gui() or _get_test_mode()
         self._w = w
         self._h = h
+        self._video_writer = None
+        self._video_file = None
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        # close OpenCV window in any
         if self._window_created:
-            cv2.destroyWindow(self._capt)  # close OpenCV window
+            cv2.destroyWindow(self._capt)
+
+        # close video writer if any, and show video in Colab
+        if self._video_writer is not None:
+            self._video_writer.release()
+            if _in_colab():
+                import IPython
+
+                IPython.display.display(
+                    IPython.display.Video(self._video_file, embed=True)
+                )
+
         return exc_type is KeyboardInterrupt  # ignore KeyboardInterrupt errors
 
     @staticmethod
@@ -515,24 +631,46 @@ class Display:
 
         import degirum as dg  # import DeGirum PySDK
         import numpy as np
+        import IPython.display
+
+        # show image in notebook
+        def show_in_notebook(img):
+            IPython.display.display(PIL.Image.fromarray(img[..., ::-1]), clear=True)
 
         if isinstance(img, dg.postprocessor.InferenceResults):
+            # special case for model results: call it recursively
             self.show(img.image_overlay, waitkey_delay)
+            return
 
-        elif isinstance(img, np.ndarray):
-            if self._fps:
-                fps = self._fps.record()
-                if fps > 0:
-                    Display._show_fps(img, fps)
+        if isinstance(img, PIL.Image.Image):
+            # PIL image: convert to OpenCV format
+            img = np.array(img)[:, :, ::-1]
 
-            if self._show_embedded or self._no_gui:
-                if _in_notebook():
-                    import IPython.display
+        if isinstance(img, np.ndarray):
+            fps = self._fps.record()
+            if self._fps and fps > 0:
+                Display._show_fps(img, fps)
 
-                    IPython.display.display(
-                        PIL.Image.fromarray(img[..., ::-1]), clear=True
-                    )
+            if _in_colab():
+                # special case for Colab environment
+                if waitkey_delay == 0:
+                    # show still image in notebook
+                    show_in_notebook(img)
+                else:
+                    # save videos to file
+                    if self._video_writer is None:
+                        self._video_file = f"{os.getcwd()}/{self._capt}.mp4"
+                        self._video_writer = create_video_writer(
+                            self._video_file, img.shape[1], img.shape[0]
+                        )
+                    self._video_writer.write(img)
+                    IPython.display.display(f"{self._capt}: {fps:.1f} FPS", clear=True)
+
+            elif self._no_gui and _in_notebook():
+                # show image in notebook when possible
+                show_in_notebook(img)
             else:
+                # show image in OpenCV window
                 if not self._window_created:
                     cv2.namedWindow(self._capt, cv2.WINDOW_NORMAL)
                     cv2.setWindowProperty(self._capt, cv2.WND_PROP_TOPMOST, 1)
@@ -554,12 +692,6 @@ class Display:
                     new_w = max(100, int(w * factor))
                     new_h = int(new_w * img.shape[0] / img.shape[1])
                     cv2.resizeWindow(self._capt, new_w, new_h)
-
-        elif isinstance(img, PIL.Image.Image):
-            if _in_notebook():
-                import IPython.display
-
-                IPython.display.display(img, clear=True)
 
         else:
             raise Exception("Unsupported image type")
@@ -784,7 +916,7 @@ def annotate_video(
         if visual_display:
             display = stack.enter_context(Display(f"Annotating {input_video_id}"))
 
-        stream = stack.enter_context(open_video_stream(str(input_video_id)))
+        stream = stack.enter_context(open_video_stream(input_video_id))
         writer = stack.enter_context(
             open_video_writer(
                 str(output_video_path),
