@@ -313,9 +313,9 @@ def create_video_writer(fname, w, h, fps=30, codec_string=None):
     """
 
     if codec_string is None:
-        codec = cv2.VideoWriter_fourcc(*"mp4v")
+        codec = cv2.VideoWriter_fourcc(*"mp4v")  # type: ignore
     else:
-        codec = cv2.VideoWriter_fourcc(*codec_string)
+        codec = cv2.VideoWriter_fourcc(*codec_string)  # type: ignore
 
     directory = Path(fname).parent
     if not directory.is_dir():
@@ -669,7 +669,17 @@ class Display:
                             self._video_file, img.shape[1], img.shape[0]
                         )
                     self._video_writer.write(img)
-                    IPython.display.display(f"{self._capt}: {fps:.1f} FPS", clear=True)
+
+                    class printer(str):
+                        def __repr__(self):
+                            return self
+
+                    IPython.display.display(
+                        printer(
+                            f"{self._video_file}: frame {self._fps.count}, {fps:.1f} FPS"
+                        ),
+                        clear=True,
+                    )
 
             elif self._no_gui and _in_notebook():
                 # show image in notebook when possible
