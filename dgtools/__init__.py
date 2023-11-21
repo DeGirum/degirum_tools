@@ -255,6 +255,9 @@ def open_video_stream(camera_id=None):
         if isinstance(camera_id, str) and camera_id.isnumeric():
             camera_id = int(camera_id)
 
+    if isinstance(camera_id, Path):
+        camera_id = str(camera_id)
+
     if isinstance(camera_id, str) and urllib.parse.urlparse(camera_id).hostname in (
         "www.youtube.com",
         "youtube.com",
@@ -313,9 +316,9 @@ def create_video_writer(fname, w, h, fps=30, codec_string=None):
     """
 
     if codec_string is None:
-        codec = cv2.VideoWriter_fourcc(*"mp4v")  # type: ignore
-    else:
-        codec = cv2.VideoWriter_fourcc(*codec_string)  # type: ignore
+        codec_string = "H264"    
+
+    codec = cv2.VideoWriter_fourcc(*codec_string)  # type: ignore
 
     directory = Path(fname).parent
     if not directory.is_dir():
@@ -357,7 +360,6 @@ def video2jpegs(
     Returns number of decoded frames
 
     """
-    from pathlib import Path
 
     jpeg_path = Path(jpeg_path)
     if not jpeg_path.exists():  # create directory for annotated images
