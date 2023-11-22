@@ -1,0 +1,36 @@
+name: Upload
+on:
+  workflow_dispatch:
+    release_tag:
+    description: "Release tag containing wheels to upload"
+    type: string
+    required: true
+jobs:
+  release:
+    name: Upload
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check tag
+        if: ${{ inputs.release_tag == '' }}
+        run: exit 1
+      - name: Get Github release wheel
+        uses: dsaltares/fetch-gh-release-asset@master
+        with:
+          repo: "DeGirum/degirum_tools"
+          version: "tags/${{ inputs.release_tag }}"
+          regex: true
+          file: ".*\\.whl"
+          target: "wheels/"
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.9
+      - name: Install twine
+        run: python3 -m pip install twine
+      - name: Upload wheels to PyPI
+        run: twine upload --verbose -u __token__ -p "${TWINE_PASSWORD}" --non-interactive --disable-progress-bar wheels/*.whl
+        env:
+          TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
+
+
