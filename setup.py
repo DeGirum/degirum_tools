@@ -27,11 +27,12 @@ setup(
         "numpy",
         "pillow",
         "opencv-python",
-        "jupyterlab",
+        "ipython",
         "pafy",
         "youtube-dl==2020.12.2",
         "pycocotools",
-        "pyyaml"
+        "pyyaml",
+        "av"
     ],
     python_requires=">=3.8",
     extras_require={
