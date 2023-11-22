@@ -7,7 +7,7 @@
 
 
 from dataclasses import dataclass
-import sys, os, time, urllib, cv2, PIL.Image
+import sys, os, time, urllib, cv2, av, PIL.Image
 from contextlib import contextmanager, ExitStack
 from pathlib import Path
 from .compound_models import *  # noqa
@@ -306,42 +306,75 @@ def video_source(stream):
         yield frame
 
 
-def create_video_writer(fname, w, h, fps=30, codec_string=None):
+class VideoWriter:
+    """
+    H264 mp4 video stream writer class
+    """
+
+    def __init__(self, fname, w, h, fps=30):
+        """Create, open, and return video stream writer
+
+        Args:
+            fname: filename to save video
+            w, h: frame width/height
+            fps: frames per second
+        """
+
+        self._container = av.open(fname, "w")
+        self._stream = self._container.add_stream("h264", fps)
+        self._stream.width = w
+        self._stream.height = h
+
+    def write(self, img):
+        """
+        Write image to video stream
+        Args:
+            img (np.ndarray): image to write
+        """
+        frame = av.VideoFrame.from_ndarray(img, format="bgr24")
+        for packet in self._stream.encode(frame):
+            self._container.mux(packet)
+
+    def release(self):
+        """
+        Close video stream
+        """
+        if self._container is not None:
+            # flush stream
+            for packet in self._stream.encode():
+                self._container.mux(packet)
+            self._container.close()
+            self._container = None
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.release()
+
+
+def create_video_writer(fname, w, h, fps=30):
     """Create, open, and return OpenCV video stream writer
 
     fname - filename to save video
     w, h - frame width/height
     fps - frames per second
-    codec - fourcc codec string or None for default codec
     """
-
-    if codec_string is None:
-        codec_string = "H264" if sys.platform == "win32" else "XVID"
-
-    codec = cv2.VideoWriter_fourcc(*codec_string)  # type: ignore
 
     directory = Path(fname).parent
     if not directory.is_dir():
         directory.mkdir(parents=True)
 
-    writer = cv2.VideoWriter()  # create stream writer
-    if not writer.open(str(fname), codec, fps, (int(w), int(h))):
-        raise Exception(f"Fail to open '{str(fname)}'")
-
-    return writer
+    return VideoWriter(str(fname), int(w), int(h), fps)  # create stream writer
 
 
 @contextmanager
-def open_video_writer(fname, w, h, *, fps=30, codec=None):
+def open_video_writer(fname, w, h, *, fps=30):
     """Create, open, and yield OpenCV video stream writer; release on exit
 
     fname - filename to save video
     w, h - frame width/height
     fps - frames per second
-    codec - fourcc codec string or None for default codec
     """
 
-    writer = create_video_writer(fname, w, h, fps, codec)
+    writer = create_video_writer(fname, w, h, fps)
     try:
         yield writer
     finally:
@@ -916,13 +949,7 @@ def predict_stream(model, input_video_id):
 
 
 def annotate_video(
-    model,
-    input_video_id,
-    output_video_path,
-    *,
-    show_progress=True,
-    visual_display=True,
-    codec=None,
+    model, input_video_id, output_video_path, *, show_progress=True, visual_display=True
 ):
     """Annotate video stream by running a model and saving results to video file
     model - model to run
@@ -933,7 +960,6 @@ def annotate_video(
        - YouTube video URL
     show_progress - when True, show text progress indicator
     visual_display - when True, show interactive video display with annotated video stream
-    codec - fourcc codec string or None for default codec
     """
 
     with ExitStack() as stack:
@@ -946,7 +972,6 @@ def annotate_video(
                 str(output_video_path),
                 stream.get(cv2.CAP_PROP_FRAME_WIDTH),
                 stream.get(cv2.CAP_PROP_FRAME_HEIGHT),
-                codec=codec,
             )
         )
 
