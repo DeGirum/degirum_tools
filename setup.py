@@ -46,7 +46,10 @@ setup(
         ],
         "testing": [
             "pytest",
-            "coverage",
+            "coverage"
+        ],
+        "build": [
+            "build"
         ],
     },
     include_package_data=True,
