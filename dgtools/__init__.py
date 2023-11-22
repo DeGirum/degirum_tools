@@ -324,6 +324,7 @@ class VideoWriter:
         self._stream = self._container.add_stream("h264", fps)
         self._stream.width = w
         self._stream.height = h
+        self._count = 0
 
     def write(self, img):
         """
@@ -331,6 +332,7 @@ class VideoWriter:
         Args:
             img (np.ndarray): image to write
         """
+        self._count += 1
         frame = av.VideoFrame.from_ndarray(img, format="bgr24")
         for packet in self._stream.encode(frame):
             self._container.mux(packet)
@@ -348,6 +350,13 @@ class VideoWriter:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.release()
+
+    @property
+    def count(self):
+        """
+        Returns number of frames written to video stream
+        """
+        return self._count
 
 
 def create_video_writer(fname, w, h, fps=30):
@@ -551,10 +560,6 @@ class FPSMeter:
         """Return current average FPS"""
         return 1e9 / self._duration_ns if self._duration_ns > 0 else 0
 
-    @property
-    def count(self):
-        return self._count
-
 
 class Display:
     """Class to handle OpenCV image display"""
@@ -709,12 +714,13 @@ class Display:
                         def __repr__(self):
                             return self
 
-                    IPython.display.display(
-                        printer(
-                            f"{self._video_file}: frame {self._fps.count}, {fps:.1f} FPS"
-                        ),
-                        clear=True,
-                    )
+                    if self._video_writer.count % 10 == 0:
+                        IPython.display.display(
+                            printer(
+                                f"{self._video_file}: frame {self._video_writer.count}, {fps:.1f} FPS"
+                            ),
+                            clear=True,
+                        )
 
             elif self._no_gui and _in_notebook():
                 # show image in notebook when possible
