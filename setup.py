@@ -8,7 +8,7 @@ with open(Path(__file__).resolve().parent / "README.md", encoding="utf-8") as f:
     readme = f.read()
 
 setup(
-    name="dgtools",
+    name="degirum_tools",
     version="0.1.0",
     description="Tools for PySDK",
     author="DeGirum",
@@ -16,7 +16,7 @@ setup(
     long_description=readme,
     long_description_content_type="text/markdown",
     packages=[
-        "dgtools",
+        "degirum_tools",
     ],
     classifiers=[
         "Programming Language :: Python :: 3",

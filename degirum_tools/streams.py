@@ -19,7 +19,7 @@ import cv2
 import numpy
 
 import degirum as dg
-import dgtools
+import degirum_tools
 
 
 class StreamData:
@@ -244,7 +244,7 @@ class Composition:
         print("Composition started")
 
         # test mode has limited inputs
-        if dgtools._get_test_mode():
+        if degirum_tools._get_test_mode():
             self.wait()
 
     def get_bottlenecks(self) -> List[dict]:
@@ -331,7 +331,7 @@ class VideoSourceGizmo(Gizmo):
 
     def run(self):
         """Run gizmo"""
-        with dgtools.open_video_stream(self._video_source) as src:
+        with degirum_tools.open_video_stream(self._video_source) as src:
             while not self._abort:
                 ret, data = src.read()
                 if not ret:
@@ -384,7 +384,7 @@ class VideoDisplayGizmo(Gizmo):
             ninputs = len(self.get_inputs())
 
             displays = [
-                stack.enter_context(dgtools.Display(w, self._show_fps))
+                stack.enter_context(degirum_tools.Display(w, self._show_fps))
                 for w in self._window_titles
             ]
             first_run = [True] * ndisplays
@@ -397,7 +397,7 @@ class VideoDisplayGizmo(Gizmo):
 
                     for ii, input in enumerate(self.get_inputs()):  # ii is input index
                         try:
-                            if ninputs > 1 and not dgtools._get_test_mode():
+                            if ninputs > 1 and not degirum_tools._get_test_mode():
                                 # non-multiplexing multi-input case (do not use it in test mode to avoid race conditions)
                                 data = input.get_nowait()
                             else:
@@ -466,7 +466,7 @@ class VideoSaverGizmo(Gizmo):
         )
 
         img = get_img(self.get_input(0).get())
-        with dgtools.open_video_writer(
+        with degirum_tools.open_video_writer(
             self._filename, img.shape[1], img.shape[0]
         ) as writer:
             self.result_cnt += 1
@@ -603,7 +603,7 @@ class AiGizmoBase(Gizmo):
 
             self.on_result(result)
             # finish processing all frames for tests
-            if self._abort and not dgtools._get_test_mode():
+            if self._abort and not degirum_tools._get_test_mode():
                 break
 
     @abstractmethod
@@ -678,7 +678,7 @@ class AiObjectDetectionCroppingGizmo(Gizmo):
             for i, r in enumerate(result.results):
                 if "label" not in r or r["label"] not in self._labels:
                     continue
-                crop = dgtools.Display.crop(result.image, r["bbox"])
+                crop = degirum_tools.Display.crop(result.image, r["bbox"])
                 # send all crops afterwards
                 meta = {}
                 if is_first:

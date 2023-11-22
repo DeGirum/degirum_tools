@@ -1,5 +1,5 @@
 #
-# dgtools.py: toolkit for PySDK samples
+# degirum_tools.py: toolkit for PySDK samples
 #
 # Copyright DeGirum Corporation 2023
 # All rights reserved

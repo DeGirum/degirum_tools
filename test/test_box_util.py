@@ -1,5 +1,5 @@
 import numpy as np
-from dgtools import area, intersection
+from degirum_tools import area, intersection
 
 
 def test_area():
