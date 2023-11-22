@@ -16,7 +16,7 @@ repos:
         pass_filenames: false
       - id: mypy
         name: mypy
-        entry: mypy dgtools/
+        entry: mypy degirum_tools/
         language: system
         always_run: true
         pass_filenames: false
