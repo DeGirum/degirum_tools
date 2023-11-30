@@ -1,10 +1,12 @@
 name: Upload
 on:
   workflow_dispatch:
-    release_tag:
-    description: "Release tag containing wheels to upload"
-    type: string
-    required: true
+    inputs:
+      release_tag:
+        description: "Release tag containing wheels to upload"
+        type: string
+        required: true
+        default: "v0.x.y"
 jobs:
   release:
     name: Upload
