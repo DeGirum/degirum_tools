@@ -24,6 +24,7 @@ _var_CloudUrl = "DEGIRUM_CLOUD_PLATFORM_URL"
 _var_AiServer = "AISERVER_HOSTNAME_OR_IP"
 _var_CloudZoo = "CLOUD_ZOO_URL"
 _var_CameraID = "CAMERA_ID"
+_var_AudioID = "AUDIO_ID"
 
 
 def _reload_env(custom_file="env.ini"):
@@ -155,9 +156,13 @@ def import_optional_package(pkg_name, is_long=False):
         return None
 
 
-def configure_colab():
+def configure_colab(*, video_file=None, audio_file=None):
     """
     Configure Google Colab environment
+
+    Args:
+        video_file - path to video file to use instead of camera
+        audio_file - path to wave file to use instead of microphone
     """
 
     # check if running under Colab
@@ -228,7 +233,12 @@ def configure_colab():
         print(f"Configuring {env_file} file...", end="")
         with open(env_file, "a") as file:
             file.write(f'DEGIRUM_CLOUD_TOKEN = "{token}"\n')
-            file.write('CAMERA_ID = "../../images/Traffic.mp4"\n')
+            file.write(
+                f'CAMERA_ID = {video_file if video_file is not None else "../../images/colab_example.mp4"}\n'
+            )
+            file.write(
+                f'AUDIO_ID = {audio_file if audio_file is not None else "../../images/colab_example.wav"}\n'
+            )
         print("DONE!")
 
     # make working dir as CWD
@@ -243,6 +253,7 @@ def open_video_stream(camera_id=None):
 
     camera_id - 0-based index for local cameras
        or IP camera URL in the format "rtsp://<user>:<password>@<ip or hostname>",
+       or local video file path,
        or URL to mp4 video file,
        or YouTube video URL
 
@@ -424,11 +435,13 @@ def video2jpegs(
 
 
 @contextmanager
-def open_audio_stream(sampling_rate_hz, buffer_size):
+def open_audio_stream(sampling_rate_hz, buffer_size, audio_id=None):
     """Open PyAudio audio stream
 
-    sampling_rate_hz - desired sample rate in Hz
-    buffer_size - read buffer size
+    Args:
+        sampling_rate_hz - desired sample rate in Hz
+        buffer_size - read buffer size
+        audio_id - 0-based index for local microphones or local WAV file path
     Returns context manager yielding audio stream object and closing it on exit
     """
 
@@ -436,34 +449,90 @@ def open_audio_stream(sampling_rate_hz, buffer_size):
 
     pyaudio = import_optional_package("pyaudio")
 
-    audio = pyaudio.PyAudio()
-    result_queue = queue.Queue()  # type: queue.Queue
+    if audio_id is None or _get_test_mode():
+        _reload_env()  # reload environment variables from file
+        audio_id = _get_var(_var_AudioID, 0)
+        if isinstance(audio_id, str) and audio_id.isnumeric():
+            audio_id = int(audio_id)
 
-    def callback(
-        in_data,  # recorded data if input=True; else None
-        frame_count,  # number of frames
-        time_info,  # dictionary
-        status_flags,
-    ):  # PaCallbackFlags
-        result_queue.put(in_data)
-        return (None, pyaudio.paContinue)
+    if isinstance(audio_id, int):
+        # microphone
 
-    stream = audio.open(
-        format=pyaudio.paInt16,
-        channels=1,
-        rate=int(sampling_rate_hz),
-        input=True,
-        frames_per_buffer=int(buffer_size),
-        stream_callback=callback,
-    )
-    stream.result_queue = result_queue
+        class MicStream:
+            def __init__(self, mic_id, sampling_rate_hz, buffer_size):
+                self._audio = pyaudio.PyAudio()
+                self._result_queue = queue.Queue()  # type: queue.Queue
 
-    try:
-        yield stream
-    finally:
-        stream.stop_stream()  # stop audio streaming
-        stream.close()  # close audio stream
-        audio.terminate()  # terminate audio library
+                def callback(
+                    in_data,  # recorded data if input=True; else None
+                    frame_count,  # number of frames
+                    time_info,  # dictionary
+                    status_flags,
+                ):  # PaCallbackFlags
+                    self._result_queue.put(in_data)
+                    return (None, pyaudio.paContinue)
+
+                self.frames_per_buffer = int(buffer_size)
+                self._stream = self._audio.open(
+                    format=pyaudio.paInt16,
+                    channels=1,
+                    rate=int(sampling_rate_hz),
+                    input=True,
+                    input_device_index=audio_id,
+                    frames_per_buffer=self.frames_per_buffer,
+                    stream_callback=callback,
+                )
+
+            def __enter__(self):
+                pass
+
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                self._stream.stop_stream()  # stop audio streaming
+                self._stream.close()  # close audio stream
+                self._audio.terminate()  # terminate audio library
+
+            def get(self, no_wait=False):
+                if no_wait:
+                    return self._result_queue.get_nowait()
+                else:
+                    return self._result_queue.get()
+
+        yield MicStream(audio_id, sampling_rate_hz, buffer_size)
+
+    else:
+        # file
+        import wave
+
+        class WavStream:
+            def __init__(self, filename, sampling_rate_hz, buffer_size):
+                self._wav = wave.open(filename, "rb")
+
+                if self._wav.getnchannels() != 1:
+                    raise Exception(f"{filename} should be mono WAV file")
+
+                if self._wav.getsampwidth() != 2:
+                    raise Exception(f"{filename} should have 16-bit samples")
+
+                if self._wav.getframerate() != sampling_rate_hz:
+                    raise Exception(
+                        f"{filename} should have {sampling_rate_hz} Hz sampling rate"
+                    )
+
+                self.frames_per_buffer = buffer_size
+
+            def __enter__(self):
+                pass
+
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                self._wav.close()
+
+            def get(self, no_wait=False):
+                buf = self._wav.readframes(self.frames_per_buffer)
+                if len(buf) < self.frames_per_buffer:
+                    raise StopIteration
+                return buf
+
+        yield WavStream(audio_id, sampling_rate_hz, buffer_size)
 
 
 def audio_source(stream, check_abort, non_blocking=False):
@@ -479,18 +548,19 @@ def audio_source(stream, check_abort, non_blocking=False):
     """
 
     import numpy as np, queue
+    try:
+        while not check_abort():
+            if non_blocking:
+                try:
+                    block = stream.get(True)
+                except queue.Empty:
+                    block = None
+            else:
+                block = stream.get()
 
-    while not check_abort():
-        if non_blocking:
-            try:
-                block = stream.result_queue.get_nowait()
-            except queue.Empty:
-                block = None
-        else:
-            block = stream.result_queue.get()
-
-        yield None if block is None else np.frombuffer(block, dtype=np.int16)
-
+            yield None if block is None else np.frombuffer(block, dtype=np.int16)
+    except StopIteration:
+        pass
 
 def audio_overlapped_source(stream, check_abort, non_blocking=False):
     """Generator function, which returns audio frames captured from given audio stream with half-length overlap.
@@ -506,23 +576,26 @@ def audio_overlapped_source(stream, check_abort, non_blocking=False):
 
     import numpy as np, queue
 
-    chunk_length = stream._frames_per_buffer
+    chunk_length = stream.frames_per_buffer
     data = np.zeros(2 * chunk_length, dtype=np.int16)
-    while not check_abort():
-        if non_blocking:
-            try:
-                block = stream.result_queue.get_nowait()
-            except queue.Empty:
-                block = None
-        else:
-            block = stream.result_queue.get()
+    try:
+        while not check_abort():
+            if non_blocking:
+                try:
+                    block = stream.get(True)
+                except queue.Empty:
+                    block = None
+            else:
+                block = stream.get()
 
-        if block is None:
-            yield None
-        else:
-            data[:chunk_length] = data[chunk_length:]
-            data[chunk_length:] = np.frombuffer(block, dtype=np.int16)
-            yield data
+            if block is None:
+                yield None
+            else:
+                data[:chunk_length] = data[chunk_length:]
+                data[chunk_length:] = np.frombuffer(block, dtype=np.int16)
+                yield data
+    except StopIteration:
+        pass
 
 
 class FPSMeter:
