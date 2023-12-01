@@ -23,8 +23,8 @@ _var_Token = "DEGIRUM_CLOUD_TOKEN"
 _var_CloudUrl = "DEGIRUM_CLOUD_PLATFORM_URL"
 _var_AiServer = "AISERVER_HOSTNAME_OR_IP"
 _var_CloudZoo = "CLOUD_ZOO_URL"
-_var_CameraID = "CAMERA_ID"
-_var_AudioID = "AUDIO_ID"
+_var_VideoSource = "VIDEO_SOURCE"
+_var_AudioSource = "AUDIO_SOURCE"
 
 
 def _reload_env(custom_file="env.ini"):
@@ -234,10 +234,10 @@ def configure_colab(*, video_file=None, audio_file=None):
         with open(env_file, "a") as file:
             file.write(f'DEGIRUM_CLOUD_TOKEN = "{token}"\n')
             file.write(
-                f'CAMERA_ID = {video_file if video_file is not None else "../../images/colab_example.mp4"}\n'
+                f'VIDEO_SOURCE = {video_file if video_file is not None else "../../images/colab_example.mp4"}\n'
             )
             file.write(
-                f'AUDIO_ID = {audio_file if audio_file is not None else "../../images/colab_example.wav"}\n'
+                f'AUDIO_SOURCE = {audio_file if audio_file is not None else "../../images/colab_example.wav"}\n'
             )
         print("DONE!")
 
@@ -248,10 +248,10 @@ def configure_colab(*, video_file=None, audio_file=None):
 
 
 @contextmanager
-def open_video_stream(camera_id=None):
+def open_video_stream(video_source=None):
     """Open OpenCV video stream from camera with given identifier.
 
-    camera_id - 0-based index for local cameras
+    video_source - 0-based index for local cameras
        or IP camera URL in the format "rtsp://<user>:<password>@<ip or hostname>",
        or local video file path,
        or URL to mp4 video file,
@@ -260,29 +260,29 @@ def open_video_stream(camera_id=None):
     Returns context manager yielding video stream object and closing it on exit
     """
 
-    if camera_id is None or _get_test_mode():
+    if video_source is None or _get_test_mode():
         _reload_env()  # reload environment variables from file
-        camera_id = _get_var(_var_CameraID, 0)
-        if isinstance(camera_id, str) and camera_id.isnumeric():
-            camera_id = int(camera_id)
+        video_source = _get_var(_var_VideoSource, 0)
+        if isinstance(video_source, str) and video_source.isnumeric():
+            video_source = int(video_source)
 
-    if isinstance(camera_id, Path):
-        camera_id = str(camera_id)
+    if isinstance(video_source, Path):
+        video_source = str(video_source)
 
-    if isinstance(camera_id, str) and urllib.parse.urlparse(camera_id).hostname in (
+    if isinstance(video_source, str) and urllib.parse.urlparse(video_source).hostname in (
         "www.youtube.com",
         "youtube.com",
         "youtu.be",
     ):  # if source is YouTube video
         import pafy
 
-        camera_id = pafy.new(camera_id).getbest(preftype="mp4").url
+        video_source = pafy.new(video_source).getbest(preftype="mp4").url
 
-    stream = cv2.VideoCapture(camera_id)
+    stream = cv2.VideoCapture(video_source)
     if not stream.isOpened():
-        raise Exception(f"Error opening '{camera_id}' video stream")
+        raise Exception(f"Error opening '{video_source}' video stream")
     else:
-        print(f"Successfully opened video stream '{camera_id}'")
+        print(f"Successfully opened video stream '{video_source}'")
 
     try:
         yield stream
@@ -435,13 +435,13 @@ def video2jpegs(
 
 
 @contextmanager
-def open_audio_stream(sampling_rate_hz, buffer_size, audio_id=None):
+def open_audio_stream(sampling_rate_hz, buffer_size, audio_source=None):
     """Open PyAudio audio stream
 
     Args:
         sampling_rate_hz - desired sample rate in Hz
         buffer_size - read buffer size
-        audio_id - 0-based index for local microphones or local WAV file path
+        audio_source - 0-based index for local microphones or local WAV file path
     Returns context manager yielding audio stream object and closing it on exit
     """
 
@@ -449,13 +449,13 @@ def open_audio_stream(sampling_rate_hz, buffer_size, audio_id=None):
 
     pyaudio = import_optional_package("pyaudio")
 
-    if audio_id is None or _get_test_mode():
+    if audio_source is None or _get_test_mode():
         _reload_env()  # reload environment variables from file
-        audio_id = _get_var(_var_AudioID, 0)
-        if isinstance(audio_id, str) and audio_id.isnumeric():
-            audio_id = int(audio_id)
+        audio_source = _get_var(_var_AudioSource, 0)
+        if isinstance(audio_source, str) and audio_source.isnumeric():
+            audio_source = int(audio_source)
 
-    if isinstance(audio_id, int):
+    if isinstance(audio_source, int):
         # microphone
 
         class MicStream:
@@ -478,7 +478,7 @@ def open_audio_stream(sampling_rate_hz, buffer_size, audio_id=None):
                     channels=1,
                     rate=int(sampling_rate_hz),
                     input=True,
-                    input_device_index=audio_id,
+                    input_device_index=audio_source,
                     frames_per_buffer=self.frames_per_buffer,
                     stream_callback=callback,
                 )
@@ -497,7 +497,7 @@ def open_audio_stream(sampling_rate_hz, buffer_size, audio_id=None):
                 else:
                     return self._result_queue.get()
 
-        yield MicStream(audio_id, sampling_rate_hz, buffer_size)
+        yield MicStream(audio_source, sampling_rate_hz, buffer_size)
 
     else:
         # file
@@ -532,7 +532,7 @@ def open_audio_stream(sampling_rate_hz, buffer_size, audio_id=None):
                     raise StopIteration
                 return buf
 
-        yield WavStream(audio_id, sampling_rate_hz, buffer_size)
+        yield WavStream(audio_source, sampling_rate_hz, buffer_size)
 
 
 def audio_source(stream, check_abort, non_blocking=False):
