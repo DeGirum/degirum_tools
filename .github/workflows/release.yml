@@ -21,7 +21,7 @@ jobs:
       - name: Run build
         run: python3 -m build .
       - name: Release python wheels from Framework
-        uses: softprops/action-gh-release@v0.1.13
+        uses: softprops/action-gh-release@v1
         with:
           fail_on_unmatched_files: true
           files: |
