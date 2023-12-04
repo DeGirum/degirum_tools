@@ -1284,8 +1284,8 @@ def annotate_video(
 
     win_name = f"Annotating {input_video_id}"
 
-    if zone_counter is not None:
-        do_zone_count = True
+    do_zone_count = zone_counter is not None
+    if do_zone_count:
         zone_counter.window_attach(win_name)
 
     with ExitStack() as stack:
