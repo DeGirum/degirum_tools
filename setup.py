@@ -23,10 +23,11 @@ setup(
         "License :: OSI Approved :: MIT License",
     ],
     install_requires=[
-        "degirum>=0.9.2",
+        "supervision" # should go before any packages depending on opencv
         "numpy",
-        "pillow",
+        "pillow",      
         "opencv-python",
+        "degirum>=0.9.2",        
         "ipython",
         "pafy",
         "youtube-dl==2020.12.2",

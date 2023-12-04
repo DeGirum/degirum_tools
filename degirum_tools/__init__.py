@@ -751,7 +751,6 @@ class Display:
         waitkey_delay - delay in ms for waitKey() call; use 0 to show still images, use 1 for streaming video
         """
 
-        import degirum as dg  # import DeGirum PySDK
         import IPython.display
 
         # show image in notebook
@@ -1202,7 +1201,7 @@ class ZoneCounter:
             cv2.setMouseCallback(self._win_name, ZoneCounter._mouse_callback, self)
             self._gui_state = {"dragging": None, "update": -1}
             self._mouse_callback_installed = True
-        except Exception as e:
+        except Exception:
             pass  # ignore errors
 
 
