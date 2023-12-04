@@ -6,8 +6,9 @@
 #
 
 
+import cv2, sys, os, time, urllib, av, PIL.Image, dotenv, importlib, queue
+import numpy as np, supervision as sv
 from dataclasses import dataclass
-import sys, os, time, urllib, cv2, av, PIL.Image
 from contextlib import contextmanager, ExitStack
 from pathlib import Path
 from .compound_models import *  # noqa
@@ -33,7 +34,6 @@ def _reload_env(custom_file="env.ini"):
         CWD, and ../CWD are searched for the file;
         if it is None or does not exist, `.env` file is loaded
     """
-    import dotenv
 
     custom_file = dotenv.find_dotenv(custom_file, usecwd=True)
     if not custom_file:
@@ -142,8 +142,6 @@ def import_optional_package(pkg_name, is_long=False):
     Returns the package object.
     Raises error message if the package is not installed"""
 
-    import importlib
-
     if is_long:
         print(f"Loading '{pkg_name}' package, be patient...")
     try:
@@ -169,7 +167,7 @@ def configure_colab(*, video_file=None, audio_file=None):
     if not _in_colab():
         return
 
-    import os, subprocess
+    import subprocess
 
     # define directories
     repo = "PySDKExamples"
@@ -445,8 +443,6 @@ def open_audio_stream(sampling_rate_hz, buffer_size, audio_id=None):
     Returns context manager yielding audio stream object and closing it on exit
     """
 
-    import queue
-
     pyaudio = import_optional_package("pyaudio")
 
     if audio_id is None or _get_test_mode():
@@ -547,7 +543,6 @@ def audio_source(stream, check_abort, non_blocking=False):
     Yields audio waveform captured from given audio stream
     """
 
-    import numpy as np, queue
     try:
         while not check_abort():
             if non_blocking:
@@ -562,6 +557,7 @@ def audio_source(stream, check_abort, non_blocking=False):
     except StopIteration:
         pass
 
+
 def audio_overlapped_source(stream, check_abort, non_blocking=False):
     """Generator function, which returns audio frames captured from given audio stream with half-length overlap.
     Useful to pass to model batch_predict().
@@ -573,8 +569,6 @@ def audio_overlapped_source(stream, check_abort, non_blocking=False):
 
     Yields audio waveform captured from given audio stream with half-length overlap.
     """
-
-    import numpy as np, queue
 
     chunk_length = stream.frames_per_buffer
     data = np.zeros(2 * chunk_length, dtype=np.int16)
@@ -679,6 +673,13 @@ class Display:
 
         return exc_type is KeyboardInterrupt  # ignore KeyboardInterrupt errors
 
+    @property
+    def window_name(self):
+        """
+        Returns window name
+        """
+        return self._capt
+
     @staticmethod
     def crop(img, bbox):
         """Crop and return OpenCV image to given bbox"""
@@ -692,15 +693,18 @@ class Display:
         text_color,
         back_color=None,
         font=cv2.FONT_HERSHEY_COMPLEX_SMALL,
+        font_scale=1,
     ):
         """Draw given text on given OpenCV image at given point with given color
 
-        img - numpy array with image
-        text - text to draw
-        position - text top left coordinate tuple (x,y)
-        text_color - text color (BGR)
-        back_color - background color (BGR) or None for transparent
-        font = font to use
+        Args:
+            img - numpy array with image
+            text - text to draw
+            position - text top left coordinate tuple (x,y)
+            text_color - text color (BGR)
+            back_color - background color (BGR) or None for transparent
+            font - font to use
+            font_scale - font scale factor to use
         """
 
         text_size = cv2.getTextSize(text, font, 1, 1)
@@ -719,7 +723,7 @@ class Display:
             text,
             (bl_corner[0] + margin, bl_corner[1] - margin),
             font,
-            1,
+            font_scale,
             text_color,
         )
 
@@ -747,15 +751,13 @@ class Display:
         waitkey_delay - delay in ms for waitKey() call; use 0 to show still images, use 1 for streaming video
         """
 
-        import degirum as dg  # import DeGirum PySDK
-        import numpy as np
         import IPython.display
 
         # show image in notebook
         def show_in_notebook(img):
             IPython.display.display(PIL.Image.fromarray(img[..., ::-1]), clear=True)
 
-        if isinstance(img, dg.postprocessor.InferenceResults):
+        if hasattr(img, "image_overlay"):
             # special case for model results: call it recursively
             self.show(img.image_overlay, waitkey_delay)
             return
@@ -1007,61 +1009,309 @@ def intersection(boxA, boxB):
     return dx * dy
 
 
-def predict_stream(model, input_video_id):
+class ZoneCounter:
+    """
+    Class to count detected object bounding boxes in polygon zones
+    """
+
+    # Triggering position within the bounding box
+    CENTER = sv.Position.CENTER
+    CENTER_LEFT = sv.Position.CENTER_LEFT
+    CENTER_RIGHT = sv.Position.CENTER_RIGHT
+    TOP_CENTER = sv.Position.TOP_CENTER
+    TOP_LEFT = sv.Position.TOP_LEFT
+    TOP_RIGHT = sv.Position.TOP_RIGHT
+    BOTTOM_LEFT = sv.Position.BOTTOM_LEFT
+    BOTTOM_CENTER = sv.Position.BOTTOM_CENTER
+    BOTTOM_RIGHT = sv.Position.BOTTOM_RIGHT
+
+    def __init__(
+        self,
+        count_polygons,
+        *,
+        class_list=None,
+        triggering_position=BOTTOM_CENTER,
+        window_name=None,
+    ):
+        """Constructor
+
+        Args:
+            count_polygons - list of polygons to count objects in; each polygon is a list of points (x,y)
+            class_list - list of classes to count; if None, all classes are counted
+            triggering_position: the position within the bounding box that triggers the zone
+            window_name - optional OpenCV window name to configure for interactive zone adjustment
+        """
+
+        self._wh = None
+        self._zones = None
+        self._win_name = window_name
+        self._mouse_callback_installed = False
+        self._class_list = class_list
+        self._triggering_position = triggering_position
+        self._polygons = [
+            np.array(polygon, dtype=np.int32) for polygon in count_polygons
+        ]
+
+    def _lazy_init(self, result):
+        """
+        Complete deferred initialization steps
+            - initialize polygon zones from model result object
+            - install mouse callback
+        """
+        if self._zones is None:
+            self._wh = (result.image.shape[1], result.image.shape[0])
+            self._zones = [
+                sv.PolygonZone(polygon, self._wh, self._triggering_position)
+                for polygon in self._polygons
+            ]
+        if not self._mouse_callback_installed and self._win_name is not None:
+            self._install_mouse_callback()
+
+    def window_attach(self, win_name):
+        """Attach OpenCV window for interactive zone adjustment by installing mouse callback
+        Args:
+            win_name - OpenCV window name to attach to
+        """
+
+        self._win_name = win_name
+        self._mouse_callback_installed = False
+
+    def count(self, result):
+        """
+        Count detected object bounding boxes in polygon zones
+
+        Args:
+            result - model result object
+        Returns:
+            list of object counts found in each polygon zone
+        """
+
+        self._lazy_init(result)
+
+        def in_class_list(obj):
+            return (
+                True
+                if self._class_list is None
+                else obj["label"] in self._class_list
+                if "label" in obj
+                else False
+            )
+
+        bboxes = np.array(
+            [
+                obj["bbox"]
+                for obj in result.results
+                if "bbox" in obj and in_class_list(obj)
+            ]
+        )
+        if self._zones is not None:
+            return [
+                (zone.trigger(sv.Detections(bboxes)).sum() if len(bboxes) > 0 else 0)
+                for zone in self._zones
+            ]
+        return None
+
+    def display(self, result, image, zone_counts):
+        """
+        Display polygon zones and counts on given image
+
+        Args:
+            result - result object to take display settings from
+            image - image to display on
+            zone_counts - list of object counts found in each polygon zone
+        Returns:
+            annotated image
+        """
+
+        def color_complement(color):
+            adj_color = (color[0] if isinstance(color, list) else color)[::-1]
+            return tuple([255 - c for c in adj_color])
+
+        zone_color = color_complement(result.overlay_color)
+        background_color = color_complement(result.overlay_fill_color)
+
+        for zi in range(len(self._polygons)):
+            cv2.polylines(
+                image, [self._polygons[zi]], True, zone_color, result.overlay_line_width
+            )
+            Display.put_text(
+                image,
+                f"Zone {zi}: {zone_counts[zi]}",
+                self._polygons[zi][0],
+                zone_color,
+                background_color,
+                cv2.FONT_HERSHEY_PLAIN,
+                result.overlay_font_scale,
+            )
+        return image
+
+    def count_and_display(self, result):
+        """
+        Count detected object bounding boxes in polygon zones and display them on model result image
+
+        Args:
+            result - model result object
+        Returns:
+            annotated image
+        """
+        return self.display(result, result.image_overlay, self.count(result))
+
+    def _mouse_callback(event, x, y, flags, self):
+        """Mouse callback for OpenCV window for interactive zone operations"""
+
+        click_point = np.array((x, y))
+
+        def zone_update():
+            idx = self._gui_state["update"]
+            if idx >= 0 and self._wh is not None:
+                self._zones[idx] = sv.PolygonZone(
+                    self._polygons[idx], self._wh, self._triggering_position
+                )
+
+        if event == cv2.EVENT_LBUTTONDOWN:
+            for idx, polygon in enumerate(self._polygons):
+                if cv2.pointPolygonTest(polygon, (x, y), False) > 0:
+                    zone_update()
+                    self._gui_state["dragging"] = polygon
+                    self._gui_state["offset"] = click_point
+                    self._gui_state["update"] = idx
+                    break
+
+        if event == cv2.EVENT_RBUTTONDOWN:
+            for idx, polygon in enumerate(self._polygons):
+                for pt in polygon:
+                    if np.linalg.norm(pt - click_point) < 10:
+                        zone_update()
+                        self._gui_state["dragging"] = pt
+                        self._gui_state["offset"] = click_point
+                        self._gui_state["update"] = idx
+                        break
+
+        elif event == cv2.EVENT_MOUSEMOVE:
+            if self._gui_state["dragging"] is not None:
+                delta = click_point - self._gui_state["offset"]
+                self._gui_state["dragging"] += delta
+                self._gui_state["offset"] = click_point
+
+        elif event == cv2.EVENT_LBUTTONUP or event == cv2.EVENT_RBUTTONUP:
+            self._gui_state["dragging"] = None
+            zone_update()
+            self._gui_state["update"] = -1
+
+    def _install_mouse_callback(self):
+        try:
+            cv2.setMouseCallback(self._win_name, ZoneCounter._mouse_callback, self)  # type: ignore[attr-defined]
+            self._gui_state = {"dragging": None, "update": -1}
+            self._mouse_callback_installed = True
+        except Exception:
+            pass  # ignore errors
+
+
+def predict_stream(model, input_video_id, *, zone_counter=None):
     """Run a model on a video stream
-    model - model to run
-    input_video_id - identifier of input video stream. It can be:
-       - 0-based index for local cameras
-       - IP camera URL in the format "rtsp://<user>:<password>@<ip or hostname>",
-       - local path or URL to mp4 video file,
-       - YouTube video URL
-    Returns generator object yielding model prediction results
+
+    Args:
+        model - model to run
+        input_video_id - identifier of input video stream. It can be:
+            - 0-based index for local cameras
+            - IP camera URL in the format "rtsp://<user>:<password>@<ip or hostname>",
+            - local path or URL to mp4 video file,
+            - YouTube video URL
+        zone_counter - optional ZoneCount object; when not None, object counting is performed
+
+    Returns:
+        generator object yielding model prediction results;
+        when zone_counter is not None, each prediction result contains additional attribute
+        `zone_counts`, which is a list of object counts for each polygon zone configured in zone_counter
     """
 
     # select OpenCV backend and matching colorspace
     model.image_backend = "opencv"
     model.input_numpy_colorspace = "BGR"
 
+    do_zone_count = zone_counter is not None
+
     with open_video_stream(input_video_id) as stream:
         for res in model.predict_batch(video_source(stream)):
-            yield res
+            if do_zone_count:
+
+                class ZoneCountResult:
+                    def __init__(self, res, zc):
+                        self._result = res
+                        self.zone_counter = zc
+                        self.zone_counts = zc.count(res)
+
+                    def __getattr__(self, item):
+                        return getattr(self._result, item)
+
+                    @property
+                    def image_overlay(self):
+                        return self.zone_counter.display(
+                            self._result, self._result.image_overlay, self.zone_counts
+                        )
+
+                yield ZoneCountResult(res, zone_counter)
+
+            else:
+                yield res
 
 
 def annotate_video(
-    model, input_video_id, output_video_path, *, show_progress=True, visual_display=True
+    model,
+    input_video_id,
+    output_video_path,
+    *,
+    show_progress=True,
+    visual_display=True,
+    zone_counter=None,
 ):
     """Annotate video stream by running a model and saving results to video file
-    model - model to run
-    input_video_id - identifier of input video stream. It can be:
-       - 0-based index for local cameras
-       - IP camera URL in the format "rtsp://<user>:<password>@<ip or hostname>",
-       - local path or URL to mp4 video file,
-       - YouTube video URL
-    show_progress - when True, show text progress indicator
-    visual_display - when True, show interactive video display with annotated video stream
+
+    Args:
+        model - model to run
+        input_video_id - identifier of input video stream. It can be:
+        - 0-based index for local cameras
+        - IP camera URL in the format "rtsp://<user>:<password>@<ip or hostname>",
+        - local path or URL to mp4 video file,
+        - YouTube video URL
+        show_progress - when True, show text progress indicator
+        visual_display - when True, show interactive video display with annotated video stream
+        zone_counter - optional ZoneCount object; when not None, object counting is performed
     """
+
+    model.image_backend = "opencv"
+    model.input_numpy_colorspace = "BGR"
+
+    win_name = f"Annotating {input_video_id}"
+
+    if zone_counter is not None:
+        do_zone_count = True
+        zone_counter.window_attach(win_name)
 
     with ExitStack() as stack:
         if visual_display:
-            display = stack.enter_context(Display(f"Annotating {input_video_id}"))
+            display = stack.enter_context(Display(win_name))
 
         stream = stack.enter_context(open_video_stream(input_video_id))
-        writer = stack.enter_context(
-            open_video_writer(
-                str(output_video_path),
-                stream.get(cv2.CAP_PROP_FRAME_WIDTH),
-                stream.get(cv2.CAP_PROP_FRAME_HEIGHT),
-            )
-        )
+        w = int(stream.get(cv2.CAP_PROP_FRAME_WIDTH))
+        h = int(stream.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+        writer = stack.enter_context(open_video_writer(str(output_video_path), w, h))
 
         if show_progress:
             progress = Progress(int(stream.get(cv2.CAP_PROP_FRAME_COUNT)))
 
         for res in model.predict_batch(video_source(stream)):
             img = res.image_overlay
+
+            if do_zone_count:
+                zone_counter.display(res, img, zone_counter.count(res))
+
             writer.write(img)
+
             if visual_display:
                 display.show(img)
+
             if show_progress:
                 progress.step()
 
@@ -1089,8 +1339,6 @@ def model_time_profile(model, iterations=100) -> ModelTimeProfile:
     Returns:
         ModelTimeProfile object
     """
-
-    import numpy as np
 
     # skip non-image type models
     if model.model_info.InputType[0] != "Image":
