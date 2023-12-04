@@ -23,7 +23,7 @@ setup(
         "License :: OSI Approved :: MIT License",
     ],
     install_requires=[
-        "supervision" # should go before any packages depending on opencv
+        "supervision", # should go before any packages depending on opencv
         "numpy",
         "pillow",      
         "opencv-python",
