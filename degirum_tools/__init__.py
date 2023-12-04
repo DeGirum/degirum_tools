@@ -1104,10 +1104,12 @@ class ZoneCounter:
                 if "bbox" in obj and in_class_list(obj)
             ]
         )
-        return [
-            (zone.trigger(sv.Detections(bboxes)).sum() if len(bboxes) > 0 else 0)
-            for zone in self._zones
-        ]
+        if self._zones is not None:
+            return [
+                (zone.trigger(sv.Detections(bboxes)).sum() if len(bboxes) > 0 else 0)
+                for zone in self._zones
+            ]
+        return None
 
     def display(self, result, image, zone_counts):
         """
@@ -1198,7 +1200,7 @@ class ZoneCounter:
 
     def _install_mouse_callback(self):
         try:
-            cv2.setMouseCallback(self._win_name, ZoneCounter._mouse_callback, self)
+            cv2.setMouseCallback(self._win_name, ZoneCounter._mouse_callback, self)  # type: ignore[attr-defined]
             self._gui_state = {"dragging": None, "update": -1}
             self._mouse_callback_installed = True
         except Exception:
