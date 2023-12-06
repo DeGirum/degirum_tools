@@ -9,7 +9,7 @@ with open(Path(__file__).resolve().parent / "README.md", encoding="utf-8") as f:
 
 setup(
     name="degirum_tools",
-    version="0.2.1",
+    version="0.3.0",
     description="Tools for PySDK",
     author="DeGirum",
     license="",
@@ -23,7 +23,6 @@ setup(
         "License :: OSI Approved :: MIT License",
     ],
     install_requires=[
-        "supervision", # should go before any packages depending on opencv
         "numpy",
         "pillow",      
         "opencv-python",
