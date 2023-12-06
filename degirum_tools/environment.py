@@ -27,6 +27,9 @@ def reload_env(custom_file: str = "env.ini"):
         if it is None or does not exist, `.env` file is loaded
     """
 
+    if get_test_mode():
+        return
+    
     env_file = dotenv.find_dotenv(custom_file, usecwd=True)
 
     dotenv.load_dotenv(
@@ -51,9 +54,8 @@ def get_var(var: Optional[str], default_val: Any = None) -> Any:
 
 
 def get_test_mode() -> bool:
-    """Returns enable status of test mode from .env file"""
-    reload_env()  # reload environment variables from file
-    return bool(get_var(var_TestMode, False))
+    """Returns enable status of test mode from environment"""
+    return bool(os.getenv(var_TestMode))
 
 
 def get_token() -> str:

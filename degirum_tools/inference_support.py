@@ -35,26 +35,25 @@ def connect_model_zoo(
     Returns model zoo accessor object
     """
 
-    env.reload_env()  # reload environment variables from file
+    cloud_zoo_url = env.get_cloud_zoo_url()
+    token = env.get_var(env.var_Token)
 
     if inference_option == CloudInference:
         # inference on cloud platform
-        zoo = dg.connect(dg.CLOUD, env.get_cloud_zoo_url(), env.get_var(env.var_Token))
+        zoo = dg.connect(dg.CLOUD, cloud_zoo_url, token)
 
     elif inference_option == AIServerInference:
         # inference on AI server
         hostname = env.get_var(env.var_AiServer)
         if env.get_var(env.var_CloudZoo, ""):
             # use cloud zoo
-            zoo = dg.connect(
-                hostname, env.get_cloud_zoo_url(), env.get_var(env.var_Token)
-            )
+            zoo = dg.connect(hostname, cloud_zoo_url, token)
         else:
             # use local zoo
             zoo = dg.connect(hostname)
 
     elif inference_option == LocalHWInference:
-        zoo = dg.connect(dg.LOCAL, env.get_cloud_zoo_url(), env.get_var(env.var_Token))
+        zoo = dg.connect(dg.LOCAL, cloud_zoo_url, token)
 
     else:
         raise Exception(

@@ -31,8 +31,7 @@ def open_video_stream(
     Returns context manager yielding video stream object and closing it on exit
     """
 
-    if camera_id is None or env.get_test_mode():
-        env.reload_env()  # reload environment variables from file
+    if env.get_test_mode() or camera_id is None:
         camera_id = env.get_var(env.var_CameraID, 0)
         if isinstance(camera_id, str) and camera_id.isnumeric():
             camera_id = int(camera_id)

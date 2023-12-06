@@ -28,8 +28,7 @@ def open_audio_stream(
 
     pyaudio = env.import_optional_package("pyaudio")
 
-    if audio_id is None or env.get_test_mode():
-        env.reload_env()  # reload environment variables from file
+    if env.get_test_mode() or audio_id is None:
         audio_id = env.get_var(env.var_AudioID, 0)
         if isinstance(audio_id, str) and audio_id.isnumeric():
             audio_id = int(audio_id)
