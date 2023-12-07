@@ -9,6 +9,7 @@
 
 import cv2, os, time, PIL.Image, numpy as np
 from .environment import get_test_mode, in_colab, in_notebook
+from dataclasses import dataclass
 from typing import Optional, Any
 
 
@@ -113,45 +114,98 @@ class Display:
 
     @staticmethod
     def put_text(
-        img: np.ndarray,
-        text: str,
-        position: tuple,
-        text_color: tuple,
-        back_color: Optional[tuple] = None,
-        font: int = cv2.FONT_HERSHEY_COMPLEX_SMALL,
+        image: np.ndarray,
+        label: str,
+        top_left_xy: tuple,
+        font_color: tuple,
+        bg_color: Optional[tuple] = None,
+        font_face=cv2.FONT_HERSHEY_PLAIN,
         font_scale: float = 1,
+        font_thickness: int = 1,
+        line_spacing: float = 1,
     ):
         """Draw given text on given OpenCV image at given point with given color
 
         Args:
-            img - numpy array with image
-            text - text to draw
-            position - text top left coordinate tuple (x,y)
-            text_color - text color (BGR)
-            back_color - background color (BGR) or None for transparent
-            font - font to use
+            image - numpy array with image
+            label - text to draw
+            top_left_xy - text top left coordinate tuple (x,y)
+            font_color - text color (BGR)
+            bg_color - background color (BGR) or None for transparent
+            font_face - font to use
             font_scale - font scale factor to use
+            font_thickness - font thickness to use
+            line_spacing - line spacing factor
         """
 
-        text_size = cv2.getTextSize(text, font, 1, 1)
-        text_w = text_size[0][0]
-        text_h = text_size[0][1] + text_size[1]
-        margin = int(text_h / 4)
-        bl_corner = (position[0], position[1] + text_h + 2 * margin)
-        if back_color is not None:
-            tr_corner = (
-                bl_corner[0] + text_w + 2 * margin,
-                bl_corner[1] - text_h - 2 * margin,
+        im_h, im_w = image.shape[:2]
+        margin = 4
+
+        @dataclass
+        class LineInfo:
+            line: str = ""
+            x: int = 0
+            y: int = 0
+            line_height: int = 0
+            line_height_no_baseline: int = 0
+
+        lines: list[LineInfo] = []
+        max_width = 0
+        for line in label.splitlines():
+            li = LineInfo()
+            li.line = line
+            li.x, li.y = top_left_xy
+            (line_width, li.line_height_no_baseline), baseline = cv2.getTextSize(
+                line,
+                font_face,
+                font_scale,
+                font_thickness,
             )
-            cv2.rectangle(img, bl_corner, tr_corner, back_color, cv2.FILLED)
-        cv2.putText(
-            img,
-            text,
-            (bl_corner[0] + margin, bl_corner[1] - margin),
-            font,
-            font_scale,
-            text_color,
-        )
+            li.line_height = li.line_height_no_baseline + baseline + margin
+            top_left_xy = (li.x, li.y + int(li.line_height * line_spacing))
+            max_width = max(max_width, line_width)
+            lines.append(li)
+
+        max_width += margin
+
+        for li in lines:
+            if bg_color is not None:
+                # get actual mask sizes with regard to image crop
+                if im_h - (li.y + li.line_height) <= 0:
+                    sz_h = max(im_h - li.y, 0)
+                else:
+                    sz_h = li.line_height
+
+                if im_w - (li.x + max_width) <= 0:
+                    sz_w = max(im_w - li.x, 0)
+                else:
+                    sz_w = max_width
+
+                # add background mask to image
+                if sz_h > 0 and sz_w > 0:
+                    bg_mask = np.zeros((sz_h, sz_w, 3), np.uint8)
+                    bg_mask[:, :] = np.array(bg_color)
+                    image[
+                        li.y : li.y + sz_h,
+                        li.x : li.x + sz_w,
+                    ] = bg_mask
+
+            # add text to image
+            image = cv2.putText(
+                image,
+                li.line,
+                (
+                    li.x + margin // 2,
+                    li.y + li.line_height_no_baseline + margin // 2,
+                ),  # putText start bottom-left
+                font_face,
+                font_scale,
+                font_color,
+                font_thickness,
+                cv2.LINE_AA,
+            )
+
+        return image
 
     @staticmethod
     def _check_gui() -> bool:

@@ -144,6 +144,7 @@ class ZoneCounter:
         count_polygons: np.ndarray,
         *,
         class_list: Optional[list] = None,
+        per_class_display: bool = False,
         triggering_position: str = BOTTOM_CENTER,
         window_name: Optional[str] = None,
     ):
@@ -152,6 +153,7 @@ class ZoneCounter:
         Args:
             count_polygons (nd.array): list of polygons to count objects in; each polygon is a list of points (x,y)
             class_list (list): list of classes to count; if None, all classes are counted
+            per_class_display (bool): when True, display zone counts per class, otherwise display total zone counts
             triggering_position (str): the position within the bounding box that triggers the zone
             window_name (str): optional OpenCV window name to configure for interactive zone adjustment
         """
@@ -161,6 +163,12 @@ class ZoneCounter:
         self._win_name = window_name
         self._mouse_callback_installed = False
         self._class_list = class_list
+        self._per_class_display = per_class_display
+        if class_list is None and per_class_display:
+            raise ValueError(
+                "class_list must be specified when per_class_display is True"
+            )
+
         self._triggering_position = triggering_position
         self._polygons = [
             np.array(polygon, dtype=np.int32) for polygon in count_polygons
@@ -194,17 +202,22 @@ class ZoneCounter:
         self._win_name = win_name
         self._mouse_callback_installed = False
 
-    def count(self, result) -> list:
+    def count(self, result):
         """
-        Count detected object bounding boxes in polygon zones
+        Detect object bounding boxes in polygon zones.
+        Update each result object `result.results[i]` by adding "in_zone" key to it,
+        when this object is in a zone and its class belongs to a class list specified
+        in a constructor. "in_zone" key value is the index of the zone where this object
+        is detected.
 
         Args:
             result: PySDK model result object
-        Returns:
-            list: list of object counts found in each polygon zone
         """
 
         self._lazy_init(result)
+
+        if self._zones is None:
+            return
 
         def in_class_list(obj):
             return (
@@ -215,28 +228,30 @@ class ZoneCounter:
                 else False
             )
 
-        bboxes = np.array(
-            [
-                obj["bbox"]
-                for obj in result.results
-                if "bbox" in obj and in_class_list(obj)
-            ]
-        )
-        if self._zones is not None:
-            return [
-                (zone.trigger(bboxes).sum() if len(bboxes) > 0 else 0)
-                for zone in self._zones
-            ]
-        return [0] * len(self._polygons)
+        filtered_results = [
+            obj for obj in result.results if "bbox" in obj and in_class_list(obj)
+        ]
 
-    def display(self, result, image: np.ndarray, zone_counts: list) -> np.ndarray:
+        if len(filtered_results) == 0:
+            return
+
+        bboxes = np.array([obj["bbox"] for obj in filtered_results])
+
+        for zi, zone in enumerate(self._zones):
+            triggers = zone.trigger(bboxes)
+            [
+                obj.update({"in_zone": zi})
+                for obj, flag in zip(filtered_results, triggers)
+                if flag
+            ]
+
+    def display(self, result, image: np.ndarray) -> np.ndarray:
         """
-        Display polygon zones and counts on given image
+        Display polygon zones and zone counts on a given image
 
         Args:
-            result: PySDK result object to take display settings from
+            result: PySDK result object to display (should be the same as used in count() method)
             image (np.ndarray): image to display on
-            zone_counts (list): list of object counts found in each polygon zone
 
         Returns:
             np.ndarray: annotated image
@@ -249,14 +264,41 @@ class ZoneCounter:
         zone_color = color_complement(result.overlay_color)
         background_color = color_complement(result.overlay_fill_color)
 
-        for zi in range(len(self._polygons)):
+        npolygons = len(self._polygons)
+
+        # count objects in zones
+        if self._per_class_display and self._class_list is not None:
+            zone_counts = [[0] * len(self._class_list) for i in range(npolygons)]
+            for obj in result.results:
+                if (zi := obj.get("in_zone", -1)) != -1:
+                    try:
+                        zone_counts[zi][self._class_list.index(obj["label"])] += 1
+                    except Exception:
+                        pass  # ignore missing classes/keys
+
+        else:
+            zone_counts = [[0] for i in range(npolygons)]
+            for obj in result.results:
+                if (zi := obj.get("in_zone", -1)) != -1:
+                    zone_counts[zi][0] += 1
+
+        # draw annotations
+        for zi in range(npolygons):
             cv2.polylines(
                 image, [self._polygons[zi]], True, zone_color, result.overlay_line_width
             )
+
+            if self._per_class_display and self._class_list is not None:
+                text = f"Zone {zi}:"
+                for ci, class_name in enumerate(self._class_list):
+                    text += f"\n {class_name}: {zone_counts[zi][ci]}"
+            else:
+                text = f"Zone {zi}: {zone_counts[zi][0]}"
+
             Display.put_text(
                 image,
-                f"Zone {zi}: {zone_counts[zi]}",
-                self._polygons[zi][0],
+                text,
+                tuple(x + result.overlay_line_width for x in self._polygons[zi][0]),
                 zone_color,
                 background_color,
                 cv2.FONT_HERSHEY_PLAIN,
@@ -264,17 +306,19 @@ class ZoneCounter:
             )
         return image
 
-    def count_and_display(self, result) -> np.ndarray:
+    def count_and_display(self, result, image: np.ndarray) -> np.ndarray:
         """
         Count detected object bounding boxes in polygon zones and display them on model result image
 
         Args:
             result: PySDK model result object
+            image (np.ndarray): image to display on
 
         Returns:
             np.ndarray: annotated image
         """
-        return self.display(result, result.image_overlay, self.count(result))
+        self.count(result)
+        return self.display(result, image)
 
     @staticmethod
     def _mouse_callback(event: int, x: int, y: int, flags: int, self: Any):

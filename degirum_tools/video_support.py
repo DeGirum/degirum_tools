@@ -107,6 +107,7 @@ class VideoWriter:
         self._stream = self._container.add_stream("h264", fps)
         self._stream.width = w
         self._stream.height = h
+        self._stream.options = {"crf": "23"}
         self._count = 0
 
     def write(self, img: np.ndarray):

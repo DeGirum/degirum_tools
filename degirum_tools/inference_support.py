@@ -98,7 +98,7 @@ def predict_stream(
                     def __init__(self, res, zc):
                         self._result = res
                         self.zone_counter = zc
-                        self.zone_counts = zc.count(res)
+                        self.zone_counter.count(res)
 
                     def __getattr__(self, item):
                         return getattr(self._result, item)
@@ -106,7 +106,7 @@ def predict_stream(
                     @property
                     def image_overlay(self):
                         return self.zone_counter.display(
-                            self._result, self._result.image_overlay, self.zone_counts
+                            self._result, self._result.image_overlay
                         )
 
                 yield ZoneCountResult(res, zone_counter)
@@ -163,7 +163,7 @@ def annotate_video(
             img = res.image_overlay
 
             if zone_counter is not None:
-                zone_counter.display(res, img, zone_counter.count(res))
+                zone_counter.count_and_display(res, img)
 
             writer.write(img)
 
