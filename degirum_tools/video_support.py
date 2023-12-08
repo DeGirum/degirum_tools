@@ -1,0 +1,213 @@
+#
+# video_support.py: video stream handling classes and functions
+#
+# Copyright DeGirum Corporation 2023
+# All rights reserved
+#
+# Implements classes and functions to handle video streams for capturing and saving
+#
+
+
+import cv2, urllib, av, numpy as np
+from contextlib import contextmanager
+from pathlib import Path
+from . import environment as env
+from .ui_support import Progress
+from typing import Union, Generator, Optional, Callable
+
+
+@contextmanager
+def open_video_stream(
+    camera_id: Union[int, str, Path, None] = None
+) -> Generator[cv2.VideoCapture, None, None]:
+    """Open OpenCV video stream from camera with given identifier.
+
+    camera_id - 0-based index for local cameras
+       or IP camera URL in the format "rtsp://<user>:<password>@<ip or hostname>",
+       or local video file path,
+       or URL to mp4 video file,
+       or YouTube video URL
+
+    Returns context manager yielding video stream object and closing it on exit
+    """
+
+    if env.get_test_mode() or camera_id is None:
+        camera_id = env.get_var(env.var_CameraID, 0)
+        if isinstance(camera_id, str) and camera_id.isnumeric():
+            camera_id = int(camera_id)
+
+    if isinstance(camera_id, Path):
+        camera_id = str(camera_id)
+
+    if isinstance(camera_id, str) and urllib.parse.urlparse(camera_id).hostname in (
+        "www.youtube.com",
+        "youtube.com",
+        "youtu.be",
+    ):  # if source is YouTube video
+        import pafy
+
+        camera_id = pafy.new(camera_id).getbest(preftype="mp4").url
+
+    stream = cv2.VideoCapture(camera_id)  # type: ignore[arg-type]
+    if not stream.isOpened():
+        raise Exception(f"Error opening '{camera_id}' video stream")
+    else:
+        print(f"Successfully opened video stream '{camera_id}'")
+
+    try:
+        yield stream
+    finally:
+        stream.release()
+
+
+def video_source(stream: cv2.VideoCapture) -> Generator[np.ndarray, None, None]:
+    """Generator function, which returns video frames captured from given video stream.
+    Useful to pass to model batch_predict().
+
+    stream - video stream context manager object returned by open_video_stream()
+
+    Yields video frame captured from given video stream
+    """
+
+    # do not report errors for files and in test mode;
+    # report errors only for camera streams
+    report_error = (
+        False
+        if env.get_test_mode() or stream.get(cv2.CAP_PROP_FRAME_COUNT) > 0
+        else True
+    )
+
+    while True:
+        ret, frame = stream.read()
+        if not ret:
+            if report_error:
+                raise Exception(
+                    "Fail to capture camera frame. May be camera was opened by another notebook?"
+                )
+            else:
+                break
+        yield frame
+
+
+class VideoWriter:
+    """
+    H264 mp4 video stream writer class
+    """
+
+    def __init__(self, fname: str, w: int, h: int, fps: int = 30):
+        """Create, open, and return video stream writer
+
+        Args:
+            fname: filename to save video
+            w, h: frame width/height
+            fps: frames per second
+        """
+
+        self._container = av.open(fname, "w")
+        self._stream = self._container.add_stream("h264", fps)
+        self._stream.width = w
+        self._stream.height = h
+        self._stream.options = {"crf": "23"}
+        self._count = 0
+
+    def write(self, img: np.ndarray):
+        """
+        Write image to video stream
+        Args:
+            img (np.ndarray): image to write
+        """
+        self._count += 1
+        frame = av.VideoFrame.from_ndarray(img, format="bgr24")
+        for packet in self._stream.encode(frame):
+            self._container.mux(packet)
+
+    def release(self):
+        """
+        Close video stream
+        """
+        if self._container is not None:
+            # flush stream
+            for packet in self._stream.encode():
+                self._container.mux(packet)
+            self._container.close()
+            self._container = None
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.release()
+
+    @property
+    def count(self):
+        """
+        Returns number of frames written to video stream
+        """
+        return self._count
+
+
+def create_video_writer(fname: str, w: int, h: int, fps: int = 30) -> VideoWriter:
+    """Create, open, and return OpenCV video stream writer
+
+    fname - filename to save video
+    w, h - frame width/height
+    fps - frames per second
+    """
+
+    directory = Path(fname).parent
+    if not directory.is_dir():
+        directory.mkdir(parents=True)
+
+    return VideoWriter(str(fname), int(w), int(h), fps)  # create stream writer
+
+
+@contextmanager
+def open_video_writer(
+    fname: str, w: int, h: int, fps: int = 30
+) -> Generator[VideoWriter, None, None]:
+    """Create, open, and yield OpenCV video stream writer; release on exit
+
+    fname - filename to save video
+    w, h - frame width/height
+    fps - frames per second
+    """
+
+    writer = create_video_writer(fname, w, h, fps)
+    try:
+        yield writer
+    finally:
+        writer.release()
+
+
+def video2jpegs(
+    video_file: str,
+    jpeg_path: str,
+    *,
+    jpeg_prefix: str = "frame_",
+    preprocessor: Optional[Callable[[np.ndarray], np.ndarray]] = None,
+) -> int:
+    """Decode video file into a set of jpeg images
+
+    video_file - filename of a video file
+    jpeg_path - directory path to store decoded jpeg files
+    jpeg_prefix - common prefix for jpeg file names
+    preprocessor - optional image preprocessing function to be applied to each frame before saving into file
+    Returns number of decoded frames
+
+    """
+
+    path_to_jpeg = Path(jpeg_path)
+    if not path_to_jpeg.exists():  # create directory for annotated images
+        path_to_jpeg.mkdir()
+
+    with open_video_stream(video_file) as stream:  # open video stream form file
+        nframes = int(stream.get(cv2.CAP_PROP_FRAME_COUNT))
+        progress = Progress(nframes)
+        # decode video stream into files resized to model input size
+        fi = 0
+        for img in video_source(stream):
+            if preprocessor is not None:
+                img = preprocessor(img)
+            fname = str(path_to_jpeg / f"{jpeg_prefix}{fi:05d}.jpg")
+            cv2.imwrite(fname, img)
+            progress.step()
+            fi += 1
+
+        return fi

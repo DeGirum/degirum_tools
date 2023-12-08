@@ -12,25 +12,7 @@ from typing import List
 import numpy as np
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
-
-
-def xyxy2xywh(x):
-    """
-    Convert bounding box coordinates from (x1, y1, x2, y2) format to (x, y, width, height) format where (x1, y1) is the
-    top-left corner and (x2, y2) is the bottom-right corner.
-
-    Args:
-        x (np.ndarray): The input bounding box coordinates in (x1, y1, x2, y2) format.
-
-    Returns:
-        y (np.ndarray): The bounding box coordinates in (x, y, width, height) format.
-    """
-    y = np.copy(x)
-    y[:, 0] = (x[:, 0] + x[:, 2]) / 2  # x center
-    y[:, 1] = (x[:, 1] + x[:, 3]) / 2  # y center
-    y[:, 2] = x[:, 2] - x[:, 0]  # width
-    y[:, 3] = x[:, 3] - x[:, 1]  # height
-    return y
+from .math_support import xyxy2xywh
 
 
 def process_keypoints(keypoints_res: List[dict]) -> List[float]:
