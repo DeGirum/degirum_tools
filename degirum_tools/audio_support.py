@@ -15,25 +15,25 @@ from typing import Union, Callable, Generator, Optional, Any
 
 @contextmanager
 def open_audio_stream(
-    sampling_rate_hz: int, buffer_size: int, audio_id: Union[int, str, None] = None
+    sampling_rate_hz: int, buffer_size: int, audio_source: Union[int, str, None] = None
 ) -> Generator[Any, None, None]:
     """Open PyAudio audio stream
 
     Args:
         sampling_rate_hz - desired sample rate in Hz
         buffer_size - read buffer size
-        audio_id - 0-based index for local microphones or local WAV file path
+        audio_source - 0-based index for local microphones or local WAV file path
     Returns context manager yielding audio stream object and closing it on exit
     """
 
     pyaudio = env.import_optional_package("pyaudio")
 
-    if env.get_test_mode() or audio_id is None:
-        audio_id = env.get_var(env.var_AudioID, 0)
-        if isinstance(audio_id, str) and audio_id.isnumeric():
-            audio_id = int(audio_id)
+    if env.get_test_mode() or audio_source is None:
+        audio_source = env.get_var(env.var_AudioSource, 0)
+        if isinstance(audio_source, str) and audio_source.isnumeric():
+            audio_source = int(audio_source)
 
-    if isinstance(audio_id, int):
+    if isinstance(audio_source, int):
         # microphone
 
         class MicStream:
@@ -56,7 +56,7 @@ def open_audio_stream(
                     channels=1,
                     rate=int(sampling_rate_hz),
                     input=True,
-                    input_device_index=audio_id,
+                    input_device_index=audio_source,
                     frames_per_buffer=self.frames_per_buffer,
                     stream_callback=callback,
                 )
@@ -75,7 +75,7 @@ def open_audio_stream(
                 else:
                     return self._result_queue.get()
 
-        yield MicStream(audio_id, sampling_rate_hz, buffer_size)
+        yield MicStream(audio_source, sampling_rate_hz, buffer_size)
 
     else:
         # file
@@ -110,7 +110,7 @@ def open_audio_stream(
                     raise StopIteration
                 return buf
 
-        yield WavStream(audio_id, sampling_rate_hz, buffer_size)
+        yield WavStream(audio_source, sampling_rate_hz, buffer_size)
 
 
 def audio_source(

@@ -16,8 +16,8 @@ var_Token = "DEGIRUM_CLOUD_TOKEN"
 var_CloudUrl = "DEGIRUM_CLOUD_PLATFORM_URL"
 var_AiServer = "AISERVER_HOSTNAME_OR_IP"
 var_CloudZoo = "CLOUD_ZOO_URL"
-var_CameraID = "CAMERA_ID"
-var_AudioID = "AUDIO_ID"
+var_VideoSource = "CAMERA_ID"
+var_AudioSource = "AUDIO_ID"
 
 
 def reload_env(custom_file: str = "env.ini"):
