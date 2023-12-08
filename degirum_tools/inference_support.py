@@ -8,15 +8,15 @@
 #
 
 import cv2, numpy as np
+import degirum as dg  # import DeGirum PySDK
 from contextlib import ExitStack
+from pathlib import Path
+from typing import Union, List
 from dataclasses import dataclass
 from .video_support import open_video_stream, video_source, open_video_writer
 from .ui_support import Progress, Display, Timer
-from .zone_count import ZoneCounter
-from typing import Union, Optional
-from pathlib import Path
+from .result_analyzer_base import ResultAnalyzerBase
 from . import environment as env
-import degirum as dg  # import DeGirum PySDK
 
 
 # Inference options: parameters for connect_model_zoo
@@ -65,92 +65,104 @@ def connect_model_zoo(
 
 def predict_stream(
     model: dg.model.Model,
-    input_video_id: Union[int, str, Path, None],
+    video_source_id: Union[int, str, Path, None],
     *,
-    zone_counter: Optional[ZoneCounter] = None,
+    analyzers: Union[ResultAnalyzerBase, List[ResultAnalyzerBase], None] = None,
 ):
     """Run a model on a video stream
 
     Args:
         model - model to run
-        input_video_id - identifier of input video stream. It can be:
+        video_source_id - identifier of input video stream. It can be:
             - 0-based index for local cameras
             - IP camera URL in the format "rtsp://<user>:<password>@<ip or hostname>",
             - local path or URL to mp4 video file,
             - YouTube video URL
-        zone_counter - optional ZoneCount object; when not None, object counting is performed
+        analyzers - optional analyzer or list of analyzers to be applied to model inference results
 
     Returns:
-        generator object yielding model prediction results;
-        when zone_counter is not None, each prediction result contains additional attribute
-        `zone_counts`, which is a list of object counts for each polygon zone configured in zone_counter
+        generator object yielding model prediction results.
+        When `analyzers` is not None, each prediction result contains additional keys, added by those analyzers.
+        Also prediction result object has overridden `image_overlay` method which additionally displays analyzers' annotations.
     """
 
     # select OpenCV backend and matching colorspace
     model.image_backend = "opencv"
     model.input_numpy_colorspace = "BGR"
 
-    with open_video_stream(input_video_id) as stream:
+    class AnalyzerResult:
+        def __init__(self, res, analyzers):
+            self._result = res
+            self._analyzers = (
+                analyzers
+                if isinstance(analyzers, list)
+                else ([analyzers] if analyzers is not None else [])
+            )
+            # apply all analyzers to the result
+            for analyzer in self._analyzers:
+                analyzer.analyze(res)
+
+        def __getattr__(self, item):
+            return getattr(self._result, item)
+
+        @property
+        def image_overlay(self):
+            img = self._result.image_overlay
+            for analyzer in self._analyzers:
+                img = analyzer.annotate(self._result, img)
+            return img
+
+    with open_video_stream(video_source_id) as stream:
         for res in model.predict_batch(video_source(stream)):
-            if zone_counter is not None:
-
-                class ZoneCountResult:
-                    def __init__(self, res, zc):
-                        self._result = res
-                        self.zone_counter = zc
-                        self.zone_counter.count(res)
-
-                    def __getattr__(self, item):
-                        return getattr(self._result, item)
-
-                    @property
-                    def image_overlay(self):
-                        return self.zone_counter.display(
-                            self._result, self._result.image_overlay
-                        )
-
-                yield ZoneCountResult(res, zone_counter)
-
+            if analyzers is not None:
+                yield AnalyzerResult(res, analyzers)
             else:
                 yield res
 
 
 def annotate_video(
     model: dg.model.Model,
-    input_video_id: Union[int, str, Path, None],
+    video_source_id: Union[int, str, Path, None],
     output_video_path: str,
     *,
     show_progress: bool = True,
     visual_display: bool = True,
-    zone_counter: Optional[ZoneCounter] = None,
+    analyzers: Union[ResultAnalyzerBase, List[ResultAnalyzerBase], None] = None,
 ):
     """Annotate video stream by running a model and saving results to video file
 
     Args:
         model - model to run
-        input_video_id - identifier of input video stream. It can be:
+        video_source_id - identifier of input video stream. It can be:
         - 0-based index for local cameras
         - IP camera URL in the format "rtsp://<user>:<password>@<ip or hostname>",
         - local path or URL to mp4 video file,
         - YouTube video URL
         show_progress - when True, show text progress indicator
         visual_display - when True, show interactive video display with annotated video stream
-        zone_counter - optional ZoneCount object; when not None, object counting is performed
+        analyzers - optional analyzer or list of analyzers to be applied to model inference results
     """
 
     model.image_backend = "opencv"
     model.input_numpy_colorspace = "BGR"
 
-    win_name = f"Annotating {input_video_id}"
+    win_name = f"Annotating {video_source_id}"
 
-    if zone_counter is not None:
-        zone_counter.window_attach(win_name)
+    analyzer_list = (
+        analyzers
+        if isinstance(analyzers, list)
+        else ([analyzers] if analyzers is not None else [])
+    )
+
+    for analyzer in analyzer_list:
+        if hasattr(analyzer, "window_attach"):
+            analyzer.window_attach(win_name)
 
     with ExitStack() as stack:
         if visual_display:
             display = stack.enter_context(Display(win_name))
 
-        stream = stack.enter_context(open_video_stream(input_video_id))
+        stream = stack.enter_context(open_video_stream(video_source_id))
         w = int(stream.get(cv2.CAP_PROP_FRAME_WIDTH))
         h = int(stream.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
@@ -162,8 +174,8 @@ def annotate_video(
         for res in model.predict_batch(video_source(stream)):
             img = res.image_overlay
 
-            if zone_counter is not None:
-                zone_counter.count_and_display(res, img)
+            for analyzer in analyzer_list:
+                img = analyzer.analyze_and_annotate(res, img)
 
             writer.write(img)
 

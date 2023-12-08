@@ -10,6 +10,7 @@
 import numpy as np, cv2
 from typing import Tuple, Optional, Any
 from .ui_support import Display
+from .result_analyzer_base import ResultAnalyzerBase
 
 
 class _PolygonZone:
@@ -123,7 +124,7 @@ class _PolygonZone:
         raise ValueError(f"{anchor} is not supported.")
 
 
-class ZoneCounter:
+class ZoneCounter(ResultAnalyzerBase):
     """
     Class to count detected object bounding boxes in polygon zones
     """
@@ -174,35 +175,7 @@ class ZoneCounter:
             np.array(polygon, dtype=np.int32) for polygon in count_polygons
         ]
 
-    def _lazy_init(self, result):
-        """
-        Complete deferred initialization steps
-            - initialize polygon zones from model result object
-            - install mouse callback
-
-        Args:
-            result: PySDK model result object
-        """
-        if self._zones is None:
-            self._wh = (result.image.shape[1], result.image.shape[0])
-            self._zones = [
-                _PolygonZone(polygon, self._wh, self._triggering_position)
-                for polygon in self._polygons
-            ]
-        if not self._mouse_callback_installed and self._win_name is not None:
-            self._install_mouse_callback()
-
-    def window_attach(self, win_name: str):
-        """Attach OpenCV window for interactive zone adjustment by installing mouse callback
-
-        Args:
-            win_name (str): OpenCV window name to attach to
-        """
-
-        self._win_name = win_name
-        self._mouse_callback_installed = False
-
-    def count(self, result):
+    def analyze(self, result):
         """
         Detect object bounding boxes in polygon zones.
         Update each result object `result.results[i]` by adding "in_zone" key to it,
@@ -245,7 +218,7 @@ class ZoneCounter:
                 if flag
             ]
 
-    def display(self, result, image: np.ndarray) -> np.ndarray:
+    def annotate(self, result, image: np.ndarray) -> np.ndarray:
         """
         Display polygon zones and zone counts on a given image
 
@@ -306,19 +279,33 @@ class ZoneCounter:
             )
         return image
 
-    def count_and_display(self, result, image: np.ndarray) -> np.ndarray:
+    def window_attach(self, win_name: str):
+        """Attach OpenCV window for interactive zone adjustment by installing mouse callback
+
+        Args:
+            win_name (str): OpenCV window name to attach to
         """
-        Count detected object bounding boxes in polygon zones and display them on model result image
+
+        self._win_name = win_name
+        self._mouse_callback_installed = False
+
+    def _lazy_init(self, result):
+        """
+        Complete deferred initialization steps
+            - initialize polygon zones from model result object
+            - install mouse callback
 
         Args:
             result: PySDK model result object
-            image (np.ndarray): image to display on
-
-        Returns:
-            np.ndarray: annotated image
         """
-        self.count(result)
-        return self.display(result, image)
+        if self._zones is None:
+            self._wh = (result.image.shape[1], result.image.shape[0])
+            self._zones = [
+                _PolygonZone(polygon, self._wh, self._triggering_position)
+                for polygon in self._polygons
+            ]
+        if not self._mouse_callback_installed and self._win_name is not None:
+            self._install_mouse_callback()
 
     @staticmethod
     def _mouse_callback(event: int, x: int, y: int, flags: int, self: Any):
