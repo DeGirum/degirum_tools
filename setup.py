@@ -24,6 +24,7 @@ setup(
     ],
     install_requires=[
         "numpy",
+        "scipy",
         "pillow",      
         "opencv-python",
         "degirum>=0.9.2",        

@@ -7,9 +7,33 @@
 # Implements classes for polygon zone object counting
 #
 
+
+# MIT License
+#
+# Copyright (c) 2022 Roboflow
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+
 import numpy as np, cv2
 from typing import Tuple, Optional, Any
-from .ui_support import Display
+from .ui_support import put_text, color_complement
 from .result_analyzer_base import ResultAnalyzerBase
 
 
@@ -153,10 +177,10 @@ class ZoneCounter(ResultAnalyzerBase):
 
         Args:
             count_polygons (nd.array): list of polygons to count objects in; each polygon is a list of points (x,y)
-            class_list (list): list of classes to count; if None, all classes are counted
-            per_class_display (bool): when True, display zone counts per class, otherwise display total zone counts
-            triggering_position (str): the position within the bounding box that triggers the zone
-            window_name (str): optional OpenCV window name to configure for interactive zone adjustment
+            class_list (list, optional): list of classes to count; if None, all classes are counted
+            per_class_display (bool, optional): when True, display zone counts per class, otherwise display total zone counts
+            triggering_position (str, optional): the position within the bounding box that triggers the zone
+            window_name (str, optional): optional OpenCV window name to configure for interactive zone adjustment
         """
 
         self._wh: Optional[Tuple] = None
@@ -223,16 +247,12 @@ class ZoneCounter(ResultAnalyzerBase):
         Display polygon zones and zone counts on a given image
 
         Args:
-            result: PySDK result object to display (should be the same as used in count() method)
+            result: PySDK result object to display (should be the same as used in analyze() method)
             image (np.ndarray): image to display on
 
         Returns:
             np.ndarray: annotated image
         """
-
-        def color_complement(color):
-            adj_color = (color[0] if isinstance(color, list) else color)[::-1]
-            return tuple([255 - c for c in adj_color])
 
         zone_color = color_complement(result.overlay_color)
         background_color = color_complement(result.overlay_fill_color)
@@ -268,14 +288,13 @@ class ZoneCounter(ResultAnalyzerBase):
             else:
                 text = f"Zone {zi}: {zone_counts[zi][0]}"
 
-            Display.put_text(
+            put_text(
                 image,
                 text,
                 tuple(x + result.overlay_line_width for x in self._polygons[zi][0]),
-                zone_color,
-                background_color,
-                cv2.FONT_HERSHEY_PLAIN,
-                result.overlay_font_scale,
+                font_color=zone_color,
+                bg_color=background_color,
+                font_scale=result.overlay_font_scale,
             )
         return image
 
