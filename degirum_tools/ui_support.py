@@ -13,6 +13,124 @@ from dataclasses import dataclass
 from typing import Optional, Any
 
 
+def luminance(color: tuple) -> float:
+    """Calculate luminance from RGB color"""
+    return 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2]
+
+
+def deduce_text_color(bg_color: tuple):
+    """Deduce text color from background color"""
+    return (0, 0, 0) if luminance(bg_color) > 180 else (255, 255, 255)
+
+
+def color_complement(color):
+    """Return color complement: 255 - color"""
+    adj_color = (color[0] if isinstance(color, list) else color)[::-1]
+    return tuple([255 - c for c in adj_color])
+
+
+def crop(img, bbox: list):
+    """Crop and return OpenCV image to given bbox"""
+    return img[int(bbox[1]) : int(bbox[3]), int(bbox[0]) : int(bbox[2])]
+
+
+def put_text(
+    image: np.ndarray,
+    label: str,
+    top_left_xy: tuple,
+    *,
+    font_color: tuple,
+    bg_color: Optional[tuple] = None,
+    font_face: int = cv2.FONT_HERSHEY_PLAIN,
+    font_scale: float = 1,
+    font_thickness: int = 1,
+    line_spacing: float = 1,
+):
+    """Draw given text on given OpenCV image at given point with given color
+
+    Args:
+        image - numpy array with image
+        label - text to draw
+        top_left_xy - text top left coordinate tuple (x,y)
+        font_color - text color (BGR)
+        bg_color - background color (BGR) or None for transparent
+        font_face - font to use
+        font_scale - font scale factor to use
+        font_thickness - font thickness to use
+        line_spacing - line spacing factor
+    """
+
+    im_h, im_w = image.shape[:2]
+    margin = 4
+
+    @dataclass
+    class LineInfo:
+        line: str = ""
+        x: int = 0
+        y: int = 0
+        line_height: int = 0
+        line_height_no_baseline: int = 0
+
+    lines: list[LineInfo] = []
+    max_width = 0
+    for line in label.splitlines():
+        li = LineInfo()
+        li.line = line
+        li.x = max(0, top_left_xy[0])
+        li.y = max(0, top_left_xy[1])
+        (line_width, li.line_height_no_baseline), baseline = cv2.getTextSize(
+            line,
+            font_face,
+            font_scale,
+            font_thickness,
+        )
+        li.line_height = li.line_height_no_baseline + baseline + margin
+        top_left_xy = (li.x, li.y + int(li.line_height * line_spacing))
+        max_width = max(max_width, line_width)
+        lines.append(li)
+
+    max_width += margin
+
+    for li in lines:
+        if bg_color is not None:
+            # get actual mask sizes with regard to image crop
+            if im_h - (li.y + li.line_height) <= 0:
+                sz_h = max(im_h - li.y, 0)
+            else:
+                sz_h = li.line_height
+
+            if im_w - (li.x + max_width) <= 0:
+                sz_w = max(im_w - li.x, 0)
+            else:
+                sz_w = max_width
+
+            # add background mask to image
+            if sz_h > 0 and sz_w > 0:
+                bg_mask = np.zeros((sz_h, sz_w, 3), np.uint8)
+                bg_mask[:, :] = np.array(bg_color)
+                image[
+                    li.y : li.y + sz_h,
+                    li.x : li.x + sz_w,
+                ] = bg_mask
+
+        # add text to image
+        image = cv2.putText(
+            image,
+            li.line,
+            (
+                li.x + margin // 2,
+                li.y + li.line_height_no_baseline + margin // 2,
+            ),  # putText start bottom-left
+            font_face,
+            font_scale,
+            font_color,
+            font_thickness,
+            cv2.LINE_AA,
+        )
+
+    return image
+
+
 class FPSMeter:
     """Simple FPS meter class"""
 
@@ -110,102 +228,7 @@ class Display:
     @staticmethod
     def crop(img, bbox: list):
         """Crop and return OpenCV image to given bbox"""
-        return img[int(bbox[1]) : int(bbox[3]), int(bbox[0]) : int(bbox[2])]
-
-    @staticmethod
-    def put_text(
-        image: np.ndarray,
-        label: str,
-        top_left_xy: tuple,
-        font_color: tuple,
-        bg_color: Optional[tuple] = None,
-        font_face=cv2.FONT_HERSHEY_PLAIN,
-        font_scale: float = 1,
-        font_thickness: int = 1,
-        line_spacing: float = 1,
-    ):
-        """Draw given text on given OpenCV image at given point with given color
-
-        Args:
-            image - numpy array with image
-            label - text to draw
-            top_left_xy - text top left coordinate tuple (x,y)
-            font_color - text color (BGR)
-            bg_color - background color (BGR) or None for transparent
-            font_face - font to use
-            font_scale - font scale factor to use
-            font_thickness - font thickness to use
-            line_spacing - line spacing factor
-        """
-
-        im_h, im_w = image.shape[:2]
-        margin = 4
-
-        @dataclass
-        class LineInfo:
-            line: str = ""
-            x: int = 0
-            y: int = 0
-            line_height: int = 0
-            line_height_no_baseline: int = 0
-
-        lines: list[LineInfo] = []
-        max_width = 0
-        for line in label.splitlines():
-            li = LineInfo()
-            li.line = line
-            li.x, li.y = top_left_xy
-            (line_width, li.line_height_no_baseline), baseline = cv2.getTextSize(
-                line,
-                font_face,
-                font_scale,
-                font_thickness,
-            )
-            li.line_height = li.line_height_no_baseline + baseline + margin
-            top_left_xy = (li.x, li.y + int(li.line_height * line_spacing))
-            max_width = max(max_width, line_width)
-            lines.append(li)
-
-        max_width += margin
-
-        for li in lines:
-            if bg_color is not None:
-                # get actual mask sizes with regard to image crop
-                if im_h - (li.y + li.line_height) <= 0:
-                    sz_h = max(im_h - li.y, 0)
-                else:
-                    sz_h = li.line_height
-
-                if im_w - (li.x + max_width) <= 0:
-                    sz_w = max(im_w - li.x, 0)
-                else:
-                    sz_w = max_width
-
-                # add background mask to image
-                if sz_h > 0 and sz_w > 0:
-                    bg_mask = np.zeros((sz_h, sz_w, 3), np.uint8)
-                    bg_mask[:, :] = np.array(bg_color)
-                    image[
-                        li.y : li.y + sz_h,
-                        li.x : li.x + sz_w,
-                    ] = bg_mask
-
-            # add text to image
-            image = cv2.putText(
-                image,
-                li.line,
-                (
-                    li.x + margin // 2,
-                    li.y + li.line_height_no_baseline + margin // 2,
-                ),  # putText start bottom-left
-                font_face,
-                font_scale,
-                font_color,
-                font_thickness,
-                cv2.LINE_AA,
-            )
-
-        return image
+        return crop(img, bbox)
 
     @staticmethod
     def _check_gui() -> bool:
@@ -222,7 +245,13 @@ class Display:
     @staticmethod
     def _display_fps(img: np.ndarray, fps: float):
         """Helper method to display FPS"""
-        Display.put_text(img, f"{fps:5.1f} FPS", (0, 0), (0, 0, 0), (255, 255, 255))
+        put_text(
+            img,
+            f"{fps:5.1f} FPS",
+            (0, 0),
+            font_color=(0, 0, 0),
+            bg_color=(255, 255, 255),
+        )
 
     def show(self, img: Any, waitkey_delay: int = 1):
         """Show image or model result

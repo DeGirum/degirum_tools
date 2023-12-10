@@ -12,6 +12,7 @@ from .compound_models import *
 from .environment import *
 from .inference_support import *
 from .math_support import *
+from .object_tracker import *
 from .ui_support import *
 from .video_support import *
 from .zone_count import *

@@ -18,11 +18,11 @@ from typing import Union, Generator, Optional, Callable
 
 @contextmanager
 def open_video_stream(
-    camera_id: Union[int, str, Path, None] = None
+    video_source: Union[int, str, Path, None] = None
 ) -> Generator[cv2.VideoCapture, None, None]:
     """Open OpenCV video stream from camera with given identifier.
 
-    camera_id - 0-based index for local cameras
+    video_source - 0-based index for local cameras
        or IP camera URL in the format "rtsp://<user>:<password>@<ip or hostname>",
        or local video file path,
        or URL to mp4 video file,
@@ -31,28 +31,28 @@ def open_video_stream(
     Returns context manager yielding video stream object and closing it on exit
     """
 
-    if env.get_test_mode() or camera_id is None:
-        camera_id = env.get_var(env.var_CameraID, 0)
-        if isinstance(camera_id, str) and camera_id.isnumeric():
-            camera_id = int(camera_id)
+    if env.get_test_mode() or video_source is None:
+        video_source = env.get_var(env.var_VideoSource, 0)
+        if isinstance(video_source, str) and video_source.isnumeric():
+            video_source = int(video_source)
 
-    if isinstance(camera_id, Path):
-        camera_id = str(camera_id)
+    if isinstance(video_source, Path):
+        video_source = str(video_source)
 
-    if isinstance(camera_id, str) and urllib.parse.urlparse(camera_id).hostname in (
+    if isinstance(video_source, str) and urllib.parse.urlparse(video_source).hostname in (
         "www.youtube.com",
         "youtube.com",
         "youtu.be",
     ):  # if source is YouTube video
         import pafy
 
-        camera_id = pafy.new(camera_id).getbest(preftype="mp4").url
+        video_source = pafy.new(video_source).getbest(preftype="mp4").url
 
-    stream = cv2.VideoCapture(camera_id)  # type: ignore[arg-type]
+    stream = cv2.VideoCapture(video_source)  # type: ignore[arg-type]
     if not stream.isOpened():
-        raise Exception(f"Error opening '{camera_id}' video stream")
+        raise Exception(f"Error opening '{video_source}' video stream")
     else:
-        print(f"Successfully opened video stream '{camera_id}'")
+        print(f"Successfully opened video stream '{video_source}'")
 
     try:
         yield stream
