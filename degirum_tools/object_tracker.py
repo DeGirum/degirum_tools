@@ -31,13 +31,13 @@
 # SOFTWARE.
 
 
-import numpy as np, scipy.linalg
+import cv2, numpy as np, scipy.linalg, copy
 from enum import Enum
 from scipy.optimize import linear_sum_assignment
 from dataclasses import dataclass
-from typing import List, Tuple, Optional
-from .math_support import box_iou_batch
-from .ui_support import put_text, deduce_text_color
+from typing import List, Tuple, Optional, Dict
+from .math_support import box_iou_batch, AnchorPoint, get_anchor_coordinates
+from .ui_support import put_text, deduce_text_color, color_complement
 from .result_analyzer_base import ResultAnalyzerBase
 
 
@@ -431,7 +431,7 @@ class STrack:
         return "OT_{}_({}-{})".format(self.track_id, self.start_frame, self.end_frame)
 
 
-class ByteTrack:
+class _ByteTrack:
     """
     Multi-object tracking class.
     """
@@ -444,7 +444,7 @@ class ByteTrack:
         match_thresh: float = 0.8,
     ):
         """
-        Initialize the ByteTrack object.
+        Initialize the _ByteTrack object.
 
         Parameters:
             class_list (list, optional): list of classes to count; if None, all classes are counted
@@ -524,13 +524,13 @@ class ByteTrack:
                 tracked_stracks.append(track)
 
         """ Step 2: First association, with high score detection boxes"""
-        strack_pool = ByteTrack._join_tracks(tracked_stracks, self._lost_tracks)
+        strack_pool = _ByteTrack._join_tracks(tracked_stracks, self._lost_tracks)
         # Predict the current location with KF
         STrack.multi_predict(strack_pool, self._kalman_filter)
-        dists = ByteTrack._iou_distance(strack_pool, detections)
+        dists = _ByteTrack._iou_distance(strack_pool, detections)
 
-        dists = ByteTrack._fuse_score(dists, detections)
-        matches, u_track, u_detection = ByteTrack._linear_assignment(
+        dists = _ByteTrack._fuse_score(dists, detections)
+        matches, u_track, u_detection = _ByteTrack._linear_assignment(
             dists, thresh=self._match_thresh
         )
 
@@ -560,8 +560,8 @@ class ByteTrack:
             for i in u_track
             if strack_pool[i].state == _TrackState.Tracked
         ]
-        dists = ByteTrack._iou_distance(r_tracked_stracks, detections_second)
-        matches, u_track, u_detection_second = ByteTrack._linear_assignment(
+        dists = _ByteTrack._iou_distance(r_tracked_stracks, detections_second)
+        matches, u_track, u_detection_second = _ByteTrack._linear_assignment(
             dists, thresh=0.5
         )
         for itracked, idet in matches:
@@ -582,10 +582,10 @@ class ByteTrack:
 
         """Deal with unconfirmed tracks, usually tracks with only one beginning frame"""
         detections = [detections[i] for i in u_detection]
-        dists = ByteTrack._iou_distance(unconfirmed, detections)
+        dists = _ByteTrack._iou_distance(unconfirmed, detections)
 
-        dists = ByteTrack._fuse_score(dists, detections)
-        matches, u_unconfirmed, u_detection = ByteTrack._linear_assignment(
+        dists = _ByteTrack._fuse_score(dists, detections)
+        matches, u_unconfirmed, u_detection = _ByteTrack._linear_assignment(
             dists, thresh=0.7
         )
         for itracked, idet in matches:
@@ -613,21 +613,21 @@ class ByteTrack:
         self._tracked_tracks = [
             t for t in self._tracked_tracks if t.state == _TrackState.Tracked
         ]
-        self._tracked_tracks = ByteTrack._join_tracks(
+        self._tracked_tracks = _ByteTrack._join_tracks(
             self._tracked_tracks, activated_stracks
         )
-        self._tracked_tracks = ByteTrack._join_tracks(
+        self._tracked_tracks = _ByteTrack._join_tracks(
             self._tracked_tracks, refind_stracks
         )
-        self._lost_tracks = ByteTrack._sub_tracks(
+        self._lost_tracks = _ByteTrack._sub_tracks(
             self._lost_tracks, self._tracked_tracks
         )
         self._lost_tracks.extend(lost_stracks)
-        self._lost_tracks = ByteTrack._sub_tracks(
+        self._lost_tracks = _ByteTrack._sub_tracks(
             self._lost_tracks, self._removed_tracks
         )
         self._removed_tracks.extend(removed_stracks)
-        self._tracked_tracks, self._lost_tracks = ByteTrack._remove_duplicate_tracks(
+        self._tracked_tracks, self._lost_tracks = _ByteTrack._remove_duplicate_tracks(
             self._tracked_tracks, self._lost_tracks
         )
         output_stracks = [track for track in self._tracked_tracks if track.is_activated]
@@ -690,7 +690,7 @@ class ByteTrack:
 
     @staticmethod
     def _remove_duplicate_tracks(tracks_a: List, tracks_b: List) -> Tuple[List, List]:
-        pairwise_distance = ByteTrack._iou_distance(tracks_a, tracks_b)
+        pairwise_distance = _ByteTrack._iou_distance(tracks_a, tracks_b)
         matching_pairs = np.where(pairwise_distance < 0.15)
 
         duplicates_a, duplicates_b = set(), set()
@@ -742,7 +742,7 @@ class ByteTrack:
         row_ind, col_ind = linear_sum_assignment(cost_matrix)
         indices = np.column_stack((row_ind, col_ind))
 
-        return ByteTrack._indices_to_matches(cost_matrix, indices, thresh)
+        return _ByteTrack._indices_to_matches(cost_matrix, indices, thresh)
 
     @staticmethod
     def _iou_distance(atracks: List, btracks: List) -> np.ndarray:
@@ -776,6 +776,80 @@ class ByteTrack:
         return fuse_cost
 
 
+class _Tracer:
+    """
+    Class to keep traces of tracked objects in video stream
+    """
+
+    def __init__(
+        self, timeout_frames: int, trail_depth: int, anchor_point: AnchorPoint
+    ) -> None:
+        """
+        Constructor
+
+        Args:
+            timeout_frames (int): number of frames to keep inactive track
+            trail_depth (int): number of frames in a trace to keep
+            anchor_point (AnchorPoint): bbox anchor point to be used for tracing
+        """
+        self._timeout_count_dict: Dict[int, int] = {}
+        self.active_trails: Dict[int, list] = {}
+        self._timeout_count_initial = timeout_frames
+        self._trace_depth = trail_depth
+        self._anchor_point = anchor_point
+
+    def update(self, result):
+        """
+        Update object traces with current frame result.
+
+        Args:
+            result: PySDK result object to update with.
+                result.results[] dictionaries containing "track_id" and "bbox" keys will be used to update taces
+        """
+
+        # array of tracked object indexes and bboxes
+        tracked_objects = np.array(
+            [
+                [obj["track_id"]] + obj["bbox"]
+                for obj in result.results
+                if "track_id" in obj
+            ],
+            dtype=np.int32,
+        )
+
+        if len(tracked_objects) > 0:
+            # compute anchor coordinates
+            tracked_objects[:, 1:3] = get_anchor_coordinates(
+                tracked_objects[:, 1:], self._anchor_point
+            ).astype(np.int32)
+
+            # here tracked_objects[:, 0] are track IDs, tracked_objects[:, 1:3] are anchor coordinates
+
+            # update active trails
+            for tid, x, y in tracked_objects[:, 0:3]:
+                trail = self.active_trails.get(tid, None)
+                if trail is None:
+                    trail = []
+                    self.active_trails[tid] = trail
+                trail.append(np.array([x, y]))
+                if len(trail) > self._trace_depth:
+                    trail.pop(0)
+
+                self._timeout_count_dict[tid] = self._timeout_count_initial
+
+            inactive_set = set(self._timeout_count_dict.keys()) - set(
+                tracked_objects[:, 0]
+            )
+        else:
+            inactive_set = set(self._timeout_count_dict.keys())
+
+        # remove inactive trails
+        for tid in inactive_set:
+            self._timeout_count_dict[tid] -= 1
+            if self._timeout_count_dict[tid] == 0:
+                del self._timeout_count_dict[tid], self.active_trails[tid]
+
+
 class ObjectTracker(ResultAnalyzerBase):
     """
     Class to track objects in video stream
@@ -788,6 +862,8 @@ class ObjectTracker(ResultAnalyzerBase):
         track_thresh: float = 0.25,
         track_buffer: int = 30,
         match_thresh: float = 0.8,
+        anchor_point: AnchorPoint = AnchorPoint.BOTTOM_CENTER,
+        trail_depth: int = 0,
     ):
         """Constructor
 
@@ -796,20 +872,32 @@ class ObjectTracker(ResultAnalyzerBase):
             track_thresh (float, optional): Detection confidence threshold for track activation.
             track_buffer (int, optional): Number of frames to buffer when a track is lost.
             match_thresh (float, optional): IOU threshold for matching tracks with detections.
+            anchor_point (AnchorPoint, optional): bbox anchor point to be used for tracing object trails
+            trail_depth (int, optional): number of frames in object trail to keep; 0 to disable tracing
         """
-        self.tracker = ByteTrack(class_list, track_thresh, track_buffer, match_thresh)
+        self._tracker = _ByteTrack(class_list, track_thresh, track_buffer, match_thresh)
+        self._tracer: Optional[_Tracer] = (
+            _Tracer(track_buffer, trail_depth, anchor_point)
+            if trail_depth > 0
+            else None
+        )
 
     def analyze(self, result):
         """
         Track object bounding boxes.
-        Update each result object `result.results[i]` by adding the following keys to it:
-
-            - "track_id" - unique track ID of the detected object
+        Updates ech element of `result.results[]` by adding the track_id key - unique track ID of the detected object
+        If trail_depth is not zero, also adds `trails` dictionary to result object. This dictionary is keyed by track IDs
+        and contains lists of trail (x,y) coordinates for every active trail.
 
         Args:
             result: PySDK model result object
         """
-        self.tracker.update(result)
+        self._tracker.update(result)
+        if self._tracer is None:
+            result.trails = {}
+        else:
+            self._tracer.update(result)
+            result.trails = copy.deepcopy(self._tracer.active_trails)
 
     def annotate(self, result, image: np.ndarray) -> np.ndarray:
         """
@@ -825,16 +913,42 @@ class ObjectTracker(ResultAnalyzerBase):
 
         bg_color_bgr = result.overlay_color[::-1]
         txt_color_bgr = deduce_text_color(bg_color_bgr)
-        for obj in result.results:
-            if "track_id" in obj and "bbox" in obj:
-                track_id = str(obj["track_id"])
-                corner_pt = tuple(map(int, obj["bbox"][:2]))
-                put_text(
-                    image,
-                    str(track_id),
-                    corner_pt,
-                    font_color=txt_color_bgr,
-                    bg_color=bg_color_bgr,
-                    font_scale=result.overlay_font_scale,
-                )
+
+        if self._tracer is None:
+            # if tracing is disabled, show track IDs inside bboxes
+            for obj in result.results:
+                if "track_id" in obj and "bbox" in obj:
+                    track_id = str(obj["track_id"])
+                    corner_pt = tuple(map(int, obj["bbox"][:2]))
+                    put_text(
+                        image,
+                        str(track_id),
+                        corner_pt,
+                        font_color=txt_color_bgr,
+                        bg_color=bg_color_bgr,
+                        font_scale=result.overlay_font_scale,
+                    )
+
+        else:
+            # if tracing is enabled, show trails
+
+            all_trails = [
+                np.array(trail) for _, trail in result.trails.items() if len(trail) > 1
+            ]
+            cv2.polylines(
+                image, all_trails, False, bg_color_bgr, result.overlay_line_width
+            )
+
+            if result.overlay_show_labels:
+                for tid, trail in result.trails.items():
+                    if len(trail) > 1:
+                        put_text(
+                            image,
+                            str(tid),
+                            trail[-1],
+                            font_color=txt_color_bgr,
+                            bg_color=bg_color_bgr,
+                            font_scale=result.overlay_font_scale,
+                        )
+
         return image
