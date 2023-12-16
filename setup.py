@@ -9,7 +9,7 @@ with open(Path(__file__).resolve().parent / "README.md", encoding="utf-8") as f:
 
 setup(
     name="degirum_tools",
-    version="0.3.0",
+    version="0.4.0",
     description="Tools for PySDK",
     author="DeGirum",
     license="",
@@ -25,15 +25,15 @@ setup(
     install_requires=[
         "numpy",
         "scipy",
-        "pillow",      
+        "pillow",
         "opencv-python",
-        "degirum>=0.9.2",        
+        "degirum>=0.9.2",
         "ipython",
         "pafy",
         "youtube-dl==2020.12.2",
         "pycocotools",
         "pyyaml",
-        "av"
+        "av",
     ],
     python_requires=">=3.8",
     extras_require={
@@ -43,15 +43,10 @@ setup(
             "flake8",
             "pre-commit",
             "types-Pillow",
-            "types-PyYAML"
+            "types-PyYAML",
         ],
-        "testing": [
-            "pytest",
-            "coverage"
-        ],
-        "build": [
-            "build"
-        ],
+        "testing": ["pytest", "coverage"],
+        "build": ["build"],
     },
     include_package_data=True,
 )

@@ -28,6 +28,7 @@
 # SOFTWARE.
 
 import numpy as np
+from enum import Enum
 from typing import Union
 
 
@@ -124,3 +125,99 @@ def box_iou_batch(boxes_true: np.ndarray, boxes_detection: np.ndarray) -> np.nda
 
     area_inter = np.prod(np.clip(bottom_right - top_left, a_min=0, a_max=None), 2)
     return area_inter / (area_true[:, None] + area_detection - area_inter)
+
+
+class AnchorPoint(Enum):
+    """Position of a point of interest within the bounding box"""
+
+    CENTER = 1
+    CENTER_LEFT = 2
+    CENTER_RIGHT = 3
+    TOP_CENTER = 4
+    TOP_LEFT = 5
+    TOP_RIGHT = 6
+    BOTTOM_LEFT = 7
+    BOTTOM_CENTER = 8
+    BOTTOM_RIGHT = 9
+
+
+def get_anchor_coordinates(xyxy: np.ndarray, anchor: AnchorPoint) -> np.ndarray:
+    """
+    Calculates and returns the coordinates of a specific anchor point
+    within the bounding boxes defined by the `xyxy` attribute. The anchor
+    point can be any of the predefined positions,
+    such as `AnchorPoint.CENTER`, `AnchorPoint.CENTER_LEFT`, `AnchorPoint.BOTTOM_RIGHT`, etc.
+
+    Args:
+        xyxy (nd.array): An array of shape `(n, 4)` of bounding box coordinates,
+            where `n` is the number of bounding boxes.
+        anchor (str): An string specifying the position of the anchor point
+            within the bounding box.
+
+    Returns:
+        np.ndarray: An array of shape `(n, 2)`, where `n` is the number of bounding
+            boxes. Each row contains the `[x, y]` coordinates of the specified
+            anchor point for the corresponding bounding box.
+
+    Raises:
+        ValueError: If the provided `anchor` is not supported.
+    """
+    if anchor == AnchorPoint.CENTER:
+        return np.array(
+            [
+                (xyxy[:, 0] + xyxy[:, 2]) / 2,
+                (xyxy[:, 1] + xyxy[:, 3]) / 2,
+            ]
+        ).transpose()
+    elif anchor == AnchorPoint.CENTER_LEFT:
+        return np.array(
+            [
+                xyxy[:, 0],
+                (xyxy[:, 1] + xyxy[:, 3]) / 2,
+            ]
+        ).transpose()
+    elif anchor == AnchorPoint.CENTER_RIGHT:
+        return np.array(
+            [
+                xyxy[:, 2],
+                (xyxy[:, 1] + xyxy[:, 3]) / 2,
+            ]
+        ).transpose()
+    elif anchor == AnchorPoint.BOTTOM_CENTER:
+        return np.array([(xyxy[:, 0] + xyxy[:, 2]) / 2, xyxy[:, 3]]).transpose()
+    elif anchor == AnchorPoint.BOTTOM_LEFT:
+        return np.array([xyxy[:, 0], xyxy[:, 3]]).transpose()
+    elif anchor == AnchorPoint.BOTTOM_RIGHT:
+        return np.array([xyxy[:, 2], xyxy[:, 3]]).transpose()
+    elif anchor == AnchorPoint.TOP_CENTER:
+        return np.array([(xyxy[:, 0] + xyxy[:, 2]) / 2, xyxy[:, 1]]).transpose()
+    elif anchor == AnchorPoint.TOP_LEFT:
+        return np.array([xyxy[:, 0], xyxy[:, 1]]).transpose()
+    elif anchor == AnchorPoint.TOP_RIGHT:
+        return np.array([xyxy[:, 2], xyxy[:, 1]]).transpose()
+
+    raise ValueError(f"{anchor} is not supported.")
+
+
+def intersect(a, b, c, d) -> bool:
+    """Check intersection of two lines
+
+    Args:
+        a (tuple): starting point of the first line
+        b (tuple): ending point of the first line
+        c (tuple): starting point of the second line
+        d (tuple): ending point of the second line
+
+    Returns:
+        bool: True if lines intersect, False otherwise
+    """
+
+    s = (a[0] - b[0]) * (c[1] - a[1]) - (a[1] - b[1]) * (c[0] - a[0])
+    t = (a[0] - b[0]) * (d[1] - a[1]) - (a[1] - b[1]) * (d[0] - a[0])
+    if np.sign(s) == np.sign(t):
+        return False
+    s = (c[0] - d[0]) * (a[1] - c[1]) - (c[1] - d[1]) * (a[0] - c[0])
+    t = (c[0] - d[0]) * (b[1] - c[1]) - (c[1] - d[1]) * (b[0] - c[0])
+    if np.sign(s) == np.sign(t):
+        return False
+    return True

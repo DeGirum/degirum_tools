@@ -33,8 +33,9 @@
 
 import numpy as np, cv2
 from typing import Tuple, Optional, Any
-from .ui_support import put_text, color_complement
+from .ui_support import put_text, color_complement, deduce_text_color
 from .result_analyzer_base import ResultAnalyzerBase
+from .math_support import AnchorPoint, get_anchor_coordinates
 
 
 class _PolygonZone:
@@ -54,7 +55,7 @@ class _PolygonZone:
         self,
         polygon: np.ndarray,
         frame_resolution_wh: Tuple[int, int],
-        triggering_position: str,
+        triggering_position: AnchorPoint,
     ):
         self.polygon = polygon.astype(int)
         self.frame_resolution_wh = frame_resolution_wh
@@ -81,88 +82,25 @@ class _PolygonZone:
         bboxes[:, [1, 3]] = bboxes[:, [1, 3]].clip(0, self.height)
 
         clipped_anchors = np.ceil(
-            _PolygonZone.get_anchor_coordinates(
-                xyxy=bboxes, anchor=self.triggering_position
-            )
+            get_anchor_coordinates(xyxy=bboxes, anchor=self.triggering_position)
         ).astype(int)
 
         is_in_zone = self.mask[clipped_anchors[:, 1], clipped_anchors[:, 0]]
         return is_in_zone.astype(bool)
 
-    @staticmethod
-    def get_anchor_coordinates(xyxy: np.ndarray, anchor: str) -> np.ndarray:
-        """
-        Calculates and returns the coordinates of a specific anchor point
-        within the bounding boxes defined by the `xyxy` attribute. The anchor
-        point can be any of the predefined positions,
-        such as `CENTER`, `CENTER_LEFT`, `BOTTOM_RIGHT`, etc.
-
-        Args:
-            xyxy (nd.array): An array of shape `(n, 4)` of bounding box coordinates,
-                where `n` is the number of bounding boxes.
-            anchor (str): An string specifying the position of the anchor point
-                within the bounding box.
-
-        Returns:
-            np.ndarray: An array of shape `(n, 2)`, where `n` is the number of bounding
-                boxes. Each row contains the `[x, y]` coordinates of the specified
-                anchor point for the corresponding bounding box.
-
-        Raises:
-            ValueError: If the provided `anchor` is not supported.
-        """
-        if anchor == "CENTER":
-            return np.array(
-                [
-                    (xyxy[:, 0] + xyxy[:, 2]) / 2,
-                    (xyxy[:, 1] + xyxy[:, 3]) / 2,
-                ]
-            ).transpose()
-        elif anchor == "CENTER_LEFT":
-            return np.array(
-                [
-                    xyxy[:, 0],
-                    (xyxy[:, 1] + xyxy[:, 3]) / 2,
-                ]
-            ).transpose()
-        elif anchor == "CENTER_RIGHT":
-            return np.array(
-                [
-                    xyxy[:, 2],
-                    (xyxy[:, 1] + xyxy[:, 3]) / 2,
-                ]
-            ).transpose()
-        elif anchor == "BOTTOM_CENTER":
-            return np.array([(xyxy[:, 0] + xyxy[:, 2]) / 2, xyxy[:, 3]]).transpose()
-        elif anchor == "BOTTOM_LEFT":
-            return np.array([xyxy[:, 0], xyxy[:, 3]]).transpose()
-        elif anchor == "BOTTOM_RIGHT":
-            return np.array([xyxy[:, 2], xyxy[:, 3]]).transpose()
-        elif anchor == "TOP_CENTER":
-            return np.array([(xyxy[:, 0] + xyxy[:, 2]) / 2, xyxy[:, 1]]).transpose()
-        elif anchor == "TOP_LEFT":
-            return np.array([xyxy[:, 0], xyxy[:, 1]]).transpose()
-        elif anchor == "TOP_RIGHT":
-            return np.array([xyxy[:, 2], xyxy[:, 1]]).transpose()
-
-        raise ValueError(f"{anchor} is not supported.")
-
 
 class ZoneCounter(ResultAnalyzerBase):
     """
-    Class to count detected object bounding boxes in polygon zones
-    """
+    Class to count objects in polygon zones.
 
-    # Triggering position within the bounding box
-    CENTER = "CENTER"
-    CENTER_LEFT = "CENTER_LEFT"
-    CENTER_RIGHT = "CENTER_RIGHT"
-    TOP_CENTER = "TOP_CENTER"
-    TOP_LEFT = "TOP_LEFT"
-    TOP_RIGHT = "TOP_RIGHT"
-    BOTTOM_LEFT = "BOTTOM_LEFT"
-    BOTTOM_CENTER = "BOTTOM_CENTER"
-    BOTTOM_RIGHT = "BOTTOM_RIGHT"
+    Analyzes the object detection `result` object passed to `analyze` method and for each detected
+    object checks, does its anchor point belongs to any of the polygon zones specified by the `count_polygons`
+    constructor parameter. Only objects belonging to the class list specified by the `class_list`
+    constructor parameter are counted.
+
+    Updates each element of `result.results[]` list by adding the "in_zone" key containing
+    the index of the polygon zone where the corresponding is detected.
+    """
 
     def __init__(
         self,
@@ -170,7 +108,7 @@ class ZoneCounter(ResultAnalyzerBase):
         *,
         class_list: Optional[list] = None,
         per_class_display: bool = False,
-        triggering_position: str = BOTTOM_CENTER,
+        triggering_position: AnchorPoint = AnchorPoint.BOTTOM_CENTER,
         window_name: Optional[str] = None,
     ):
         """Constructor
@@ -179,7 +117,7 @@ class ZoneCounter(ResultAnalyzerBase):
             count_polygons (nd.array): list of polygons to count objects in; each polygon is a list of points (x,y)
             class_list (list, optional): list of classes to count; if None, all classes are counted
             per_class_display (bool, optional): when True, display zone counts per class, otherwise display total zone counts
-            triggering_position (str, optional): the position within the bounding box that triggers the zone
+            triggering_position (AnchorPoint, optional): the position within the bounding box that triggers the zone
             window_name (str, optional): optional OpenCV window name to configure for interactive zone adjustment
         """
 
@@ -254,8 +192,8 @@ class ZoneCounter(ResultAnalyzerBase):
             np.ndarray: annotated image
         """
 
-        zone_color = color_complement(result.overlay_color)
-        background_color = color_complement(result.overlay_fill_color)
+        line_color = color_complement(result.overlay_color)
+        text_color = deduce_text_color(line_color)
 
         npolygons = len(self._polygons)
 
@@ -278,7 +216,7 @@ class ZoneCounter(ResultAnalyzerBase):
         # draw annotations
         for zi in range(npolygons):
             cv2.polylines(
-                image, [self._polygons[zi]], True, zone_color, result.overlay_line_width
+                image, [self._polygons[zi]], True, line_color, result.overlay_line_width
             )
 
             if self._per_class_display and self._class_list is not None:
@@ -292,8 +230,8 @@ class ZoneCounter(ResultAnalyzerBase):
                 image,
                 text,
                 tuple(x + result.overlay_line_width for x in self._polygons[zi][0]),
-                font_color=zone_color,
-                bg_color=background_color,
+                font_color=text_color,
+                bg_color=line_color,
                 font_scale=result.overlay_font_scale,
             )
         return image

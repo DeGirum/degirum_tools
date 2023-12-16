@@ -29,7 +29,7 @@ def reload_env(custom_file: str = "env.ini"):
 
     if get_test_mode():
         return
-    
+
     env_file = dotenv.find_dotenv(custom_file, usecwd=True)
 
     dotenv.load_dotenv(
@@ -189,12 +189,12 @@ def configure_colab(
         env_file = "env.ini"
         print(f"Configuring {env_file} file...", end="")
         with open(env_file, "a") as file:
-            file.write(f'DEGIRUM_CLOUD_TOKEN = "{token}"\n')
+            file.write(f'{var_Token} = "{token}"\n')
             file.write(
-                f'CAMERA_ID = {video_file if video_file is not None else "../../images/colab_example.mp4"}\n'
+                f'{var_VideoSource} = {video_file if video_file is not None else "../../images/example_video.mp4"}\n'
             )
             file.write(
-                f'AUDIO_ID = {audio_file if audio_file is not None else "../../images/colab_example.wav"}\n'
+                f'{var_AudioSource} = {audio_file if audio_file is not None else "../../images/example_audio.wav"}\n'
             )
         print("DONE!")
 
