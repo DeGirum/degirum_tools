@@ -11,6 +11,7 @@ import cv2, os, time, PIL.Image, numpy as np
 from .environment import get_test_mode, in_colab, in_notebook
 from dataclasses import dataclass
 from typing import Optional, Any
+from enum import Enum
 
 
 def luminance(color: tuple) -> float:
@@ -34,11 +35,21 @@ def crop(img, bbox: list):
     return img[int(bbox[1]) : int(bbox[3]), int(bbox[0]) : int(bbox[2])]
 
 
+class CornerPosition(Enum):
+    """Corner position options"""
+
+    TOP_LEFT = 1
+    TOP_RIGHT = 2
+    BOTTOM_LEFT = 3
+    BOTTOM_RIGHT = 4
+
+
 def put_text(
     image: np.ndarray,
     label: str,
-    top_left_xy: tuple,
+    corner_xy: tuple,
     *,
+    corner_position: CornerPosition = CornerPosition.TOP_LEFT,
     font_color: tuple,
     bg_color: Optional[tuple] = None,
     font_face: int = cv2.FONT_HERSHEY_PLAIN,
@@ -51,7 +62,8 @@ def put_text(
     Args:
         image - numpy array with image
         label - text to draw
-        top_left_xy - text top left coordinate tuple (x,y)
+        corner_xy - text corner coordinate tuple (x,y); meaning depends on `corner_position` argument
+        corner_position - where to place text relative to corner_xy
         font_color - text color (BGR)
         bg_color - background color (BGR) or None for transparent
         font_face - font to use
@@ -71,25 +83,39 @@ def put_text(
         line_height: int = 0
         line_height_no_baseline: int = 0
 
+    top_left_xy = corner_xy
     lines: list[LineInfo] = []
     max_width = 0
     for line in label.splitlines():
         li = LineInfo()
         li.line = line
-        li.x = max(0, top_left_xy[0])
-        li.y = max(0, top_left_xy[1])
         (line_width, li.line_height_no_baseline), baseline = cv2.getTextSize(
             line,
             font_face,
             font_scale,
             font_thickness,
         )
+        li.x = max(0, top_left_xy[0])
+        li.y = max(0, top_left_xy[1])
+
         li.line_height = li.line_height_no_baseline + baseline + margin
         top_left_xy = (li.x, li.y + int(li.line_height * line_spacing))
         max_width = max(max_width, line_width)
         lines.append(li)
 
     max_width += margin
+
+    # adjust coordinates according to corner_position option
+    if corner_position != CornerPosition.TOP_LEFT:
+        y_adjustment = (
+            lines[-1].y + lines[-1].line_height - lines[0].y
+            if corner_position != CornerPosition.TOP_RIGHT
+            else 0
+        )
+        x_adjustment = max_width if corner_position != CornerPosition.BOTTOM_LEFT else 0
+        for li in lines:
+            li.x = max(0, li.x - x_adjustment)
+            li.y = max(0, li.y - y_adjustment)
 
     for li in lines:
         if bg_color is not None:
