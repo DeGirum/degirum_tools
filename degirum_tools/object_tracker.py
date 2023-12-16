@@ -31,8 +31,9 @@
 # SOFTWARE.
 
 
-import cv2, numpy as np, scipy.linalg, copy
+import cv2, numpy as np, scipy.linalg
 from enum import Enum
+from copy import deepcopy
 from scipy.optimize import linear_sum_assignment
 from dataclasses import dataclass
 from typing import List, Tuple, Optional, Dict
@@ -852,7 +853,20 @@ class _Tracer:
 
 class ObjectTracker(ResultAnalyzerBase):
     """
-    Class to track objects in video stream
+    Class to track objects in video stream.
+
+    Analyzes the object detection `result` object passed to `analyze` method and, for each detected
+    object in the `result.results[]` list, keeps its frame-to-frame track, assigning that thrack an
+    unique track ID. Only objects belonging to the class list specified by the `class_list` constructor
+    parameter are tracked.
+
+    Updates each element of `result.results[]` list by adding the "track_id" key containing that unique
+    track ID.
+
+    If the `trail_depth` constructor parameter is not zero, also adds `trails` dictionary to the
+    `result` object. This dictionary is keyed by track IDs and contains lists of trail (x,y)
+    coordinates of object anchor points for every active trail.
+
     """
 
     def __init__(
@@ -885,7 +899,7 @@ class ObjectTracker(ResultAnalyzerBase):
     def analyze(self, result):
         """
         Track object bounding boxes.
-        Updates ech element of `result.results[]` by adding the track_id key - unique track ID of the detected object
+        Updates each element of `result.results[]` by adding the track_id key - unique track ID of the detected object
         If trail_depth is not zero, also adds `trails` dictionary to result object. This dictionary is keyed by track IDs
         and contains lists of trail (x,y) coordinates for every active trail.
 
@@ -897,7 +911,7 @@ class ObjectTracker(ResultAnalyzerBase):
             result.trails = {}
         else:
             self._tracer.update(result)
-            result.trails = copy.deepcopy(self._tracer.active_trails)
+            result.trails = deepcopy(self._tracer.active_trails)
 
     def annotate(self, result, image: np.ndarray) -> np.ndarray:
         """
@@ -911,8 +925,8 @@ class ObjectTracker(ResultAnalyzerBase):
             np.ndarray: annotated image
         """
 
-        bg_color_bgr = result.overlay_color[::-1]
-        txt_color_bgr = deduce_text_color(bg_color_bgr)
+        line_color = color_complement(result.overlay_color)
+        text_color = deduce_text_color(line_color)
 
         if self._tracer is None:
             # if tracing is disabled, show track IDs inside bboxes
@@ -924,8 +938,8 @@ class ObjectTracker(ResultAnalyzerBase):
                         image,
                         str(track_id),
                         corner_pt,
-                        font_color=txt_color_bgr,
-                        bg_color=bg_color_bgr,
+                        font_color=text_color,
+                        bg_color=line_color,
                         font_scale=result.overlay_font_scale,
                     )
 
@@ -936,7 +950,7 @@ class ObjectTracker(ResultAnalyzerBase):
                 np.array(trail) for _, trail in result.trails.items() if len(trail) > 1
             ]
             cv2.polylines(
-                image, all_trails, False, bg_color_bgr, result.overlay_line_width
+                image, all_trails, False, line_color, result.overlay_line_width
             )
 
             if result.overlay_show_labels:
@@ -946,8 +960,8 @@ class ObjectTracker(ResultAnalyzerBase):
                             image,
                             str(tid),
                             trail[-1],
-                            font_color=txt_color_bgr,
-                            bg_color=bg_color_bgr,
+                            font_color=text_color,
+                            bg_color=line_color,
                             font_scale=result.overlay_font_scale,
                         )
 

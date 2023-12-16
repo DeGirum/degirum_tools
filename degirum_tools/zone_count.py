@@ -33,7 +33,7 @@
 
 import numpy as np, cv2
 from typing import Tuple, Optional, Any
-from .ui_support import put_text, color_complement
+from .ui_support import put_text, color_complement, deduce_text_color
 from .result_analyzer_base import ResultAnalyzerBase
 from .math_support import AnchorPoint, get_anchor_coordinates
 
@@ -91,7 +91,15 @@ class _PolygonZone:
 
 class ZoneCounter(ResultAnalyzerBase):
     """
-    Class to count detected object bounding boxes in polygon zones
+    Class to count objects in polygon zones.
+
+    Analyzes the object detection `result` object passed to `analyze` method and for each detected
+    object checks, does its anchor point belongs to any of the polygon zones specified by the `count_polygons`
+    constructor parameter. Only objects belonging to the class list specified by the `class_list`
+    constructor parameter are counted.
+
+    Updates each element of `result.results[]` list by adding the "in_zone" key containing
+    the index of the polygon zone where the corresponding is detected.
     """
 
     def __init__(
@@ -184,8 +192,8 @@ class ZoneCounter(ResultAnalyzerBase):
             np.ndarray: annotated image
         """
 
-        zone_color = color_complement(result.overlay_color)
-        background_color = color_complement(result.overlay_fill_color)
+        line_color = color_complement(result.overlay_color)
+        text_color = deduce_text_color(line_color)
 
         npolygons = len(self._polygons)
 
@@ -208,7 +216,7 @@ class ZoneCounter(ResultAnalyzerBase):
         # draw annotations
         for zi in range(npolygons):
             cv2.polylines(
-                image, [self._polygons[zi]], True, zone_color, result.overlay_line_width
+                image, [self._polygons[zi]], True, line_color, result.overlay_line_width
             )
 
             if self._per_class_display and self._class_list is not None:
@@ -222,8 +230,8 @@ class ZoneCounter(ResultAnalyzerBase):
                 image,
                 text,
                 tuple(x + result.overlay_line_width for x in self._polygons[zi][0]),
-                font_color=zone_color,
-                bg_color=background_color,
+                font_color=text_color,
+                bg_color=line_color,
                 font_scale=result.overlay_font_scale,
             )
         return image
