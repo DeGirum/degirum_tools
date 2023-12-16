@@ -197,3 +197,27 @@ def get_anchor_coordinates(xyxy: np.ndarray, anchor: AnchorPoint) -> np.ndarray:
         return np.array([xyxy[:, 2], xyxy[:, 1]]).transpose()
 
     raise ValueError(f"{anchor} is not supported.")
+
+
+def intersect(a, b, c, d) -> bool:
+    """Check intersection of two lines
+
+    Args:
+        a (tuple): starting point of the first line
+        b (tuple): ending point of the first line
+        c (tuple): starting point of the second line
+        d (tuple): ending point of the second line
+
+    Returns:
+        bool: True if lines intersect, False otherwise
+    """
+
+    s = (a[0] - b[0]) * (c[1] - a[1]) - (a[1] - b[1]) * (c[0] - a[0])
+    t = (a[0] - b[0]) * (d[1] - a[1]) - (a[1] - b[1]) * (d[0] - a[0])
+    if np.sign(s) == np.sign(t):
+        return False
+    s = (c[0] - d[0]) * (a[1] - c[1]) - (c[1] - d[1]) * (a[0] - c[0])
+    t = (c[0] - d[0]) * (b[1] - c[1]) - (c[1] - d[1]) * (b[0] - c[0])
+    if np.sign(s) == np.sign(t):
+        return False
+    return True
