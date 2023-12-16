@@ -97,6 +97,7 @@ def open_audio_stream(
                     )
 
                 self.frames_per_buffer = buffer_size
+                self._sample_width = self._wav.getsampwidth()
 
             def __enter__(self):
                 pass
@@ -106,7 +107,7 @@ def open_audio_stream(
 
             def get(self, no_wait=False):
                 buf = self._wav.readframes(self.frames_per_buffer)
-                if len(buf) < self.frames_per_buffer:
+                if len(buf) < self.frames_per_buffer * self._sample_width:
                     raise StopIteration
                 return buf
 
