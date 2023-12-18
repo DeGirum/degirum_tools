@@ -62,10 +62,7 @@ def get_token() -> str:
     """Returns a token from .env file"""
     if in_colab():
         from google.colab import userdata
-        try:
-            return userdata.get('DEGIRUM_CLOUD_TOKEN')
-        except Exception:
-            print("DEGIRUM_CLOUD_TOKEN secret probably not defined. Please add it to secrets and grant access to your notebook")            
+        return userdata.get('DEGIRUM_CLOUD_TOKEN')        
     reload_env()  # reload environment variables from file
     return get_var(var_Token)
 
