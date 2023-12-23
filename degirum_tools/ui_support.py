@@ -10,7 +10,7 @@
 import cv2, os, time, PIL.Image, numpy as np
 from .environment import get_test_mode, in_colab, in_notebook
 from dataclasses import dataclass
-from typing import Optional, Any
+from typing import Optional, Any, List
 from enum import Enum
 
 
@@ -84,7 +84,7 @@ def put_text(
         line_height_no_baseline: int = 0
 
     top_left_xy = corner_xy
-    lines: list[LineInfo] = []
+    lines: List[LineInfo] = []
     max_width = 0
     for line in label.splitlines():
         li = LineInfo()
