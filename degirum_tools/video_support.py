@@ -111,7 +111,7 @@ class VideoWriter:
         if platform.system() == "Windows":
             # use OpenCV VideoWriter on Windows
             self._writer = cv2.VideoWriter(
-                fname, cv2.VideoWriter_fourcc(*"H264"), fps, (w, h)
+                fname, int.from_bytes("H264".encode(), byteorder="little"), fps, (w, h)
             )
         else:
             import ffmpegcv
