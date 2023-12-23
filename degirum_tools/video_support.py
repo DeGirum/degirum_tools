@@ -8,7 +8,7 @@
 #
 
 
-import cv2, urllib, av, numpy as np
+import cv2, urllib, numpy as np
 from contextlib import contextmanager
 from pathlib import Path
 from . import environment as env
@@ -39,7 +39,9 @@ def open_video_stream(
     if isinstance(video_source, Path):
         video_source = str(video_source)
 
-    if isinstance(video_source, str) and urllib.parse.urlparse(video_source).hostname in (
+    if isinstance(video_source, str) and urllib.parse.urlparse(
+        video_source
+    ).hostname in (
         "www.youtube.com",
         "youtube.com",
         "youtu.be",
@@ -102,13 +104,21 @@ class VideoWriter:
             w, h: frame width/height
             fps: frames per second
         """
-
-        self._container = av.open(fname, "w")
-        self._stream = self._container.add_stream("h264", fps)
-        self._stream.width = w
-        self._stream.height = h
-        self._stream.options = {"crf": "23"}
         self._count = 0
+
+        import platform
+
+        if platform.system() == "Windows":
+            # use OpenCV VideoWriter on Windows
+            self._writer = cv2.VideoWriter(
+                fname, int.from_bytes("H264".encode(), byteorder="little"), fps, (w, h)
+            )
+        else:
+            import ffmpegcv
+
+            # use ffmpeg-wrapped VideoWriter on other platforms;
+            # reason: OpenCV VideoWriter does not support H264 on Linux
+            self._writer = ffmpegcv.VideoWriter(fname, None, fps, (w, h))
 
     def write(self, img: np.ndarray):
         """
@@ -117,20 +127,13 @@ class VideoWriter:
             img (np.ndarray): image to write
         """
         self._count += 1
-        frame = av.VideoFrame.from_ndarray(img, format="bgr24")
-        for packet in self._stream.encode(frame):
-            self._container.mux(packet)
+        self._writer.write(img)
 
     def release(self):
         """
         Close video stream
         """
-        if self._container is not None:
-            # flush stream
-            for packet in self._stream.encode():
-                self._container.mux(packet)
-            self._container.close()
-            self._container = None
+        self._writer.release()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.release()
