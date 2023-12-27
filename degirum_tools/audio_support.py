@@ -83,6 +83,18 @@ def open_audio_stream(
 
         class WavStream:
             def __init__(self, filename, sampling_rate_hz, buffer_size):
+                if filename.startswith("http"):
+                    import requests, io
+
+                    # download file from URL and treat response as file-like object
+                    response = requests.get(filename)
+                    if response.status_code != 200:
+                        raise Exception(
+                            f"Failed to download {filename}: {response.reason}"
+                        )
+                    # treat response as file-like object
+                    filename = io.BytesIO(response.content)
+
                 self._wav = wave.open(filename, "rb")
 
                 if self._wav.getnchannels() != 1:
