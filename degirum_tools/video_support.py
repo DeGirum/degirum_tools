@@ -136,7 +136,7 @@ class VideoWriter:
         """
         self._writer.release()
         if not self._use_cv2:
-            time.sleep(0.01)  # for ffmpegcv we need to wait to finalize file closing
+            time.sleep(0.1)  # for ffmpegcv we need to wait to finalize file closing
 
     def __enter__(self):
         pass
