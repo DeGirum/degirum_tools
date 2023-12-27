@@ -8,7 +8,7 @@
 #
 
 
-import cv2, urllib, numpy as np
+import cv2, urllib, time, numpy as np
 from contextlib import contextmanager
 from pathlib import Path
 from . import environment as env
@@ -108,7 +108,8 @@ class VideoWriter:
 
         import platform
 
-        if platform.system() == "Windows":
+        self._use_cv2 = platform.system() == "Windows"
+        if self._use_cv2:
             # use OpenCV VideoWriter on Windows
             self._writer = cv2.VideoWriter(
                 fname, int.from_bytes("H264".encode(), byteorder="little"), fps, (w, h)
@@ -134,6 +135,11 @@ class VideoWriter:
         Close video stream
         """
         self._writer.release()
+        if not self._use_cv2:
+            time.sleep(0.01)  # for ffmpegcv we need to wait to finalize file closing
+
+    def __enter__(self):
+        pass
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.release()
