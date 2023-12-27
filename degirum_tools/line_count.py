@@ -9,6 +9,7 @@
 
 import numpy as np, cv2
 from dataclasses import dataclass
+from typing import List
 from copy import deepcopy
 from .ui_support import put_text, color_complement, deduce_text_color, CornerPosition
 from .result_analyzer_base import ResultAnalyzerBase
@@ -43,7 +44,7 @@ class LineCounter(ResultAnalyzerBase):
 
     """
 
-    def __init__(self, lines: list[tuple]):
+    def __init__(self, lines: List[tuple]):
         """Constructor
 
         Args:

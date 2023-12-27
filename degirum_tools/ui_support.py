@@ -10,7 +10,7 @@
 import cv2, os, time, PIL.Image, numpy as np
 from .environment import get_test_mode, in_colab, in_notebook
 from dataclasses import dataclass
-from typing import Optional, Any
+from typing import Optional, Any, List
 from enum import Enum
 
 
@@ -33,6 +33,38 @@ def color_complement(color):
 def crop(img, bbox: list):
     """Crop and return OpenCV image to given bbox"""
     return img[int(bbox[1]) : int(bbox[3]), int(bbox[0]) : int(bbox[2])]
+
+
+def ipython_display(obj: Any, clear: bool = False):
+    """
+    Display object in IPython environment
+
+    Args:
+        obj - object to display; can be PIL/OpenCV image object or image/video filename/URL
+        clear - True to clear previous output
+    """
+
+    import IPython.display
+
+    if isinstance(obj, PIL.Image.Image):
+        # PIL image
+        IPython.display.display(obj, clear=clear)
+    elif isinstance(obj, np.ndarray):
+        # OpenCV image
+        IPython.display.display(PIL.Image.fromarray(obj[..., ::-1]), clear=clear)
+    elif isinstance(obj, str):
+        # filename or URL
+        is_url = obj.startswith("http")
+        if obj.endswith(".mp4") or obj.endswith(".avi"):
+            # video
+            IPython.display.display(
+                IPython.display.Video(obj, embed=in_colab() and not is_url), clear=clear
+            )
+        else:
+            # assume image
+            IPython.display.display(IPython.display.Image(obj), clear=clear)
+    else:
+        raise Exception(f"ipython_display: unsupported object type {type(obj)}")
 
 
 class CornerPosition(Enum):
@@ -84,7 +116,7 @@ def put_text(
         line_height_no_baseline: int = 0
 
     top_left_xy = corner_xy
-    lines: list[LineInfo] = []
+    lines: List[LineInfo] = []
     max_width = 0
     for line in label.splitlines():
         li = LineInfo()
