@@ -84,7 +84,7 @@ def open_audio_stream(
         class WavStream:
             def __init__(self, filename, sampling_rate_hz, buffer_size):
                 if filename.startswith("http"):
-                    import requests, io
+                    import requests, io  # type: ignore[import-untyped]
 
                     # download file from URL and treat response as file-like object
                     response = requests.get(filename)
