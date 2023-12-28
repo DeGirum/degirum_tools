@@ -215,4 +215,4 @@ def to_valid_filename(in_str: str):
     import string, re
 
     valid_chars = "-_.()!@#$& %s%s" % (string.ascii_letters, string.digits)
-    return re.sub("[^%s]+" % re.escape(valid_chars), " ", in_str)
+    return re.sub("[^%s]+" % re.escape(valid_chars), "_", in_str)
