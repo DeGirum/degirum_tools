@@ -8,7 +8,7 @@
 #
 
 
-import cv2, urllib, time, numpy as np
+import cv2, urllib, numpy as np
 from contextlib import contextmanager
 from pathlib import Path
 from . import environment as env
@@ -135,8 +135,14 @@ class VideoWriter:
         Close video stream
         """
         self._writer.release()
-        if not self._use_cv2:
-            time.sleep(0.1)  # for ffmpegcv we need to wait to finalize file closing
+
+        # wait for ffmpeg process to finish
+        if not self._use_cv2 and hasattr(self._writer, "process"):
+            import psutil
+
+            for p in psutil.process_iter([]):
+                if self._writer.process.pid == p.ppid():
+                    p.wait()
 
     def __enter__(self):
         pass
