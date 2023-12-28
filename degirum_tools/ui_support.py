@@ -8,10 +8,11 @@
 #
 
 import cv2, os, time, PIL.Image, numpy as np
-from .environment import get_test_mode, in_colab, in_notebook
+from .environment import get_test_mode, in_colab, in_notebook, to_valid_filename
 from dataclasses import dataclass
 from typing import Optional, Any, List
 from enum import Enum
+from pathlib import Path
 
 
 def luminance(color: tuple) -> float:
@@ -349,7 +350,7 @@ class Display:
                     from .video_support import create_video_writer
 
                     if self._video_writer is None:
-                        self._video_file = f"{os.getcwd()}/{self._capt}.mp4"
+                        self._video_file = f"{os.getcwd()}/{Path(to_valid_filename(self._capt)).stem}.mp4"
                         self._video_writer = create_video_writer(
                             self._video_file, img.shape[1], img.shape[0]
                         )
@@ -360,7 +361,6 @@ class Display:
                             return self
 
                     if self._video_writer.count % 10 == 0:
-
                         if self._display_id is None:
                             self._display_id = "dg_show_" + str(time.time_ns())
 

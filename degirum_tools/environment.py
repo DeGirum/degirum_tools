@@ -62,7 +62,8 @@ def get_token() -> str:
     """Returns a token from .env file"""
     if in_colab():
         from google.colab import userdata
-        return userdata.get('DEGIRUM_CLOUD_TOKEN')        
+
+        return userdata.get("DEGIRUM_CLOUD_TOKEN")
     reload_env()  # reload environment variables from file
     return get_var(var_Token)
 
@@ -205,3 +206,13 @@ def configure_colab(
     if not os.path.exists(work_dir):
         os.makedirs(work_dir)
     os.chdir(work_dir)
+
+
+def to_valid_filename(in_str: str):
+    """
+    Convert string to a valid filename
+    """
+    import string, re
+
+    valid_chars = "-_.()!@#$& %s%s" % (string.ascii_letters, string.digits)
+    return re.sub("[^%s]+" % re.escape(valid_chars), " ", in_str)
