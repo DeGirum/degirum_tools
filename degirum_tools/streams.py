@@ -247,9 +247,8 @@ class Composition:
 
         print("Composition started")
 
-        # test mode has limited inputs
         if wait or get_test_mode():
-            self.wait()
+            self.stop(force_stop=False)
 
     def get_bottlenecks(self) -> List[dict]:
         """Return a list of gizmos, which experienced bottlenecks during last run.
@@ -277,25 +276,26 @@ class Composition:
             ret.append({gizmo.name: qsizes})
         return ret
 
-    def stop(self):
+    def stop(self, force_stop: bool = True):
         """Signal abort to all registered gizmos and wait until all threads stopped"""
 
         if len(self._threads) == 0:
             raise Exception("Composition not started")
 
         def do_join():
-            # first signal abort to all gizmos
-            for gizmo in self._gizmos:
-                gizmo.abort()
+            if force_stop:
+                # first signal abort to all gizmos
+                for gizmo in self._gizmos:
+                    gizmo.abort()
 
-            # then empty all streams
-            for gizmo in self._gizmos:
-                for i in gizmo._inputs:
-                    while not i.empty():
-                        try:
-                            i.get_nowait()
-                        except queue.Empty:
-                            break
+                # then empty all streams
+                for gizmo in self._gizmos:
+                    for i in gizmo._inputs:
+                        while not i.empty():
+                            try:
+                                i.get_nowait()
+                            except queue.Empty:
+                                break
 
             # finally wait for completion of all threads
             for t in self._threads:
@@ -311,15 +311,6 @@ class Composition:
                 print(
                     f"Error detected during execution of {gizmo.name}:\n  {type(gizmo.error)}: {str(gizmo.error)}"
                 )
-
-    def wait(self):
-        """Wait until all threads stopped"""
-
-        if len(self._threads) == 0:
-            raise Exception("Composition not started")
-
-        for t in self._threads:
-            t.join()
 
 
 class VideoSourceGizmo(Gizmo):
