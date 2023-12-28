@@ -108,18 +108,18 @@ class VideoWriter:
 
         import platform
 
-        self._use_cv2 = platform.system() == "Windows"
-        if self._use_cv2:
-            # use OpenCV VideoWriter on Windows
-            self._writer = cv2.VideoWriter(
-                fname, int.from_bytes("H264".encode(), byteorder="little"), fps, (w, h)
-            )
-        else:
+        self._use_ffmpeg = platform.system() != "Windows"
+        if self._use_ffmpeg:
             import ffmpegcv
 
             # use ffmpeg-wrapped VideoWriter on other platforms;
             # reason: OpenCV VideoWriter does not support H264 on Linux
             self._writer = ffmpegcv.VideoWriter(fname, None, fps, (w, h))
+        else:
+            # use OpenCV VideoWriter on Windows
+            self._writer = cv2.VideoWriter(
+                fname, int.from_bytes("H264".encode(), byteorder="little"), fps, (w, h)
+            )
 
     def write(self, img: np.ndarray):
         """
@@ -134,15 +134,21 @@ class VideoWriter:
         """
         Close video stream
         """
+
+        process_to_wait = None
+        if self._use_ffmpeg:
+            import psutil
+
+            # find ffmpeg process: it is a child process of the writer shell process
+            for p in psutil.process_iter([]):
+                if self._writer.process.pid == p.ppid():
+                    process_to_wait = p
+
         self._writer.release()
 
         # wait for ffmpeg process to finish
-        if not self._use_cv2 and hasattr(self._writer, "process"):
-            import psutil
-
-            for p in psutil.process_iter([]):
-                if self._writer.process.pid == p.ppid():
-                    p.wait()
+        if process_to_wait is not None:
+            process_to_wait.wait(1)
 
     def __enter__(self):
         pass
