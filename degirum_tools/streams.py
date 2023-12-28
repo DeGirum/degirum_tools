@@ -207,11 +207,13 @@ class Composition:
         """Operator synonym for add()"""
         return self.add(gizmo)
 
-    def start(self, detect_bottlenecks: bool = False):
+    def start(self, *, wait: bool = True, detect_bottlenecks: bool = False):
         """Start gizmo animation: launch run() method of every registered gizmo in a separate thread.
 
-        - detect_bottlenecks: true to switch all streams into dropping mode to detect bottlenecks.
-        Use get_bottlenecks() method to return list of gizmos-bottlenecks
+        Args:
+            wait: True to wait until all gizmos finished.
+            detect_bottlenecks: True to switch all streams into dropping mode to detect bottlenecks.
+            Use get_bottlenecks() method to return list of gizmos-bottlenecks
         """
 
         if len(self._threads) > 0:
@@ -246,7 +248,7 @@ class Composition:
         print("Composition started")
 
         # test mode has limited inputs
-        if get_test_mode():
+        if wait or get_test_mode():
             self.wait()
 
     def get_bottlenecks(self) -> List[dict]:
@@ -468,9 +470,7 @@ class VideoSaverGizmo(Gizmo):
         )
 
         img = get_img(self.get_input(0).get())
-        with open_video_writer(
-            self._filename, img.shape[1], img.shape[0]
-        ) as writer:
+        with open_video_writer(self._filename, img.shape[1], img.shape[0]) as writer:
             self.result_cnt += 1
             writer.write(img)
             for data in self.get_input(0):
