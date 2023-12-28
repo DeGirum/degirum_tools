@@ -302,7 +302,9 @@ class Composition:
                 t.join()
 
         # do it in a separate thread, because stop() may be called by some gizmo
-        threading.Thread(target=do_join).start()
+        joiner = threading.Thread(target=do_join)
+        joiner.start()
+        joiner.join()
 
         self._threads = []
         print("Composition stopped")
