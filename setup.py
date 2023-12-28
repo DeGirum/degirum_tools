@@ -9,7 +9,7 @@ with open(Path(__file__).resolve().parent / "README.md", encoding="utf-8") as f:
 
 setup(
     name="degirum_tools",
-    version="0.4.4",
+    version="0.4.5",
     description="Tools for PySDK",
     author="DeGirum",
     license="",
@@ -27,6 +27,7 @@ setup(
         "scipy",
         "pillow",
         "requests",
+        "psutil",
         "opencv-python",
         "degirum>=0.9.2",
         "ipython",
