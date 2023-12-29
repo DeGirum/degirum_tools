@@ -207,11 +207,13 @@ class Composition:
         """Operator synonym for add()"""
         return self.add(gizmo)
 
-    def start(self, detect_bottlenecks: bool = False):
+    def start(self, *, wait: bool = True, detect_bottlenecks: bool = False):
         """Start gizmo animation: launch run() method of every registered gizmo in a separate thread.
 
-        - detect_bottlenecks: true to switch all streams into dropping mode to detect bottlenecks.
-        Use get_bottlenecks() method to return list of gizmos-bottlenecks
+        Args:
+            wait: True to wait until all gizmos finished.
+            detect_bottlenecks: True to switch all streams into dropping mode to detect bottlenecks.
+            Use get_bottlenecks() method to return list of gizmos-bottlenecks
         """
 
         if len(self._threads) > 0:
@@ -245,9 +247,8 @@ class Composition:
 
         print("Composition started")
 
-        # test mode has limited inputs
-        if get_test_mode():
-            self.wait()
+        if wait or get_test_mode():
+            self.stop(force_stop=False)
 
     def get_bottlenecks(self) -> List[dict]:
         """Return a list of gizmos, which experienced bottlenecks during last run.
@@ -275,32 +276,35 @@ class Composition:
             ret.append({gizmo.name: qsizes})
         return ret
 
-    def stop(self):
+    def stop(self, force_stop: bool = True):
         """Signal abort to all registered gizmos and wait until all threads stopped"""
 
         if len(self._threads) == 0:
             raise Exception("Composition not started")
 
         def do_join():
-            # first signal abort to all gizmos
-            for gizmo in self._gizmos:
-                gizmo.abort()
+            if force_stop:
+                # first signal abort to all gizmos
+                for gizmo in self._gizmos:
+                    gizmo.abort()
 
-            # then empty all streams
-            for gizmo in self._gizmos:
-                for i in gizmo._inputs:
-                    while not i.empty():
-                        try:
-                            i.get_nowait()
-                        except queue.Empty:
-                            break
+                # then empty all streams
+                for gizmo in self._gizmos:
+                    for i in gizmo._inputs:
+                        while not i.empty():
+                            try:
+                                i.get_nowait()
+                            except queue.Empty:
+                                break
 
             # finally wait for completion of all threads
             for t in self._threads:
                 t.join()
 
         # do it in a separate thread, because stop() may be called by some gizmo
-        threading.Thread(target=do_join).start()
+        joiner = threading.Thread(target=do_join)
+        joiner.start()
+        joiner.join()
 
         self._threads = []
         print("Composition stopped")
@@ -309,15 +313,6 @@ class Composition:
                 print(
                     f"Error detected during execution of {gizmo.name}:\n  {type(gizmo.error)}: {str(gizmo.error)}"
                 )
-
-    def wait(self):
-        """Wait until all threads stopped"""
-
-        if len(self._threads) == 0:
-            raise Exception("Composition not started")
-
-        for t in self._threads:
-            t.join()
 
 
 class VideoSourceGizmo(Gizmo):
@@ -468,9 +463,7 @@ class VideoSaverGizmo(Gizmo):
         )
 
         img = get_img(self.get_input(0).get())
-        with open_video_writer(
-            self._filename, img.shape[1], img.shape[0]
-        ) as writer:
+        with open_video_writer(self._filename, img.shape[1], img.shape[0]) as writer:
             self.result_cnt += 1
             writer.write(img)
             for data in self.get_input(0):

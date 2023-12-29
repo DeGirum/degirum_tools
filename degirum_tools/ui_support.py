@@ -8,10 +8,11 @@
 #
 
 import cv2, os, time, PIL.Image, numpy as np
-from .environment import get_test_mode, in_colab, in_notebook
+from .environment import get_test_mode, in_colab, in_notebook, to_valid_filename
 from dataclasses import dataclass
 from typing import Optional, Any, List
 from enum import Enum
+from pathlib import Path
 
 
 def luminance(color: tuple) -> float:
@@ -255,6 +256,7 @@ class Display:
         self._h = h
         self._video_writer: Optional[Any] = None
         self._video_file: Optional[str] = None
+        self._display_id: Optional[str] = None
 
     def __enter__(self):
         return self
@@ -268,7 +270,7 @@ class Display:
         if self._video_writer is not None:
             self._video_writer.release()
             if in_colab():
-                import IPython
+                import IPython.display
 
                 IPython.display.display(
                     IPython.display.Video(self._video_file, embed=True)
@@ -348,7 +350,7 @@ class Display:
                     from .video_support import create_video_writer
 
                     if self._video_writer is None:
-                        self._video_file = f"{os.getcwd()}/{self._capt}.mp4"
+                        self._video_file = f"{os.getcwd()}/{Path(to_valid_filename(self._capt)).stem}.mp4"
                         self._video_writer = create_video_writer(
                             self._video_file, img.shape[1], img.shape[0]
                         )
@@ -359,11 +361,14 @@ class Display:
                             return self
 
                     if self._video_writer.count % 10 == 0:
+                        if self._display_id is None:
+                            self._display_id = "dg_show_" + str(time.time_ns())
+
                         IPython.display.display(
                             printer(
                                 f"{self._video_file}: frame {self._video_writer.count}, {fps:.1f} FPS"
                             ),
-                            clear=True,
+                            display_id=self._display_id,
                         )
 
             elif self._no_gui and in_notebook():

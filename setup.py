@@ -9,7 +9,7 @@ with open(Path(__file__).resolve().parent / "README.md", encoding="utf-8") as f:
 
 setup(
     name="degirum_tools",
-    version="0.4.6",
+    version="0.4.7",
     description="Tools for PySDK",
     author="DeGirum",
     license="",

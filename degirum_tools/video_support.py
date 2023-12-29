@@ -148,7 +148,10 @@ class VideoWriter:
 
         # wait for ffmpeg process to finish
         if process_to_wait is not None:
-            process_to_wait.wait(1)
+            try:
+                process_to_wait.wait()
+            except Exception:
+                pass
 
     def __enter__(self):
         pass
