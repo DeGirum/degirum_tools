@@ -7,10 +7,11 @@
 # Implements classes for multi-model aggregation.
 #
 
-import queue
+import queue, cv2, numpy as np, degirum as dg
 from abc import ABC, abstractmethod
-import degirum as dg
-import numpy as np
+from dataclasses import dataclass
+from .image_tools import detect_motion
+from typing import Union
 
 
 class ModelLike(ABC):
@@ -60,6 +61,14 @@ class ModelLike(ABC):
             Combined inference result object.
         """
         return self.predict(data)
+
+
+@dataclass
+class _FrameInfo:
+    """Class to hold frame info"""
+
+    result1: dg.postprocessor.InferenceResults  # model 1 result
+    sub_result: int  # sub-result index in model 1 result
 
 
 class CompoundModelBase(ModelLike):
@@ -173,7 +182,7 @@ class CombiningCompoundModel(CompoundModelBase):
         Args:
             result1: prediction result of the first model
         """
-        self.queue.put((result1.image, result1))
+        self.queue.put((result1.image, _FrameInfo(result1, -1)))
 
     def transform_result2(self, result2):
         """
@@ -187,7 +196,7 @@ class CombiningCompoundModel(CompoundModelBase):
         Returns:
             Combined result of both models. It's `info` property is the result of the first model.
         """
-        result2.results.extend(result2.info.results)
+        result2.results.extend(result2.info.result1.results)
         return result2
 
 
@@ -224,10 +233,13 @@ class CroppingCompoundModel(CompoundModelBase):
             result1: prediction result of the first model
         """
         if len(result1.results) == 0 or "bbox" not in result1.results[0]:
-            self.queue.put((result1.image, result1))
+            # no bbox detected: put black image into the queue to keep things going
+            self.queue.put(
+                (np.zeros((2, 2, 3), dtype=np.uint8), _FrameInfo(result1, -1))
+            )
         else:
             image_size = self.image_size(result1.image)
-            for obj in result1.results:
+            for idx, obj in enumerate(result1.results):
                 adj_bbox = self._adjust_bbox(obj["bbox"], image_size)
                 if hasattr(result1.image, "crop"):
                     cropped_img = result1.image.crop(adj_bbox)
@@ -235,7 +247,7 @@ class CroppingCompoundModel(CompoundModelBase):
                     cropped_img = result1.image[
                         adj_bbox[1] : adj_bbox[3], adj_bbox[0] : adj_bbox[2]
                     ]
-                self.queue.put((cropped_img, result1))
+                self.queue.put((cropped_img, _FrameInfo(result1, idx)))
 
     def transform_result2(self, result2):
         """
@@ -259,28 +271,6 @@ class CroppingCompoundModel(CompoundModelBase):
             return image.size
         else:
             raise Exception("Unsupported image type")
-
-    def _find_bbox(self, results, image, orig_image):
-        """
-        Find index of bbox in the first model's result list, which size is equal to the size of given image
-
-        Args:
-            results: list of inference results of the first model
-            image: image to find matching bbox
-            orig_image: original image from which image was cropped
-        """
-
-        image_size = self.image_size(image)
-        orig_image_size = self.image_size(orig_image)
-
-        def cond(obj):
-            adj_bbox = self._adjust_bbox(obj["bbox"], orig_image_size)
-            return image_size == (
-                round(adj_bbox[2]) - round(adj_bbox[0]),
-                round(adj_bbox[3]) - round(adj_bbox[1]),
-            )
-
-        return next((i for i, obj in enumerate(results) if cond(obj)), -1)
 
     def _adjust_bbox(self, bbox, image_size):
         """
@@ -343,13 +333,25 @@ class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
             classification results of the second model.
         """
 
-        result1 = result2.info  # result2.info stores the result of the first model
+        result1 = (
+            result2.info.result1
+        )  # result2.info stores the result of the first model
 
         # find result in the first model's result list, which corresponds to the second model's input image
-        idx = self._find_bbox(result1.results, result2.image, result1.image)
+        idx = result2.info.sub_result
         if idx >= 0:
             # patch bbox label with recognized class label
-            result1.results[idx]["label"] = result2.results[0]["label"]
+            label = (
+                result2.results[0]["label"] if self.model1.overlay_show_labels else ""
+            )
+            if self.model1.overlay_show_probabilities:
+                score = result2.results[0]["score"]
+                score_str = f"{score:.2f}" if isinstance(score, float) else str(score)
+                result1.results[idx]["label"] = (
+                    label + (": " if label else "") + score_str
+                )
+            else:
+                result1.results[idx]["label"] = label
 
         # return result when frame changes
         ret = None
@@ -391,7 +393,7 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
     second model should be of object detection type.
     """
 
-    def __init__(self, model1, model2, crop_extent=0, add_model1_results=False):
+    def __init__(self, model1, model2, *, crop_extent=0, add_model1_results=False):
         """
         Constructor.
 
@@ -427,10 +429,12 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
             where bbox coordinates are translated to original image coordinates.
         """
 
-        result1 = result2.info  # result2.info stores the result of the first model
+        result1 = (
+            result2.info.result1
+        )  # result2.info stores the result of the first model
 
         # find result in the first model's result list, which corresponds to the second model's input image
-        idx = self._find_bbox(result1.results, result2.image, result1.image)
+        idx = result2.info.sub_result
         if idx >= 0:
             # adjust bbox coordinates to original image coordinates
             x, y = result1.results[idx]["bbox"][:2]
@@ -485,16 +489,29 @@ class RegionExtractionPseudoModel(ModelLike):
     Pseudo model class which extracts regions from given image according to given ROI boxes.
     """
 
-    def __init__(self, roi_list: list, model2: dg.model.Model):
+    def __init__(
+        self,
+        roi_list: list,
+        model2: dg.model.Model,
+        *,
+        motion_detect: Union[bool, int] = False,
+    ):
         """
         Constructor.
 
         Args:
             roi_list: list of ROI boxes in [x1, y1, x2, y2] format
             model2: model, which will be used as a second step of the compound model pipeline
+            motion_detect: True or non-zero int to enable motion detection.
+                When enabled, ROI boxes where motion is not detected will be skipped.
+                When `motion_detect` is integer, it specifies how many frames to look back
+                to detect motion. When `motion_detect` is boolean, it is equivalent to
+                `motion_detect=1` (look back one frame).
         """
         self._roi_list = roi_list
         self._model2 = model2
+        self._base_img: list = []  # base image for motion detection
+        self._motion_detect = motion_detect
 
     # fallback all model-like attributes to the second model
     def __getattr__(self, attr):
@@ -514,17 +531,14 @@ class RegionExtractionPseudoModel(ModelLike):
             This allows you directly using the result in `for` loops.
         """
 
-        roi_list = [
-            {"bbox": roi, "label": "ROI", "score": idx, "category_id": idx}
-            for idx, roi in enumerate(self._roi_list)
-        ]
-
         preprocessor = dg._preprocessor.create_image_preprocessor(
             self._model2.model_info,  # we do copy here to avoid modifying original model parameters
             image_backend=self._model2.image_backend,
             pad_method="",  # to disable resizing/padding
         )
         preprocessor.image_format = "RAW"  # to avoid unnecessary JPEG encoding
+
+        all_rois = [True] * len(self._roi_list)
 
         for element in data:
             # extract frame and frame info from data
@@ -538,11 +552,38 @@ class RegionExtractionPseudoModel(ModelLike):
             # do pre-processing
             preprocessed_data = preprocessor.forward(frame)
 
+            image = preprocessed_data["image_input"]
+
+            if self._motion_detect:
+                motion_img, base_img = detect_motion(
+                    self._base_img[0] if self._base_img else None, image
+                )
+                self._base_img.append(base_img)
+                if len(self._base_img) > int(self._motion_detect):
+                    self._base_img.pop(0)
+
+                if motion_img is None:
+                    motion_detected = all_rois
+                else:
+                    motion_detected = [
+                        cv2.countNonZero(motion_img[roi[1] : roi[3], roi[0] : roi[2]])
+                        > 0
+                        for roi in self._roi_list
+                    ]
+            else:
+                motion_detected = all_rois
+
+            roi_list = [
+                {"bbox": roi, "label": "ROI", "score": idx, "category_id": idx}
+                for idx, roi in enumerate(self._roi_list)
+                if motion_detected[idx]
+            ]
+
             # generate pseudo inference results
             result = dg.postprocessor.DetectionResults(
                 model_params=self._model2._model_parameters,
-                input_image=preprocessed_data["image_input"],
-                model_image=preprocessed_data["image_input"],
+                input_image=image,
+                model_image=image,
                 inference_results=roi_list,
                 draw_color=self._model2.overlay_color,
                 line_width=self._model2.overlay_line_width,

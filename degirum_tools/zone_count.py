@@ -57,13 +57,12 @@ class _PolygonZone:
         frame_resolution_wh: Tuple[int, int],
         triggering_position: AnchorPoint,
     ):
-        self.polygon = polygon.astype(int)
         self.frame_resolution_wh = frame_resolution_wh
         self.triggering_position = triggering_position
 
         self.width, self.height = frame_resolution_wh
         self.mask = np.zeros((self.height + 1, self.width + 1))
-        cv2.fillPoly(self.mask, [polygon], color=1)
+        cv2.fillPoly(self.mask, [polygon.astype(int)], color=[1])
 
     def trigger(self, bboxes: np.ndarray) -> np.ndarray:
         """
@@ -308,9 +307,10 @@ class ZoneCounter(ResultAnalyzerBase):
             self._gui_state["update"] = -1
 
     def _install_mouse_callback(self):
-        try:
-            cv2.setMouseCallback(self._win_name, ZoneCounter._mouse_callback, self)  # type: ignore[attr-defined]
-            self._gui_state = {"dragging": None, "update": -1}
-            self._mouse_callback_installed = True
-        except Exception:
-            pass  # ignore errors
+        if self._win_name is not None:
+            try:
+                cv2.setMouseCallback(self._win_name, ZoneCounter._mouse_callback, self)  # type: ignore[attr-defined]
+                self._gui_state = {"dragging": None, "update": -1}
+                self._mouse_callback_installed = True
+            except Exception:
+                pass  # ignore errors
