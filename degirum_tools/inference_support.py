@@ -165,8 +165,11 @@ def annotate_video(
         stream = stack.enter_context(open_video_stream(video_source_id))
         w = int(stream.get(cv2.CAP_PROP_FRAME_WIDTH))
         h = int(stream.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fps = stream.get(cv2.CAP_PROP_FPS)
 
-        writer = stack.enter_context(open_video_writer(str(output_video_path), w, h))
+        writer = stack.enter_context(
+            open_video_writer(str(output_video_path), w, h, fps)
+        )
 
         if show_progress:
             progress = Progress(int(stream.get(cv2.CAP_PROP_FRAME_COUNT)))
