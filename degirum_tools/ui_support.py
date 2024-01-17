@@ -1,7 +1,7 @@
 #
 # ui_support.py: UI support classes and functions
 #
-# Copyright DeGirum Corporation 2023
+# Copyright DeGirum Corporation 2023-2024
 # All rights reserved
 #
 # Implements classes and functions to handle image display, progress indication, etc.
@@ -9,15 +9,11 @@
 
 import cv2, os, time, PIL.Image, numpy as np
 from .environment import get_test_mode, in_colab, in_notebook, to_valid_filename
+from .image_tools import crop, luminance
 from dataclasses import dataclass
 from typing import Optional, Any, List
 from enum import Enum
 from pathlib import Path
-
-
-def luminance(color: tuple) -> float:
-    """Calculate luminance from RGB color"""
-    return 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2]
 
 
 def deduce_text_color(bg_color: tuple):
@@ -29,11 +25,6 @@ def color_complement(color):
     """Return color complement: 255 - color"""
     adj_color = (color[0] if isinstance(color, list) else color)[::-1]
     return tuple([255 - c for c in adj_color])
-
-
-def crop(img, bbox: list):
-    """Crop and return OpenCV image to given bbox"""
-    return img[int(bbox[1]) : int(bbox[3]), int(bbox[0]) : int(bbox[2])]
 
 
 def ipython_display(obj: Any, clear: bool = False):

@@ -7,11 +7,71 @@
 # Implements classes for multi-model aggregation.
 #
 
-import queue
+import queue, cv2, numpy as np, degirum as dg
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from .image_tools import detect_motion
+from typing import Union
 
 
-class CompoundModelBase(ABC):
+class ModelLike(ABC):
+    """
+    A base class which provides a common interface for all models, similar to PySDK model class
+    """
+
+    @abstractmethod
+    def predict_batch(self, data):
+        """
+        Perform whole inference lifecycle for all objects in given iterator object (for example, `list`).
+
+        Args:
+            data (iterator): Inference input data iterator object such as list or generator function.
+            Each element returned by this iterator should be compatible to that regular PySDK model
+            accepts
+
+        Returns:
+            Generator object which iterates over combined inference result objects.
+            This allows you directly using the result in `for` loops.
+        """
+
+    def predict(self, data):
+        """Perform whole inference lifecycle on a single frame.
+
+        Args:
+
+            data (any): Inference input data. Input data type depends on the model.
+            It should be compatible to that regular PySDK model accepts.
+
+        Returns:
+            Combined inference result object.
+        """
+        for result in self.predict_batch([data]):
+            return result
+        return None
+
+    def __call__(self, data):
+        """Perform whole inference lifecycle on a single frame.
+
+        Args:
+
+            data (any): Inference input data. Input data type depends on the model.
+            It should be compatible to that regular PySDK model accepts.
+
+        Returns:
+            Combined inference result object.
+        """
+        return self.predict(data)
+
+
+@dataclass
+class _FrameInfo:
+    """Class to hold frame info"""
+
+    result1: dg.postprocessor.InferenceResults  # model 1 result
+    sub_result: int  # sub-result index in model 1 result
+
+
+class CompoundModelBase(ModelLike):
     """
     Compound model class which combines two models into one pipeline.
     """
@@ -103,34 +163,6 @@ class CompoundModelBase(ABC):
             if (transformed_result2 := self.transform_result2(result2)) is not None:
                 yield transformed_result2
 
-    def predict(self, data):
-        """Perform whole inference lifecycle on a single frame.
-
-        Args:
-
-            data (any): Inference input data. Input data type depends on the model.
-            It should be compatible to that regular PySDK model accepts.
-
-        Returns:
-            Combined inference result object.
-        """
-        for result in self.predict_batch([data]):
-            return result
-        return None
-
-    def __call__(self, data):
-        """Perform whole inference lifecycle on a single frame.
-
-        Args:
-
-            data (any): Inference input data. Input data type depends on the model.
-            It should be compatible to that regular PySDK model accepts.
-
-        Returns:
-            Combined inference result object.
-        """
-        return self.predict(data)
-
 
 class CombiningCompoundModel(CompoundModelBase):
     """
@@ -150,7 +182,7 @@ class CombiningCompoundModel(CompoundModelBase):
         Args:
             result1: prediction result of the first model
         """
-        self.queue.put((result1.image, result1))
+        self.queue.put((result1.image, _FrameInfo(result1, -1)))
 
     def transform_result2(self, result2):
         """
@@ -164,7 +196,7 @@ class CombiningCompoundModel(CompoundModelBase):
         Returns:
             Combined result of both models. It's `info` property is the result of the first model.
         """
-        result2.results.extend(result2.info.results)
+        result2.results.extend(result2.info.result1.results)
         return result2
 
 
@@ -201,10 +233,13 @@ class CroppingCompoundModel(CompoundModelBase):
             result1: prediction result of the first model
         """
         if len(result1.results) == 0 or "bbox" not in result1.results[0]:
-            self.queue.put((result1.image, result1))
+            # no bbox detected: put black image into the queue to keep things going
+            self.queue.put(
+                (np.zeros((2, 2, 3), dtype=np.uint8), _FrameInfo(result1, -1))
+            )
         else:
             image_size = self.image_size(result1.image)
-            for obj in result1.results:
+            for idx, obj in enumerate(result1.results):
                 adj_bbox = self._adjust_bbox(obj["bbox"], image_size)
                 if hasattr(result1.image, "crop"):
                     cropped_img = result1.image.crop(adj_bbox)
@@ -212,7 +247,7 @@ class CroppingCompoundModel(CompoundModelBase):
                     cropped_img = result1.image[
                         adj_bbox[1] : adj_bbox[3], adj_bbox[0] : adj_bbox[2]
                     ]
-                self.queue.put((cropped_img, result1))
+                self.queue.put((cropped_img, _FrameInfo(result1, idx)))
 
     def transform_result2(self, result2):
         """
@@ -236,28 +271,6 @@ class CroppingCompoundModel(CompoundModelBase):
             return image.size
         else:
             raise Exception("Unsupported image type")
-
-    def _find_bbox(self, results, image, orig_image):
-        """
-        Find index of bbox in the first model's result list, which size is equal to the size of given image
-
-        Args:
-            results: list of inference results of the first model
-            image: image to find matching bbox
-            orig_image: original image from which image was cropped
-        """
-
-        image_size = self.image_size(image)
-        orig_image_size = self.image_size(orig_image)
-
-        def cond(obj):
-            adj_bbox = self._adjust_bbox(obj["bbox"], orig_image_size)
-            return image_size == (
-                round(adj_bbox[2]) - round(adj_bbox[0]),
-                round(adj_bbox[3]) - round(adj_bbox[1]),
-            )
-
-        return next((i for i, obj in enumerate(results) if cond(obj)), -1)
 
     def _adjust_bbox(self, bbox, image_size):
         """
@@ -309,26 +322,40 @@ class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
         """
         Transform result of the second model.
 
-        This implementation appends result of the first model to the result of the second model.
+        This implementation adjusts bbox labels detected by the first model according to
+        classification results of the second model.
 
         Args:
             result2: prediction result of the second model
 
         Returns:
-            Result of second model. It's `info` property is the result of the first model.
+            Result of the first model with patched labels according to
+            classification results of the second model.
         """
 
-        # patch bbox label with recognized class label
-        idx = self._find_bbox(result2.info.results, result2.image, result2.info.image)
+        result1 = result2.info.result1
+        idx = result2.info.sub_result
+
         if idx >= 0:
-            result2.info.results[idx]["label"] = result2.results[0]["label"]
+            # patch bbox label with recognized class label
+            label = (
+                result2.results[0]["label"] if self.model1.overlay_show_labels else ""
+            )
+            if self.model1.overlay_show_probabilities:
+                score = result2.results[0]["score"]
+                score_str = f"{score:.2f}" if isinstance(score, float) else str(score)
+                result1.results[idx]["label"] = (
+                    label + (": " if label else "") + score_str
+                )
+            else:
+                result1.results[idx]["label"] = label
 
         # return result when frame changes
         ret = None
-        if result2.info is not self._current_result:
+        if result1 is not self._current_result:
             if self._current_result is not None:
                 ret = self._current_result
-        self._current_result = result2.info
+            self._current_result = result1
         return ret
 
     def predict_batch(self, data):
@@ -348,3 +375,219 @@ class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
             yield result
         if self._current_result is not None:
             yield self._current_result
+
+
+class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
+    """
+    Compound model class which crops original image according to results of the first model
+    and then passes cropped images to the second detection model, which performs detections
+    in each bbox and combines detection results from multiple bboxes from the same frame.
+    It returns the combined results of the **second** model where bbox coordinates are translated
+    to original image coordinates.
+
+    Restriction: first model should be of object detection type
+    (or pseudo object detection type like `RegionExtractionPseudoModel),
+    second model should be of object detection type.
+    """
+
+    def __init__(self, model1, model2, *, crop_extent=0, add_model1_results=False):
+        """
+        Constructor.
+
+        Args:
+            model1: PySDK object detection model
+            model2: PySDK object detection model
+            crop_extent: extent of cropping in percent of bbox size
+            add_model1_results: True to add detections of model1 to the combined result
+        """
+
+        if model1.image_backend != model2.image_backend:
+            raise Exception(
+                f"Image backends of both models should be the same, but got {model1.image_backend} and {model2.image_backend}"
+            )
+
+        super().__init__(model1, model2, crop_extent)
+        self._current_result = None
+        self._current_result1 = None
+        self._add_model1_results = add_model1_results
+
+    def transform_result2(self, result2):
+        """
+        Transform result of the second model.
+
+        This implementation combines results of the **second** model over all bboxes detected by the first model,
+        translating bbox coordinates to original image coordinates.
+
+        Args:
+            result2: detection result of the second model
+
+        Returns:
+            Combined results of the **second** model over all bboxes detected by the first model,
+            where bbox coordinates are translated to original image coordinates.
+        """
+
+        result1 = result2.info.result1
+        idx = result2.info.sub_result
+
+        if idx >= 0:
+            # adjust bbox coordinates to original image coordinates
+            x, y = result1.results[idx]["bbox"][:2]
+            for r in result2._inference_results:
+                r["bbox"] = np.add(r["bbox"], [x, y, x, y]).tolist()
+            if self._add_model1_results:
+                # prepend result from the first model to the combined result if requested
+                result2._inference_results.insert(0, result1.results[idx])
+
+        ret = None
+        if result1 is self._current_result1:
+            # frame continues: append second model results to the combined result
+            if self._current_result is not None and idx >= 0:
+                self._current_result._inference_results.extend(
+                    result2._inference_results
+                )
+
+        else:
+            # new frame comes
+            if self._current_result is not None:
+                # patch combined result image to be original image
+                self._current_result._input_image = result1.image
+                # return combined result of previous frame
+                ret = self._current_result
+
+            self._current_result = result2
+            self._current_result1 = result1
+
+        return ret
+
+    def predict_batch(self, data):
+        """
+        Perform whole inference lifecycle for all objects in given iterator object (for example, `list`).
+
+        Args:
+            data (iterator): Inference input data iterator object such as list or generator function.
+            Each element returned by this iterator should be compatible to that regular PySDK model
+            accepts
+
+        Returns:
+            Generator object which iterates over combined inference result objects.
+            This allows you directly using the result in `for` loops.
+        """
+        for result in super().predict_batch(data):
+            yield result
+        if self._current_result is not None:
+            yield self._current_result
+
+
+class RegionExtractionPseudoModel(ModelLike):
+    """
+    Pseudo model class which extracts regions from given image according to given ROI boxes.
+    """
+
+    def __init__(
+        self,
+        roi_list: list,
+        model2: dg.model.Model,
+        *,
+        motion_detect: Union[bool, int] = False,
+    ):
+        """
+        Constructor.
+
+        Args:
+            roi_list: list of ROI boxes in [x1, y1, x2, y2] format
+            model2: model, which will be used as a second step of the compound model pipeline
+            motion_detect: True or non-zero int to enable motion detection.
+                When enabled, ROI boxes where motion is not detected will be skipped.
+                When `motion_detect` is integer, it specifies how many frames to look back
+                to detect motion. When `motion_detect` is boolean, it is equivalent to
+                `motion_detect=1` (look back one frame).
+        """
+        self._roi_list = roi_list
+        self._model2 = model2
+        self._base_img: list = []  # base image for motion detection
+        self._motion_detect = motion_detect
+
+    # fallback all model-like attributes to the second model
+    def __getattr__(self, attr):
+        return getattr(self._model2, attr)
+
+    def predict_batch(self, data):
+        """
+        Perform whole inference lifecycle for all objects in given iterator object (for example, `list`).
+
+        Args:
+            data (iterator): Inference input data iterator object such as list or generator function.
+            Each element returned by this iterator should be compatible to that regular PySDK model
+            accepts
+
+        Returns:
+            Generator object which iterates over combined inference result objects.
+            This allows you directly using the result in `for` loops.
+        """
+
+        preprocessor = dg._preprocessor.create_image_preprocessor(
+            self._model2.model_info,  # we do copy here to avoid modifying original model parameters
+            image_backend=self._model2.image_backend,
+            pad_method="",  # to disable resizing/padding
+        )
+        preprocessor.image_format = "RAW"  # to avoid unnecessary JPEG encoding
+
+        all_rois = [True] * len(self._roi_list)
+
+        for element in data:
+            # extract frame and frame info from data
+            if isinstance(element, tuple):
+                # if data is tuple, we treat first element as frame data and second element as frame info
+                frame, frame_info = element
+            else:
+                # otherwise we treat data as frame data and if it is string, we set frame info equal to frame data
+                frame, frame_info = element, element if isinstance(element, str) else ""
+
+            # do pre-processing
+            preprocessed_data = preprocessor.forward(frame)
+
+            image = preprocessed_data["image_input"]
+
+            if self._motion_detect:
+                motion_img, base_img = detect_motion(
+                    self._base_img[0] if self._base_img else None, image
+                )
+                self._base_img.append(base_img)
+                if len(self._base_img) > int(self._motion_detect):
+                    self._base_img.pop(0)
+
+                if motion_img is None:
+                    motion_detected = all_rois
+                else:
+                    motion_detected = [
+                        cv2.countNonZero(motion_img[roi[1] : roi[3], roi[0] : roi[2]])
+                        > 0
+                        for roi in self._roi_list
+                    ]
+            else:
+                motion_detected = all_rois
+
+            roi_list = [
+                {"bbox": roi, "label": "ROI", "score": idx, "category_id": idx}
+                for idx, roi in enumerate(self._roi_list)
+                if motion_detected[idx]
+            ]
+
+            # generate pseudo inference results
+            result = dg.postprocessor.DetectionResults(
+                model_params=self._model2._model_parameters,
+                input_image=image,
+                model_image=image,
+                inference_results=roi_list,
+                draw_color=self._model2.overlay_color,
+                line_width=self._model2.overlay_line_width,
+                show_labels=self._model2.overlay_show_labels,
+                show_probabilities=self._model2.overlay_show_probabilities,
+                alpha=self._model2.overlay_alpha,
+                font_scale=self._model2.overlay_font_scale,
+                fill_color=self._model2.input_letterbox_fill_color,
+                frame_info=frame_info,
+                conversion=lambda x, y: (x, y),
+                label_dictionary=self._model2.label_dictionary,
+            )
+            yield result
