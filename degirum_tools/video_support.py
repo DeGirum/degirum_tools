@@ -96,7 +96,7 @@ class VideoWriter:
     H264 mp4 video stream writer class
     """
 
-    def __init__(self, fname: str, w: int, h: int, fps: int = 30):
+    def __init__(self, fname: str, w: int, h: int, fps: float = 30.0):
         """Create, open, and return video stream writer
 
         Args:
@@ -167,7 +167,7 @@ class VideoWriter:
         return self._count
 
 
-def create_video_writer(fname: str, w: int, h: int, fps: int = 30) -> VideoWriter:
+def create_video_writer(fname: str, w: int, h: int, fps: float = 30.0) -> VideoWriter:
     """Create, open, and return OpenCV video stream writer
 
     fname - filename to save video
@@ -184,7 +184,7 @@ def create_video_writer(fname: str, w: int, h: int, fps: int = 30) -> VideoWrite
 
 @contextmanager
 def open_video_writer(
-    fname: str, w: int, h: int, fps: int = 30
+    fname: str, w: int, h: int, fps: float = 30.0
 ) -> Generator[VideoWriter, None, None]:
     """Create, open, and yield OpenCV video stream writer; release on exit
 
