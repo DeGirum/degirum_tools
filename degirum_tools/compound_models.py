@@ -333,12 +333,9 @@ class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
             classification results of the second model.
         """
 
-        result1 = (
-            result2.info.result1
-        )  # result2.info stores the result of the first model
-
-        # find result in the first model's result list, which corresponds to the second model's input image
+        result1 = result2.info.result1
         idx = result2.info.sub_result
+
         if idx >= 0:
             # patch bbox label with recognized class label
             label = (
@@ -429,12 +426,9 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
             where bbox coordinates are translated to original image coordinates.
         """
 
-        result1 = (
-            result2.info.result1
-        )  # result2.info stores the result of the first model
-
-        # find result in the first model's result list, which corresponds to the second model's input image
+        result1 = result2.info.result1
         idx = result2.info.sub_result
+
         if idx >= 0:
             # adjust bbox coordinates to original image coordinates
             x, y = result1.results[idx]["bbox"][:2]
