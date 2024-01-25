@@ -209,7 +209,7 @@ class CroppingCompoundModel(CompoundModelBase):
     Restriction: first model should be of object detection type.
     """
 
-    def __init__(self, model1, model2, crop_extent=0):
+    def __init__(self, model1, model2, crop_extent=0, keep_aspect_ratio=False):
         """
         Constructor.
 
@@ -217,10 +217,12 @@ class CroppingCompoundModel(CompoundModelBase):
             model1: PySDK object detection model
             model2: PySDK classification model
             crop_extent: extent of cropping in percent of bbox size
+            keep_aspect_ratio: preserve model2's input aspect ratio when applying extending crop
         """
 
         super().__init__(model1, model2)
         self._crop_extent = crop_extent
+        self._keep_aspect_ratio = keep_aspect_ratio
 
     def queue_result1(self, result1):
         """
@@ -280,10 +282,22 @@ class CroppingCompoundModel(CompoundModelBase):
             bbox: bbox coordinates in [x1, y1, x2, y2] format
             image_size: image size in (width, height) format
         """
-        scale = self._crop_extent * 0.01 * 0.5
+        bbox_w, bbox_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        if self._keep_aspect_ratio:
+            expansion_factor = np.power(self._crop_extent * 0.01 + 1, 2)
+            aspect_ratio = self.model2.model_info.InputW[0] / self.model2.model_info.InputH[0]
+            new_bbox_h = np.sqrt(bbox_w * bbox_h * expansion_factor / aspect_ratio)
+            new_bbox_h = max(new_bbox_h, bbox_h)
+            new_bbox_w = new_bbox_h * aspect_ratio
+            new_bbox_w = max(new_bbox_w, bbox_w)
+            new_bbox_h = new_bbox_w / aspect_ratio
+            dx = max((new_bbox_w - bbox_w) / 2, 0)
+            dy = max((new_bbox_h - bbox_h) / 2, 0)
+        else:
+            scale = self._crop_extent * 0.01 * 0.5
+            dx = bbox_w * scale
+            dy = bbox_h * scale
         maxval = [image_size[0], image_size[1], image_size[0], image_size[1]]
-        dx = (bbox[2] - bbox[0]) * scale
-        dy = (bbox[3] - bbox[1]) * scale
         adjust = [-dx, -dy, dx, dy]
         return [min(maxval[i], max(0, round(bbox[i] + adjust[i]))) for i in range(4)]
 
@@ -300,7 +314,7 @@ class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
     second model should be of classification type.
     """
 
-    def __init__(self, model1, model2, crop_extent=0):
+    def __init__(self, model1, model2, crop_extent=0, keep_aspect_ratio=False):
         """
         Constructor.
 
@@ -315,7 +329,7 @@ class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
                 f"Image backends of both models should be the same, but got {model1.image_backend} and {model2.image_backend}"
             )
 
-        super().__init__(model1, model2, crop_extent)
+        super().__init__(model1, model2, crop_extent, keep_aspect_ratio)
         self._current_result = None
 
     def transform_result2(self, result2):
@@ -390,7 +404,7 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
     second model should be of object detection type.
     """
 
-    def __init__(self, model1, model2, *, crop_extent=0, add_model1_results=False):
+    def __init__(self, model1, model2, *, crop_extent=0, add_model1_results=False, keep_aspect_ratio=False):
         """
         Constructor.
 
@@ -406,7 +420,7 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
                 f"Image backends of both models should be the same, but got {model1.image_backend} and {model2.image_backend}"
             )
 
-        super().__init__(model1, model2, crop_extent)
+        super().__init__(model1, model2, crop_extent, keep_aspect_ratio)
         self._current_result = None
         self._current_result1 = None
         self._add_model1_results = add_model1_results
