@@ -226,7 +226,7 @@ def nms(
     bboxes = np.empty((n_results, 4), dtype=np.float64)
     scores = np.empty(n_results, dtype=np.float64)
     classes = np.empty(n_results, dtype=np.int32)
-    unique_ids = {}
+    unique_ids: dict = {}
 
     try:
         for i, r in enumerate(result_list):
