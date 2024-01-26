@@ -127,6 +127,129 @@ def box_iou_batch(boxes_true: np.ndarray, boxes_detection: np.ndarray) -> np.nda
     return area_inter / (area_true[:, None] + area_detection - area_inter)
 
 
+def _nms_custom(
+    bboxes: np.ndarray,
+    scores: np.ndarray,
+    classes: np.ndarray,
+    iou_threshold: float,
+    use_iou: bool,
+    merge_boxes: bool,
+    max_wh: int,
+):
+    """
+    Perform non-maximum suppression on a set of detections.
+
+    Args:
+        bboxes (np.ndarray): 2D `np.ndarray` representing bboxes in (x1, y1, x2, y2) format
+        scores (np.ndarray): 1D `np.ndarray` representing confidence scores of detections
+        classes (np.ndarray): 1D `np.ndarray` representing class IDs
+        iou_threshold (float): IoU/IoS threshold used for detecting overlapping boxes.
+        use_iou (bool): If True, IoU is used for detecting overlapping boxes. Otherwise, IoS is used.
+        merge_boxes (bool): If True, boxes are merged into one bounding box by averaging their coordinates.
+            Otherwise, boxes are discarded.
+        max_wh (int): Maximum width/height of an image. Used for category separation.
+
+    Returns:
+        np.ndarray: An array of indices of detections that have survived non-maximum suppression.
+        If `merge_boxes` is True, the `bboxes` array is modified in-place with merged boxes.
+
+    """
+
+    # adjust bboxes by class offset so bboxes of different classes would never overlap
+    class_offsets = classes * float(max_wh)
+    bboxes[:, 0:4] += class_offsets[:, None]
+
+    x1 = bboxes[:, 0]
+    y1 = bboxes[:, 1]
+    x2 = bboxes[:, 2]
+    y2 = bboxes[:, 3]
+
+    areas = (x2 - x1 + 1) * (y2 - y1 + 1)
+    order = scores.argsort()  # sort boxes by IoUs in ascending order
+
+    keep = []
+    while order.size > 0:
+        i = order[-1]  # pick maximum IoU box
+        keep.append(i)
+
+        xx1 = np.maximum(x1[i], x1[order])
+        yy1 = np.maximum(y1[i], y1[order])
+        xx2 = np.minimum(x2[i], x2[order])
+        yy2 = np.minimum(y2[i], y2[order])
+
+        w = np.maximum(0.0, xx2 - xx1 + 1)  # maximum width
+        h = np.maximum(0.0, yy2 - yy1 + 1)  # maximum height
+
+        inter = w * h
+        if use_iou:
+            overlap = inter / (areas[i] + areas[order] - inter)
+        else:  # use IoS
+            overlap = inter / np.minimum(areas[i], areas[order])
+
+        if merge_boxes:
+            sel = order[overlap > iou_threshold]
+            bboxes[i] = (
+                np.average(bboxes[sel], axis=0, weights=scores[sel]) - class_offsets[i]
+            )
+
+        order = order[overlap <= iou_threshold]
+
+    return keep
+
+
+def nms(
+    detections,
+    iou_threshold: float = 0.3,
+    use_iou: bool = True,
+    merge_boxes: bool = False,
+    max_wh: int = 10000,
+):
+    """
+    Perform non-maximum suppression on a set of detections.
+
+    Args:
+        detections (InferenceResults): PySDK inference result object
+        iou_threshold (float): IoU/IoS threshold used for detecting overlapping boxes.
+        use_iou (bool): If True, IoU is used for detecting overlapping boxes. Otherwise, IoS is used.
+        merge_boxes (bool): If True, boxes are merged into one bounding box by averaging their coordinates.
+            Otherwise, boxes are discarded.
+        max_wh (int): Maximum width/height of an image. Used for category separation.
+
+
+    `detections` will be updated with objects, which survived non-maximum suppression.
+    If `merge_boxes` is True, the survived object boxes are modified in-place with merged box coordinates.
+
+    """
+
+    result_list = detections._inference_results
+    try:
+        classes = np.array([r["category_id"] for r in result_list], dtype=np.int32)
+        bboxes = np.array([r["bbox"] for r in result_list], dtype=np.float64)
+        scores = np.array([r["score"] for r in result_list], dtype=np.float64)
+
+    except KeyError as e:
+        raise Exception(
+            "Detections must be a list of dicts with 'bbox', 'score' and 'category_id' keys"
+        ) from e
+
+    if use_iou and not merge_boxes:
+        import cv2
+
+        # use fast OpenCV implementation when possible
+        bboxes[:, 2:4] = bboxes[:, 2:4] - bboxes[:, 0:2]  # TLBR to TLWH
+        keep = cv2.dnn.NMSBoxesBatched(bboxes, scores, classes, 0, iou_threshold)  # type: ignore[arg-type]
+    else:
+        keep = _nms_custom(
+            bboxes, scores, classes, iou_threshold, use_iou, merge_boxes, max_wh
+        )
+
+        if merge_boxes:
+            for i in keep:
+                result_list[i]["bbox"] = list(bboxes[i])
+
+    detections._inference_results = [result_list[i] for i in keep]
+
+
 class AnchorPoint(Enum):
     """Position of a point of interest within the bounding box"""
 
