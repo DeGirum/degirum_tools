@@ -222,11 +222,17 @@ def nms(
     """
 
     result_list = detections._inference_results
-    try:
-        classes = np.array([r["category_id"] for r in result_list], dtype=np.int32)
-        bboxes = np.array([r["bbox"] for r in result_list], dtype=np.float64)
-        scores = np.array([r["score"] for r in result_list], dtype=np.float64)
+    n_results = len(result_list)
+    bboxes = np.empty((n_results, 4), dtype=np.float64)
+    scores = np.empty(n_results, dtype=np.float64)
+    classes = np.empty(n_results, dtype=np.int32)
+    unique_ids = {}
 
+    try:
+        for i, r in enumerate(result_list):
+            bboxes[i] = r["bbox"]
+            scores[i] = r["score"]
+            classes[i] = unique_ids.setdefault(r["label"], len(unique_ids))
     except KeyError as e:
         raise Exception(
             "Detections must be a list of dicts with 'bbox', 'score' and 'category_id' keys"
@@ -245,7 +251,7 @@ def nms(
 
         if merge_boxes:
             for i in keep:
-                result_list[i]["bbox"] = list(bboxes[i])
+                result_list[i]["bbox"] = bboxes[i].tolist()
 
     detections._inference_results = [result_list[i] for i in keep]
 
