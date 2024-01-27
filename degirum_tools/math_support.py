@@ -350,3 +350,93 @@ def intersect(a, b, c, d) -> bool:
     if np.sign(s) == np.sign(t):
         return False
     return True
+
+
+def _generate_tiles_core(
+    tile_size: np.ndarray, tiles_cnt: np.ndarray, image_size: np.ndarray
+):
+    overlaps = 1.0 - (image_size - tile_size) / (
+        np.maximum(1, (tiles_cnt - 1)) * tile_size
+    )
+
+    tile_inds = np.array(
+        np.meshgrid(np.arange(tiles_cnt[0]), np.arange(tiles_cnt[1]), indexing="ij")
+    ).T.reshape(-1, 2)
+    top_left = np.floor(tile_inds * tile_size * (1 - overlaps))
+    return np.column_stack((top_left, top_left + tile_size))
+
+
+def _tiles_count(
+    tile_size: np.ndarray, image_size: np.ndarray, min_overlap_percent: np.ndarray
+):
+    return 1 + np.ceil(
+        (image_size - tile_size) / (tile_size * (1.0 - 0.01 * min_overlap_percent))
+    ).astype(np.int32)
+
+
+def generate_tiles_fixed_size(
+    tile_size: np.ndarray, image_size: np.ndarray, min_overlap_percent: np.ndarray
+):
+    """
+    Generate a set of rectangular boxes (tiles) of given fixed size
+    covering given rectangular area (image) with given overlap.
+
+    Args:
+        tile_size: desired tile size (width,height)
+        image_size: image size (width,height)
+        min_overlap_percent: minimum overlaps between tiles in percent (x_overlap,y_overlap)
+
+    Returns:
+        np.ndarray: array of tile coordinates in format (x0, y0, x1, y1)
+    """
+
+    return _generate_tiles_core(
+        tile_size, _tiles_count(tile_size, image_size, min_overlap_percent), image_size
+    )
+
+
+def generate_tiles_fixed_ratio(
+    tile_aspect_ratio: float,
+    grid_size: np.ndarray,
+    image_size: np.ndarray,
+    min_overlap_percent: np.ndarray,
+):
+    """
+    Generate a set of rectangular boxes (tiles) of given fixed size
+    covering given rectangular area (image) with given overlap.
+
+    Args:
+        tile_aspect_ratio: desired tile aspect ratio width/height
+        grid_size: desired number of tiles in each direction (column,rows);
+            only one of the values (which is non-zero) is used to compute the other one
+        image_size: image size (width,height)
+        min_overlap_percent: minimum overlaps between tiles in percent (x_overlap,y_overlap)
+
+    Returns:
+        np.ndarray: array of tile coordinates in format (x0, y0, x1, y1)
+    """
+
+    def get_tile_dimension(dim):
+        return np.round(
+            image_size[dim]
+            / (1 + (grid_size[dim] - 1) * (1.0 - 0.01 * min_overlap_percent[dim]))
+        )
+
+    tile_size = np.zeros(2)
+    if grid_size[0] != 0:
+        tile_size[0] = get_tile_dimension(0)
+        tile_size[1] = np.round(tile_size[0] / tile_aspect_ratio)
+        grid_size[1:] = _tiles_count(
+            tile_size[1:], image_size[1:], min_overlap_percent[1:]
+        )
+
+    elif grid_size[1] != 0:
+        tile_size[1] = get_tile_dimension(1)
+        tile_size[0] = np.round(tile_size[1] * tile_aspect_ratio)
+        grid_size[:1] = _tiles_count(
+            tile_size[:1], image_size[:1], min_overlap_percent[:1]
+        )
+    else:
+        raise ValueError("At least one of grid_size values must be non-zero")
+
+    return _generate_tiles_core(tile_size, grid_size, image_size)
