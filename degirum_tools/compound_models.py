@@ -10,8 +10,30 @@
 import queue, cv2, numpy as np, degirum as dg
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Union, Optional
 from .image_tools import detect_motion
-from typing import Union
+from .math_support import nms
+
+
+@dataclass
+class NmsOptions:
+    """
+    Options for non-maximum suppression (NMS) algorithm.
+    """
+
+    threshold: float  # IoU or IoS threshold for box clustering [0..1]
+    use_iou: bool = True  # use IoU for box clustering (otherwise use IoS)
+    merge_boxes: bool = False  # merge cluster boxes by score-weighted average
+
+
+@dataclass
+class MotionDetectOptions:
+    """
+    Options for motion detection algorithm.
+    """
+
+    threshold: float  # threshold for motion detection [0..1]: fraction of changed pixels in respect to frame size
+    look_back: int = 1  # number of frames to look back to detect motion
 
 
 class ModelLike(ABC):
@@ -390,7 +412,15 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
     second model should be of object detection type.
     """
 
-    def __init__(self, model1, model2, *, crop_extent=0, add_model1_results=False):
+    def __init__(
+        self,
+        model1,
+        model2,
+        *,
+        crop_extent=0,
+        add_model1_results=False,
+        nms_options: Optional[NmsOptions] = None,
+    ):
         """
         Constructor.
 
@@ -407,9 +437,10 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
             )
 
         super().__init__(model1, model2, crop_extent)
-        self._current_result = None
-        self._current_result1 = None
+        self._current_result: Optional[dg.postprocessor.InferenceResults] = None
+        self._current_result1: Optional[dg.postprocessor.InferenceResults] = None
         self._add_model1_results = add_model1_results
+        self._nms_options: Optional[NmsOptions] = nms_options
 
     def transform_result2(self, result2):
         """
@@ -451,6 +482,16 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
             if self._current_result is not None:
                 # patch combined result image to be original image
                 self._current_result._input_image = result1.image
+
+                if self._nms_options is not None:
+                    # apply NMS to combined result
+                    nms(
+                        self._current_result,
+                        iou_threshold=self._nms_options.threshold,
+                        use_iou=self._nms_options.use_iou,
+                        merge_boxes=self._nms_options.merge_boxes,
+                    )
+
                 # return combined result of previous frame
                 ret = self._current_result
 
@@ -485,10 +526,10 @@ class RegionExtractionPseudoModel(ModelLike):
 
     def __init__(
         self,
-        roi_list: list,
+        roi_list: Union[list, np.ndarray],
         model2: dg.model.Model,
         *,
-        motion_detect: Union[bool, int] = False,
+        motion_detect: Optional[MotionDetectOptions] = None,
     ):
         """
         Constructor.
@@ -496,11 +537,9 @@ class RegionExtractionPseudoModel(ModelLike):
         Args:
             roi_list: list of ROI boxes in [x1, y1, x2, y2] format
             model2: model, which will be used as a second step of the compound model pipeline
-            motion_detect: True or non-zero int to enable motion detection.
+            motion_detect: motion detection options.
+                When None, motion detection is disabled.
                 When enabled, ROI boxes where motion is not detected will be skipped.
-                When `motion_detect` is integer, it specifies how many frames to look back
-                to detect motion. When `motion_detect` is boolean, it is equivalent to
-                `motion_detect=1` (look back one frame).
         """
         self._roi_list = roi_list
         self._model2 = model2
@@ -548,12 +587,12 @@ class RegionExtractionPseudoModel(ModelLike):
 
             image = preprocessed_data["image_input"]
 
-            if self._motion_detect:
+            if self._motion_detect is not None:
                 motion_img, base_img = detect_motion(
                     self._base_img[0] if self._base_img else None, image
                 )
                 self._base_img.append(base_img)
-                if len(self._base_img) > int(self._motion_detect):
+                if len(self._base_img) > int(self._motion_detect.look_back):
                     self._base_img.pop(0)
 
                 if motion_img is None:
@@ -561,7 +600,9 @@ class RegionExtractionPseudoModel(ModelLike):
                 else:
                     motion_detected = [
                         cv2.countNonZero(motion_img[roi[1] : roi[3], roi[0] : roi[2]])
-                        > 0
+                        > self._motion_detect.threshold
+                        * (roi[2] - roi[0])
+                        * (roi[3] - roi[1])
                         for roi in self._roi_list
                     ]
             else:

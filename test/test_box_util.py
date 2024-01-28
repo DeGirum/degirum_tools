@@ -103,31 +103,19 @@ def test_generate_tiles():
     from degirum_tools import generate_tiles_fixed_size, generate_tiles_fixed_ratio
 
     # single tile
-    assert generate_tiles_fixed_size(
-        np.array([200, 150]), np.array([200, 150]), np.array([0, 0])
-    ).shape == (1, 4)
+    assert generate_tiles_fixed_size([200, 150], [200, 150], [0, 0]).shape == (1, 4)
 
     # 4x2 tiles, zero overlap
-    assert generate_tiles_fixed_size(
-        np.array([200, 150]), np.array([800, 300]), np.array([0, 0])
-    ).shape == (8, 4)
+    assert generate_tiles_fixed_size([200, 150], [800, 300], [0, 0]).shape == (8, 4)
 
     # 5x3 tiles, some overlap
-    assert generate_tiles_fixed_size(
-        np.array([200, 150]), np.array([800, 300]), np.array([10, 20])
-    ).shape == (15, 4)
+    assert generate_tiles_fixed_size([200, 150], [800, 300], [10, 20]).shape == (15, 4)
 
     # single tile
-    assert generate_tiles_fixed_ratio(
-        2.0, np.array([1, 0]), np.array([200, 100]), np.array([0, 0])
-    ).shape == (1, 4)
+    assert generate_tiles_fixed_ratio(2.0, [1, 0], [200, 100], 0).shape == (1, 4)
 
     # 2x2 tiles
-    assert generate_tiles_fixed_ratio(
-        0.5, np.array([2, 0]), np.array([200, 300]), np.array([10, 20])
-    ).shape == (4, 4)
+    assert generate_tiles_fixed_ratio(0.5, [2, 0], [200, 300], [10, 20]).shape == (4, 4)
 
     # 3x3 tiles
-    assert generate_tiles_fixed_ratio(
-        1.5, np.array([0, 3]), np.array([600, 400]), np.array([0, 10])
-    ).shape == (9, 4)
+    assert generate_tiles_fixed_ratio(1.5, [0, 3], [600, 400], 10).shape == (12, 4)

@@ -29,7 +29,7 @@
 
 import numpy as np
 from enum import Enum
-from typing import Union
+from typing import Union, Sequence
 
 
 def area(box: np.ndarray) -> np.ndarray:
@@ -363,7 +363,7 @@ def _generate_tiles_core(
         np.meshgrid(np.arange(tiles_cnt[0]), np.arange(tiles_cnt[1]), indexing="ij")
     ).T.reshape(-1, 2)
     top_left = np.floor(tile_inds * tile_size * (1 - overlaps))
-    return np.column_stack((top_left, top_left + tile_size))
+    return np.column_stack((top_left, top_left + tile_size)).astype(np.int32)
 
 
 def _tiles_count(
@@ -375,7 +375,9 @@ def _tiles_count(
 
 
 def generate_tiles_fixed_size(
-    tile_size: np.ndarray, image_size: np.ndarray, min_overlap_percent: np.ndarray
+    tile_size: Union[np.ndarray, Sequence],
+    image_size: Union[np.ndarray, Sequence],
+    min_overlap_percent: Union[np.ndarray, Sequence],
 ):
     """
     Generate a set of rectangular boxes (tiles) of given fixed size
@@ -390,23 +392,33 @@ def generate_tiles_fixed_size(
         np.ndarray: array of tile coordinates in format (x0, y0, x1, y1)
     """
 
+    if not isinstance(tile_size, np.ndarray):
+        tile_size = np.array(tile_size)
+    if not isinstance(image_size, np.ndarray):
+        image_size = np.array(image_size)
+    if not isinstance(min_overlap_percent, np.ndarray):
+        min_overlap_percent = np.array(min_overlap_percent)
+    if min_overlap_percent.size < 2:
+        min_overlap_percent = np.repeat(min_overlap_percent, 2)
+
     return _generate_tiles_core(
         tile_size, _tiles_count(tile_size, image_size, min_overlap_percent), image_size
     )
 
 
 def generate_tiles_fixed_ratio(
-    tile_aspect_ratio: float,
-    grid_size: np.ndarray,
-    image_size: np.ndarray,
-    min_overlap_percent: np.ndarray,
+    tile_aspect_ratio: Union[float, np.ndarray, Sequence],
+    grid_size: Union[np.ndarray, Sequence],
+    image_size: Union[np.ndarray, Sequence],
+    min_overlap_percent: Union[np.ndarray, Sequence],
 ):
     """
     Generate a set of rectangular boxes (tiles) of given fixed size
     covering given rectangular area (image) with given overlap.
 
     Args:
-        tile_aspect_ratio: desired tile aspect ratio width/height
+        tile_aspect_ratio: desired tile aspect ratio,
+            it can be number width/height or 2-element sequence [width,height]
         grid_size: desired number of tiles in each direction (column,rows);
             only one of the values (which is non-zero) is used to compute the other one
         image_size: image size (width,height)
@@ -415,6 +427,18 @@ def generate_tiles_fixed_ratio(
     Returns:
         np.ndarray: array of tile coordinates in format (x0, y0, x1, y1)
     """
+
+    if not isinstance(grid_size, np.ndarray):
+        grid_size = np.array(grid_size)
+    if not isinstance(image_size, np.ndarray):
+        image_size = np.array(image_size)
+    if not isinstance(min_overlap_percent, np.ndarray):
+        min_overlap_percent = np.array(min_overlap_percent)
+    if min_overlap_percent.size < 2:
+        min_overlap_percent = np.repeat(min_overlap_percent, 2)
+
+    if not isinstance(tile_aspect_ratio, float):
+        tile_aspect_ratio = tile_aspect_ratio[0] / tile_aspect_ratio[1]
 
     def get_tile_dimension(dim):
         return np.round(
