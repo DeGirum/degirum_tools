@@ -62,6 +62,33 @@ def open_video_stream(
         stream.release()
 
 
+def get_video_stream_properties(
+    video_source: Union[int, str, Path, None, cv2.VideoCapture]
+) -> tuple:
+    """
+    Get video stream properties
+
+    Args:
+        video_source - VideoCapture object or argument of open_video_stream() function
+
+    Returns:
+        tuple of (width, height, fps)
+    """
+
+    def get_props(stream: cv2.VideoCapture) -> tuple:
+        return (
+            int(stream.get(cv2.CAP_PROP_FRAME_WIDTH)),
+            int(stream.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+            stream.get(cv2.CAP_PROP_FPS),
+        )
+
+    if isinstance(video_source, cv2.VideoCapture):
+        return get_props(video_source)
+    else:
+        with open_video_stream(video_source) as stream:
+            return get_props(stream)
+
+
 def video_source(stream: cv2.VideoCapture) -> Generator[np.ndarray, None, None]:
     """Generator function, which returns video frames captured from given video stream.
     Useful to pass to model batch_predict().

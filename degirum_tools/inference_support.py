@@ -13,7 +13,12 @@ from contextlib import ExitStack
 from pathlib import Path
 from typing import Union, List
 from dataclasses import dataclass
-from .video_support import open_video_stream, video_source, open_video_writer
+from .video_support import (
+    open_video_stream,
+    get_video_stream_properties,
+    video_source,
+    open_video_writer,
+)
 from .ui_support import Progress, Display, Timer
 from .result_analyzer_base import ResultAnalyzerBase
 from . import environment as env
@@ -122,7 +127,7 @@ def predict_stream(
 
 def annotate_video(
     model: dg.model.Model,
-    video_source_id: Union[int, str, Path, None],
+    video_source_id: Union[int, str, Path, None, cv2.VideoCapture],
     output_video_path: str,
     *,
     show_progress: bool = True,
@@ -134,6 +139,7 @@ def annotate_video(
     Args:
         model - model to run
         video_source_id - identifier of input video stream. It can be:
+        - cv2.VideoCapture object, already opened by open_video_stream()
         - 0-based index for local cameras
         - IP camera URL in the format "rtsp://<user>:<password>@<ip or hostname>",
         - local path or URL to mp4 video file,
@@ -162,10 +168,12 @@ def annotate_video(
         if visual_display:
             display = stack.enter_context(Display(win_name))
 
-        stream = stack.enter_context(open_video_stream(video_source_id))
-        w = int(stream.get(cv2.CAP_PROP_FRAME_WIDTH))
-        h = int(stream.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        fps = stream.get(cv2.CAP_PROP_FPS)
+        if isinstance(video_source_id, cv2.VideoCapture):
+            stream = video_source_id
+        else:
+            stream = stack.enter_context(open_video_stream(video_source_id))
+
+        w, h, fps = get_video_stream_properties(stream)
 
         writer = stack.enter_context(
             open_video_writer(str(output_video_path), w, h, fps)
