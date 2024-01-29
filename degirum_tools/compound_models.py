@@ -609,7 +609,7 @@ class RegionExtractionPseudoModel(ModelLike):
                 motion_detected = all_rois
 
             roi_list = [
-                {"bbox": roi, "label": "ROI", "score": idx, "category_id": idx}
+                {"bbox": roi, "label": f"ROI{idx}", "score": 1.0, "category_id": idx}
                 for idx, roi in enumerate(self._roi_list)
                 if motion_detected[idx]
             ]
