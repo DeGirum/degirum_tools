@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Union, Optional
 from .image_tools import detect_motion
-from .math_support import nms
+from .math_support import nms, NmsBoxSelectionPolicy
 
 
 @dataclass
@@ -23,7 +23,7 @@ class NmsOptions:
 
     threshold: float  # IoU or IoS threshold for box clustering [0..1]
     use_iou: bool = True  # use IoU for box clustering (otherwise use IoS)
-    merge_boxes: bool = False  # merge cluster boxes by score-weighted average
+    box_select: NmsBoxSelectionPolicy = NmsBoxSelectionPolicy.MOST_PROBABLE
 
 
 @dataclass
@@ -489,7 +489,7 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
                         self._current_result,
                         iou_threshold=self._nms_options.threshold,
                         use_iou=self._nms_options.use_iou,
-                        merge_boxes=self._nms_options.merge_boxes,
+                        box_select=self._nms_options.box_select,
                     )
 
                 # return combined result of previous frame

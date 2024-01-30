@@ -20,7 +20,7 @@ def test_intersection():
 
 
 def test_nms():
-    from degirum_tools import nms
+    from degirum_tools import nms, NmsBoxSelectionPolicy
     import degirum as dg
     from copy import deepcopy
 
@@ -28,11 +28,17 @@ def test_nms():
         {"bbox": [0, 0, 10, 10], "score": 0.8, "label": ""},
         {"bbox": [10, 10, 20, 20], "score": 0.7, "label": ""},
         {"bbox": [20, 20, 29, 30], "score": 0.6, "label": ""},
-        {"bbox": [1, 1, 11, 11], "score": 0.5, "label": ""},
+        {"bbox": [1, 1, 11, 12], "score": 0.5, "label": ""},
         {"bbox": [22, 19, 30, 29], "score": 0.9, "label": ""},
         {"bbox": [21, 0, 28, 10], "score": 0.4, "label": ""},
         {"bbox": [0, 0, 1, 1], "score": 0.3, "label": ""},
     ]
+
+    def area(res):
+        return np.prod(np.array(res["bbox"][2:]) - np.array(res["bbox"][:2]))
+
+    def bbox_is_in(res, res_list):
+        return any(np.allclose(res["bbox"], r["bbox"]) for r in res_list)
 
     res = dg.postprocessor.InferenceResults(
         model_params=None, inference_results=res_list, conversion=None
@@ -44,7 +50,6 @@ def test_nms():
         res_base,
         iou_threshold=0.3,
         use_iou=True,
-        merge_boxes=False,
     )
     assert len(res_base.results) == 5
 
@@ -54,7 +59,6 @@ def test_nms():
         res_maxthr,
         iou_threshold=1.0,
         use_iou=True,
-        merge_boxes=False,
     )
     assert len(res_maxthr.results) == len(res_list)
 
@@ -64,11 +68,51 @@ def test_nms():
         res_ios,
         iou_threshold=0.3,
         use_iou=False,
-        merge_boxes=False,
     )
     assert len(res_ios.results) == 4
     for i, r in enumerate(res_ios.results):
         assert r == res_base.results[i]
+
+    # test box averaging
+    res_avg = deepcopy(res)
+    nms(
+        res_avg,
+        iou_threshold=0.3,
+        use_iou=True,
+        box_select=NmsBoxSelectionPolicy.AVERAGE,
+    )
+    assert len(res_avg.results) == len(res_base.results)
+    assert (
+        sum(
+            base["bbox"] != avg["bbox"]
+            for base, avg in zip(res_base.results, res_avg.results)
+        )
+        == 2
+    )
+    assert (
+        sum(bbox_is_in(avg, res_list) for avg in res_avg.results)
+        == len(res_avg.results) - 2
+    )
+
+    # test largest box
+    res_largest = deepcopy(res)
+    nms(
+        res_largest,
+        iou_threshold=0.3,
+        use_iou=True,
+        box_select=NmsBoxSelectionPolicy.LARGEST_AREA,
+    )
+    assert len(res_largest.results) == len(res_base.results)
+    assert (
+        sum(
+            area(base) < area(lg)
+            for base, lg in zip(res_base.results, res_largest.results)
+        )
+        == 2
+    )
+    assert sum(bbox_is_in(lg, res_list) for lg in res_largest.results) == len(
+        res_largest.results
+    )
 
     # test merge boxes
     res_merge = deepcopy(res)
@@ -76,13 +120,20 @@ def test_nms():
         res_merge,
         iou_threshold=0.3,
         use_iou=True,
-        merge_boxes=True,
+        box_select=NmsBoxSelectionPolicy.MERGE,
     )
-
-    assert len(res_merge.results) == len(res_base.results)
+    print(res_merge.results)
+    assert len(res_merge.results) == len(res_merge.results)
     assert (
-        sum(base != merge for base, merge in zip(res_base.results, res_merge.results))
+        sum(
+            area(base) < area(merge)
+            for base, merge in zip(res_base.results, res_merge.results)
+        )
         == 2
+    )
+    assert (
+        sum(bbox_is_in(merge, res_list) for merge in res_merge.results)
+        == len(res_merge.results) - 2
     )
 
     # test unique class labels: no suppression
@@ -94,7 +145,6 @@ def test_nms():
         res_unique,
         iou_threshold=0.3,
         use_iou=True,
-        merge_boxes=False,
     )
     assert len(res_unique.results) == len(res_list)
 

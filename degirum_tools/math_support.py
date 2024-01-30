@@ -127,13 +127,22 @@ def box_iou_batch(boxes_true: np.ndarray, boxes_detection: np.ndarray) -> np.nda
     return area_inter / (area_true[:, None] + area_detection - area_inter)
 
 
+class NmsBoxSelectionPolicy(Enum):
+    """Bounding box selection policy for non-maximum suppression"""
+
+    MOST_PROBABLE = 1  # traditional NMS: select box with highest probability
+    LARGEST_AREA = 2  # select box with largest area
+    AVERAGE = 3  # average all boxes in a cluster
+    MERGE = 4  # merge all boxes in a cluster
+
+
 def _nms_custom(
     bboxes: np.ndarray,
     scores: np.ndarray,
     classes: np.ndarray,
     iou_threshold: float,
     use_iou: bool,
-    merge_boxes: bool,
+    box_select: NmsBoxSelectionPolicy,
     max_wh: int,
 ):
     """
@@ -145,13 +154,12 @@ def _nms_custom(
         classes (np.ndarray): 1D `np.ndarray` representing class IDs
         iou_threshold (float): IoU/IoS threshold used for detecting overlapping boxes.
         use_iou (bool): If True, IoU is used for detecting overlapping boxes. Otherwise, IoS is used.
-        merge_boxes (bool): If True, boxes are merged into one bounding box by averaging their coordinates.
-            Otherwise, boxes are discarded.
-        max_wh (int): Maximum width/height of an image. Used for category separation.
+        box_select (NmsBoxSelectionPolicy): bounding box selection policy
+        max_wh (int): maximum width/height of an image. Used for category separation.
 
     Returns:
         np.ndarray: An array of indices of detections that have survived non-maximum suppression.
-        If `merge_boxes` is True, the `bboxes` array is modified in-place with merged boxes.
+        If `box_select` option dictates box coordinates update, the survived object box coordinates are modified in-place
 
     """
 
@@ -186,11 +194,22 @@ def _nms_custom(
         else:  # use IoS
             overlap = inter / np.minimum(areas[i], areas[order])
 
-        if merge_boxes:
+        if box_select == NmsBoxSelectionPolicy.MOST_PROBABLE:
+            pass
+        elif box_select == NmsBoxSelectionPolicy.LARGEST_AREA:
+            sel = order[overlap > iou_threshold]
+            bboxes[i] = bboxes[sel[np.argmax(areas[sel])]] - class_offsets[i]
+        elif box_select == NmsBoxSelectionPolicy.AVERAGE:
             sel = order[overlap > iou_threshold]
             bboxes[i] = (
                 np.average(bboxes[sel], axis=0, weights=scores[sel]) - class_offsets[i]
             )
+        elif box_select == NmsBoxSelectionPolicy.MERGE:
+            sel = order[overlap > iou_threshold]
+            enclosing_rect = np.array(
+                [np.min(x1[sel]), np.min(y1[sel]), np.max(x2[sel]), np.max(y2[sel])]
+            )
+            bboxes[i] = enclosing_rect - class_offsets[i]
 
         order = order[overlap <= iou_threshold]
 
@@ -201,7 +220,7 @@ def nms(
     detections,
     iou_threshold: float = 0.3,
     use_iou: bool = True,
-    merge_boxes: bool = False,
+    box_select: NmsBoxSelectionPolicy = NmsBoxSelectionPolicy.MOST_PROBABLE,
     max_wh: int = 10000,
 ):
     """
@@ -211,13 +230,11 @@ def nms(
         detections (InferenceResults): PySDK inference result object
         iou_threshold (float): IoU/IoS threshold used for detecting overlapping boxes.
         use_iou (bool): If True, IoU is used for detecting overlapping boxes. Otherwise, IoS is used.
-        merge_boxes (bool): If True, boxes are merged into one bounding box by averaging their coordinates.
-            Otherwise, boxes are discarded.
+        box_select (NmsBoxSelectionPolicy): bounding box selection policy
         max_wh (int): Maximum width/height of an image. Used for category separation.
 
-
     `detections` will be updated with objects, which survived non-maximum suppression.
-    If `merge_boxes` is True, the survived object boxes are modified in-place with merged box coordinates.
+    If `box_select` option dictates box coordinates update, the survived object box coordinates are modified in-place
 
     """
 
@@ -238,7 +255,7 @@ def nms(
             "Detections must be a list of dicts with 'bbox', 'score' and 'category_id' keys"
         ) from e
 
-    if use_iou and not merge_boxes:
+    if use_iou and box_select == NmsBoxSelectionPolicy.MOST_PROBABLE:
         import cv2
 
         # use fast OpenCV implementation when possible
@@ -246,10 +263,10 @@ def nms(
         keep = cv2.dnn.NMSBoxesBatched(bboxes, scores, classes, 0, iou_threshold)  # type: ignore[arg-type]
     else:
         keep = _nms_custom(
-            bboxes, scores, classes, iou_threshold, use_iou, merge_boxes, max_wh
+            bboxes, scores, classes, iou_threshold, use_iou, box_select, max_wh
         )
 
-        if merge_boxes:
+        if box_select != NmsBoxSelectionPolicy.MOST_PROBABLE:
             for i in keep:
                 result_list[i]["bbox"] = bboxes[i].tolist()
 
