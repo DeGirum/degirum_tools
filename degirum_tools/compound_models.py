@@ -115,12 +115,13 @@ class ModelLike(ABC):
         return self.predict(data)
 
 
-@dataclass
 class _FrameInfo:
     """Class to hold frame info"""
 
-    result1: dg.postprocessor.InferenceResults  # model 1 result
-    sub_result: int  # sub-result index in model 1 result
+    def __init__(self, result1, sub_result):
+        self.result1 = result1  # model 1 result
+        self.original_info = result1.info  # original frame info
+        self.sub_result = sub_result  # sub-result index in model 1 result
 
 
 class CompoundModelBase(ModelLike):
@@ -193,7 +194,6 @@ class CompoundModelBase(ModelLike):
         """
 
         # use non-blocking mode for nested model and regular mode for the first model
-        self.model1.non_blocking_batch_predict = False
         self.model2.non_blocking_batch_predict = True
 
         # iterator over predictions of nested model
@@ -201,18 +201,24 @@ class CompoundModelBase(ModelLike):
 
         for result1 in self.model1.predict_batch(data):
             # put result of the first model into the queue
-            self.queue_result1(result1)
+            if result1 is not None:
+                self.queue_result1(result1)
 
-            # process all recognized license plates ready so far
+            # process all results ready so far
             while result2 := next(model2_iter):
                 if (transformed_result2 := self.transform_result2(result2)) is not None:
+                    # restore original frame info to support nested compound models
+                    transformed_result2.info = result2.info.original_info
                     yield transformed_result2
 
         self.queue.put(None)  # signal end of queue to nested model
         self.model2.non_blocking_batch_predict = False  # restore blocking mode
-        # process all remaining recognized license plates
+
+        # process all remaining results
         for result2 in model2_iter:
             if (transformed_result2 := self.transform_result2(result2)) is not None:
+                # restore original frame info to support nested compound models
+                transformed_result2.info = result2.info.original_info
                 yield transformed_result2
 
 
