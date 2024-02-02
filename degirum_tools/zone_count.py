@@ -99,6 +99,12 @@ class ZoneCounter(ResultAnalyzerBase):
 
     Updates each element of `result.results[]` list by adding the "in_zone" key containing
     the index of the polygon zone where the corresponding is detected.
+
+    Adds `zone_counts` list of dictionaries to the `result` object - one element per polygon zone.
+    Each dictionary contains the count of objects detected in the corresponding zone. The key is the
+    class name and the value is the count of objects of this class detected in the zone.
+    If the `per_class_display` constructor parameter is False, the dictionary contains only one key "total".
+
     """
 
     def __init__(
@@ -139,14 +145,23 @@ class ZoneCounter(ResultAnalyzerBase):
     def analyze(self, result):
         """
         Detect object bounding boxes in polygon zones.
-        Update each result object `result.results[i]` by adding "in_zone" key to it,
+
+        Updates each result object `result.results[i]` by adding "in_zone" key to it,
         when this object is in a zone and its class belongs to a class list specified
         in a constructor. "in_zone" key value is the index of the zone where this object
         is detected.
 
+        Adds `zone_counts` list of dictionaries to the `result` object - one element per polygon zone.
+        Each dictionary contains the count of objects detected in the corresponding zone. The key is the
+        class name and the value is the count of objects of this class detected in the zone.
+        If the `per_class_display` constructor parameter is False, the dictionary contains only one key "total".
+
+
         Args:
             result: PySDK model result object
         """
+
+        result.zone_counts = [{} for _ in self._polygons]
 
         self._lazy_init(result)
 
@@ -157,9 +172,7 @@ class ZoneCounter(ResultAnalyzerBase):
             return (
                 True
                 if self._class_list is None
-                else obj["label"] in self._class_list
-                if "label" in obj
-                else False
+                else obj["label"] in self._class_list if "label" in obj else False
             )
 
         filtered_results = [
@@ -173,11 +186,16 @@ class ZoneCounter(ResultAnalyzerBase):
 
         for zi, zone in enumerate(self._zones):
             triggers = zone.trigger(bboxes)
-            [
-                obj.update({"in_zone": zi})
-                for obj, flag in zip(filtered_results, triggers)
-                if flag
-            ]
+            zone_counts = result.zone_counts[zi]
+            for obj, flag in zip(filtered_results, triggers):
+                if flag:
+                    obj["in_zone"] = zi
+                    label = (
+                        obj["label"]
+                        if self._per_class_display and "label" in obj
+                        else "total"
+                    )
+                    zone_counts[label] = zone_counts.get(label, 0) + 1
 
     def annotate(self, result, image: np.ndarray) -> np.ndarray:
         """
@@ -194,36 +212,20 @@ class ZoneCounter(ResultAnalyzerBase):
         line_color = color_complement(result.overlay_color)
         text_color = deduce_text_color(line_color)
 
-        npolygons = len(self._polygons)
-
-        # count objects in zones
-        if self._per_class_display and self._class_list is not None:
-            zone_counts = [[0] * len(self._class_list) for i in range(npolygons)]
-            for obj in result.results:
-                if (zi := obj.get("in_zone", -1)) != -1:
-                    try:
-                        zone_counts[zi][self._class_list.index(obj["label"])] += 1
-                    except Exception:
-                        pass  # ignore missing classes/keys
-
-        else:
-            zone_counts = [[0] for i in range(npolygons)]
-            for obj in result.results:
-                if (zi := obj.get("in_zone", -1)) != -1:
-                    zone_counts[zi][0] += 1
-
         # draw annotations
-        for zi in range(npolygons):
+        for zi in range(len(self._polygons)):
             cv2.polylines(
                 image, [self._polygons[zi]], True, line_color, result.overlay_line_width
             )
 
             if self._per_class_display and self._class_list is not None:
                 text = f"Zone {zi}:"
-                for ci, class_name in enumerate(self._class_list):
-                    text += f"\n {class_name}: {zone_counts[zi][ci]}"
+                for class_name in self._class_list:
+                    text += (
+                        f"\n {class_name}: {result.zone_counts[zi].get(class_name, 0)}"
+                    )
             else:
-                text = f"Zone {zi}: {zone_counts[zi][0]}"
+                text = f"Zone {zi}: {result.zone_counts[zi].get('total', 0)}"
 
             put_text(
                 image,
