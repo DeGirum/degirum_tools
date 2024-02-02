@@ -450,12 +450,13 @@ class VideoSaverGizmo(Gizmo):
     def run(self):
         """Run gizmo"""
 
-        get_img = lambda data: (
-            data.meta.image_overlay
-            if self._show_ai_overlay
-            and isinstance(data.meta, dg.postprocessor.InferenceResults)
-            else data.data
-        )
+        def get_img(data):
+            return (
+                data.meta.image_overlay
+                if self._show_ai_overlay
+                and isinstance(data.meta, dg.postprocessor.InferenceResults)
+                else data.data
+            )
 
         img = get_img(self.get_input(0).get())
         with open_video_writer(self._filename, img.shape[1], img.shape[0]) as writer:
