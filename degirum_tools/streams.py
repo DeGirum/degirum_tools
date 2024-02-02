@@ -282,29 +282,24 @@ class Composition:
         if len(self._threads) == 0:
             raise Exception("Composition not started")
 
-        def do_join():
-            if force_stop:
-                # first signal abort to all gizmos
-                for gizmo in self._gizmos:
-                    gizmo.abort()
+        if force_stop:
+            # first signal abort to all gizmos
+            for gizmo in self._gizmos:
+                gizmo.abort()
 
-                # then empty all streams
-                for gizmo in self._gizmos:
-                    for i in gizmo._inputs:
-                        while not i.empty():
-                            try:
-                                i.get_nowait()
-                            except queue.Empty:
-                                break
+            # then empty all streams
+            for gizmo in self._gizmos:
+                for i in gizmo._inputs:
+                    while not i.empty():
+                        try:
+                            i.get_nowait()
+                        except queue.Empty:
+                            break
 
-            # finally wait for completion of all threads
-            for t in self._threads:
+        # finally wait for completion of all threads
+        for t in self._threads:            
+            if t.name != threading.current_thread().name:
                 t.join()
-
-        # do it in a separate thread, because stop() may be called by some gizmo
-        joiner = threading.Thread(target=do_join)
-        joiner.start()
-        joiner.join()
 
         self._threads = []
         print("Composition stopped")
