@@ -37,10 +37,33 @@ class MotionDetectOptions:
     look_back: int = 1  # number of frames to look back to detect motion
 
 
-class CropExtentOption(Enum):
+class CropExtentOptions(Enum):
+    """
+    Options for applying extending crop to the input image.
+    """
+
     ASPECT_RATIO_NO_ADJUSTMENT = 1
+    """
+    Each dimension of the bounding box is extended by 'crop_extent' parameter
+    """
+
     ASPECT_RATIO_ADJUSTMENT_BY_LONG_SIDE = 2
+    """
+    The longer dimension of the bounding box is extended by 'crop_extent' parameter, and the other side is 
+    calculated as new_bbox_h * aspect_ratio (if the longer dimension is the height of the bounding box)
+    or new_bbox_w / aspect_ratio (if the longer dimension is the width of the bounding box),
+    aspect_ratio is defined as the ratio of model2's input width to model2's input height
+    """
+
     ASPECT_RATIO_ADJUSTMENT_BY_AREA = 3
+    """
+    The bounding box is extended by an area factor of ('crop_extent' * 0.01 + 1) ^ 2; the new height
+    is determined from the desired area and aspect ratio, and is adjusted to be at least as long as 
+    the original bounding box height; the new width is calculated as new_bbox_h * aspect_ratio, where
+    aspect_ratio is defined as the ratio of model2's input width to model2's input height,
+    and then adjusted to be at least as long as the original bounding box width; the new
+    height is then adjusted as new_bbox_w / aspect_ratio
+    """
 
 
 class ModelLike(ABC):
@@ -243,7 +266,7 @@ class CroppingCompoundModel(CompoundModelBase):
         model1,
         model2,
         crop_extent=0,
-        crop_extent_option=CropExtentOption.ASPECT_RATIO_NO_ADJUSTMENT,
+        crop_extent_option=CropExtentOptions.ASPECT_RATIO_NO_ADJUSTMENT,
     ):
         """
         Constructor.
@@ -252,24 +275,7 @@ class CroppingCompoundModel(CompoundModelBase):
             model1: PySDK object detection model
             model2: PySDK classification model
             crop_extent: extent of cropping in percent of bbox size
-            crop_extent_option: method of applying extending crop to the input image for model2;
-                can be one of the following:
-                    - CropExtentOption.ASPECT_RATIO_NO_ADJUSTMENT: each dimension of the bounding box
-                      is extended by 'crop_extent'.
-
-                    - CropExtentOption.ASPECT_RATIO_ADJUSTMENT_BY_LONG_SIDE: the longer dimension of the
-                      bounding box is extended by 'crop_extent', and the other side is calculated as
-                      new_bbox_h * aspect_ratio (if the longer dimension is the height of the bounding box)
-                      or new_bbox_w / aspect_ratio (if the longer dimension is the width of the bounding box),
-                      aspect_ratio is defined as the ratio of model2's input width to model2's input height
-
-                    - CropExtentOption.ASPECT_RATIO_ADJUSTMENT_BY_AREA: the bounding box is extended by an
-                      area factor of ('crop_extent' * 0.01 + 1) ^ 2; the new height is determined from the
-                      desired area and aspect ratio, and is adjusted to be at least as long as the original
-                      bounding box height; the new width is calculated as new_bbox_h * aspect_ratio, where
-                      aspect_ratio is defined as the ratio of model2's input width to model2's input height,
-                      and then adjusted to be at least as long as the original bounding box width; the new
-                      height is then adjusted as new_bbox_w / aspect_ratio
+            crop_extent_option: method of applying extending crop to the input image for model2
         """
 
         super().__init__(model1, model2)
@@ -337,14 +343,14 @@ class CroppingCompoundModel(CompoundModelBase):
         """
         bbox_w, bbox_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
 
-        if self._crop_extent_option == CropExtentOption.ASPECT_RATIO_NO_ADJUSTMENT:
+        if self._crop_extent_option == CropExtentOptions.ASPECT_RATIO_NO_ADJUSTMENT:
             scale = self._crop_extent * 0.01 * 0.5
             dx = bbox_w * scale
             dy = bbox_h * scale
 
         elif (
             self._crop_extent_option
-            == CropExtentOption.ASPECT_RATIO_ADJUSTMENT_BY_LONG_SIDE
+            == CropExtentOptions.ASPECT_RATIO_ADJUSTMENT_BY_LONG_SIDE
         ):
             scale = self._crop_extent * 0.01 + 1.0
             aspect_ratio = (
@@ -360,7 +366,8 @@ class CroppingCompoundModel(CompoundModelBase):
             dy = (new_bbox_h - bbox_h) / 2
 
         elif (
-            self._crop_extent_option == CropExtentOption.ASPECT_RATIO_ADJUSTMENT_BY_AREA
+            self._crop_extent_option
+            == CropExtentOptions.ASPECT_RATIO_ADJUSTMENT_BY_AREA
         ):
             expansion_factor = np.power(self._crop_extent * 0.01 + 1, 2)
             aspect_ratio = (
@@ -396,7 +403,7 @@ class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
         model1,
         model2,
         crop_extent=0,
-        crop_extent_option=CropExtentOption.ASPECT_RATIO_NO_ADJUSTMENT,
+        crop_extent_option=CropExtentOptions.ASPECT_RATIO_NO_ADJUSTMENT,
     ):
         """
         Constructor.
@@ -405,24 +412,7 @@ class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
             model1: PySDK object detection model
             model2: PySDK classification model
             crop_extent: extent of cropping in percent of bbox size
-            crop_extent_option: method of applying extending crop to the input image for model2;
-                can be one of the following:
-                    - CropExtentOption.ASPECT_RATIO_NO_ADJUSTMENT: each dimension of the bounding box
-                      is extended by 'crop_extent'.
-
-                    - CropExtentOption.ASPECT_RATIO_ADJUSTMENT_BY_LONG_SIDE: the longer dimension of the
-                      bounding box is extended by 'crop_extent', and the other side is calculated as
-                      new_bbox_h * aspect_ratio (if the longer dimension is the height of the bounding box)
-                      or new_bbox_w / aspect_ratio (if the longer dimension is the width of the bounding box),
-                      aspect_ratio is defined as the ratio of model2's input width to model2's input height
-
-                    - CropExtentOption.ASPECT_RATIO_ADJUSTMENT_BY_AREA: the bounding box is extended by an
-                      area factor of ('crop_extent' * 0.01 + 1) ^ 2; the new height is determined from the
-                      desired area and aspect ratio, and is adjusted to be at least as long as the original
-                      bounding box height; the new width is calculated as new_bbox_h * aspect_ratio, where
-                      aspect_ratio is defined as the ratio of model2's input width to model2's input height,
-                      and then adjusted to be at least as long as the original bounding box width; the new
-                      height is then adjusted as new_bbox_w / aspect_ratio
+            crop_extent_option: method of applying extending crop to the input image for model2
         """
 
         if model1.image_backend != model2.image_backend:
@@ -511,9 +501,9 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
         model2,
         *,
         crop_extent=0,
+        crop_extent_option=CropExtentOptions.ASPECT_RATIO_NO_ADJUSTMENT,
         add_model1_results=False,
         nms_options: Optional[NmsOptions] = None,
-        crop_extent_option=CropExtentOption.ASPECT_RATIO_NO_ADJUSTMENT,
     ):
         """
         Constructor.
@@ -522,8 +512,9 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
             model1: PySDK object detection model
             model2: PySDK object detection model
             crop_extent: extent of cropping in percent of bbox size
+            crop_extent_option: method of applying extending crop to the input image for model2
             add_model1_results: True to add detections of model1 to the combined result
-            keep_aspect_ratio: preserve model2's input aspect ratio when applying extending crop
+            nms_options: non-maximum suppression (NMS) options
         """
 
         if model1.image_backend != model2.image_backend:
