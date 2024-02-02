@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Union, Optional
 from .image_tools import detect_motion
 from .math_support import nms, NmsBoxSelectionPolicy
+from enum import Enum
 
 
 @dataclass
@@ -34,6 +35,12 @@ class MotionDetectOptions:
 
     threshold: float  # threshold for motion detection [0..1]: fraction of changed pixels in respect to frame size
     look_back: int = 1  # number of frames to look back to detect motion
+
+
+class CropExtentOption(Enum):
+    ASPECT_RATIO_NO_ADJUSTMENT = 1
+    ASPECT_RATIO_ADJUSTMENT_BY_LONG_SIDE = 2
+    ASPECT_RATIO_ADJUSTMENT_BY_AREA = 3
 
 
 class ModelLike(ABC):
@@ -231,7 +238,13 @@ class CroppingCompoundModel(CompoundModelBase):
     Restriction: first model should be of object detection type.
     """
 
-    def __init__(self, model1, model2, crop_extent=0):
+    def __init__(
+        self,
+        model1,
+        model2,
+        crop_extent=0,
+        crop_extent_option=CropExtentOption.ASPECT_RATIO_NO_ADJUSTMENT,
+    ):
         """
         Constructor.
 
@@ -239,10 +252,29 @@ class CroppingCompoundModel(CompoundModelBase):
             model1: PySDK object detection model
             model2: PySDK classification model
             crop_extent: extent of cropping in percent of bbox size
+            crop_extent_option: method of applying extending crop to the input image for model2;
+                can be one of the following:
+                    - CropExtentOption.ASPECT_RATIO_NO_ADJUSTMENT: each dimension of the bounding box
+                      is extended by 'crop_extent'.
+
+                    - CropExtentOption.ASPECT_RATIO_ADJUSTMENT_BY_LONG_SIDE: the longer dimension of the
+                      bounding box is extended by 'crop_extent', and the other side is calculated as
+                      new_bbox_h * aspect_ratio (if the longer dimension is the height of the bounding box)
+                      or new_bbox_w / aspect_ratio (if the longer dimension is the width of the bounding box),
+                      aspect_ratio is defined as the ratio of model2's input width to model2's input height
+
+                    - CropExtentOption.ASPECT_RATIO_ADJUSTMENT_BY_AREA: the bounding box is extended by an
+                      area factor of ('crop_extent' * 0.01 + 1) ^ 2; the new height is determined from the
+                      desired area and aspect ratio, and is adjusted to be at least as long as the original
+                      bounding box height; the new width is calculated as new_bbox_h * aspect_ratio, where
+                      aspect_ratio is defined as the ratio of model2's input width to model2's input height,
+                      and then adjusted to be at least as long as the original bounding box width; the new
+                      height is then adjusted as new_bbox_w / aspect_ratio
         """
 
         super().__init__(model1, model2)
         self._crop_extent = crop_extent
+        self._crop_extent_option = crop_extent_option
 
     def queue_result1(self, result1):
         """
@@ -296,16 +328,53 @@ class CroppingCompoundModel(CompoundModelBase):
 
     def _adjust_bbox(self, bbox, image_size):
         """
-        Inflate bbox coordinates to crop extent and adjust to image size
+        Inflate bbox coordinates to crop extent according to chosen crop extent approach
+        and adjust to image size
 
         Args:
             bbox: bbox coordinates in [x1, y1, x2, y2] format
             image_size: image size in (width, height) format
         """
-        scale = self._crop_extent * 0.01 * 0.5
+        bbox_w, bbox_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+        if self._crop_extent_option == CropExtentOption.ASPECT_RATIO_NO_ADJUSTMENT:
+            scale = self._crop_extent * 0.01 * 0.5
+            dx = bbox_w * scale
+            dy = bbox_h * scale
+
+        elif (
+            self._crop_extent_option
+            == CropExtentOption.ASPECT_RATIO_ADJUSTMENT_BY_LONG_SIDE
+        ):
+            scale = self._crop_extent * 0.01 + 1.0
+            aspect_ratio = (
+                self.model2.model_info.InputW[0] / self.model2.model_info.InputH[0]
+            )
+            if bbox_h > bbox_w:
+                new_bbox_h = bbox_h * scale
+                new_bbox_w = new_bbox_h * aspect_ratio
+            else:
+                new_bbox_w = bbox_w * scale
+                new_bbox_h = new_bbox_w / aspect_ratio
+            dx = (new_bbox_w - bbox_w) / 2
+            dy = (new_bbox_h - bbox_h) / 2
+
+        elif (
+            self._crop_extent_option == CropExtentOption.ASPECT_RATIO_ADJUSTMENT_BY_AREA
+        ):
+            expansion_factor = np.power(self._crop_extent * 0.01 + 1, 2)
+            aspect_ratio = (
+                self.model2.model_info.InputW[0] / self.model2.model_info.InputH[0]
+            )
+            new_bbox_h = np.sqrt(bbox_w * bbox_h * expansion_factor / aspect_ratio)
+            new_bbox_h = max(new_bbox_h, bbox_h)
+            new_bbox_w = new_bbox_h * aspect_ratio
+            new_bbox_w = max(new_bbox_w, bbox_w)
+            new_bbox_h = new_bbox_w / aspect_ratio
+            dx = (new_bbox_w - bbox_w) / 2
+            dy = (new_bbox_h - bbox_h) / 2
+
         maxval = [image_size[0], image_size[1], image_size[0], image_size[1]]
-        dx = (bbox[2] - bbox[0]) * scale
-        dy = (bbox[3] - bbox[1]) * scale
         adjust = [-dx, -dy, dx, dy]
         return [min(maxval[i], max(0, round(bbox[i] + adjust[i]))) for i in range(4)]
 
@@ -322,7 +391,13 @@ class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
     second model should be of classification type.
     """
 
-    def __init__(self, model1, model2, crop_extent=0):
+    def __init__(
+        self,
+        model1,
+        model2,
+        crop_extent=0,
+        crop_extent_option=CropExtentOption.ASPECT_RATIO_NO_ADJUSTMENT,
+    ):
         """
         Constructor.
 
@@ -330,6 +405,24 @@ class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
             model1: PySDK object detection model
             model2: PySDK classification model
             crop_extent: extent of cropping in percent of bbox size
+            crop_extent_option: method of applying extending crop to the input image for model2;
+                can be one of the following:
+                    - CropExtentOption.ASPECT_RATIO_NO_ADJUSTMENT: each dimension of the bounding box
+                      is extended by 'crop_extent'.
+
+                    - CropExtentOption.ASPECT_RATIO_ADJUSTMENT_BY_LONG_SIDE: the longer dimension of the
+                      bounding box is extended by 'crop_extent', and the other side is calculated as
+                      new_bbox_h * aspect_ratio (if the longer dimension is the height of the bounding box)
+                      or new_bbox_w / aspect_ratio (if the longer dimension is the width of the bounding box),
+                      aspect_ratio is defined as the ratio of model2's input width to model2's input height
+
+                    - CropExtentOption.ASPECT_RATIO_ADJUSTMENT_BY_AREA: the bounding box is extended by an
+                      area factor of ('crop_extent' * 0.01 + 1) ^ 2; the new height is determined from the
+                      desired area and aspect ratio, and is adjusted to be at least as long as the original
+                      bounding box height; the new width is calculated as new_bbox_h * aspect_ratio, where
+                      aspect_ratio is defined as the ratio of model2's input width to model2's input height,
+                      and then adjusted to be at least as long as the original bounding box width; the new
+                      height is then adjusted as new_bbox_w / aspect_ratio
         """
 
         if model1.image_backend != model2.image_backend:
@@ -337,7 +430,7 @@ class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
                 f"Image backends of both models should be the same, but got {model1.image_backend} and {model2.image_backend}"
             )
 
-        super().__init__(model1, model2, crop_extent)
+        super().__init__(model1, model2, crop_extent, crop_extent_option)
         self._current_result = None
 
     def transform_result2(self, result2):
@@ -420,6 +513,7 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
         crop_extent=0,
         add_model1_results=False,
         nms_options: Optional[NmsOptions] = None,
+        crop_extent_option=CropExtentOption.ASPECT_RATIO_NO_ADJUSTMENT,
     ):
         """
         Constructor.
@@ -429,6 +523,7 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
             model2: PySDK object detection model
             crop_extent: extent of cropping in percent of bbox size
             add_model1_results: True to add detections of model1 to the combined result
+            keep_aspect_ratio: preserve model2's input aspect ratio when applying extending crop
         """
 
         if model1.image_backend != model2.image_backend:
@@ -436,7 +531,7 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
                 f"Image backends of both models should be the same, but got {model1.image_backend} and {model2.image_backend}"
             )
 
-        super().__init__(model1, model2, crop_extent)
+        super().__init__(model1, model2, crop_extent, crop_extent_option)
         self._current_result: Optional[dg.postprocessor.InferenceResults] = None
         self._current_result1: Optional[dg.postprocessor.InferenceResults] = None
         self._add_model1_results = add_model1_results
