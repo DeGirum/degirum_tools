@@ -245,8 +245,6 @@ class Composition:
         for t in self._threads:
             t.start()
 
-        print("Composition started")
-
         if wait or get_test_mode():
             self.stop(force_stop=False)
 
@@ -297,17 +295,19 @@ class Composition:
                             break
 
         # finally wait for completion of all threads
-        for t in self._threads:            
+        for t in self._threads:
             if t.name != threading.current_thread().name:
                 t.join()
 
         self._threads = []
-        print("Composition stopped")
+
+        # error handling
+        errors = ""
         for gizmo in self._gizmos:
             if gizmo.error is not None:
-                print(
-                    f"Error detected during execution of {gizmo.name}:\n  {type(gizmo.error)}: {str(gizmo.error)}"
-                )
+                errors += f"Error detected during execution of {gizmo.name}:\n  {type(gizmo.error)}: {str(gizmo.error)}\n\n"
+        if errors:
+            raise Exception(errors)
 
 
 class VideoSourceGizmo(Gizmo):
@@ -450,8 +450,8 @@ class VideoSaverGizmo(Gizmo):
     def run(self):
         """Run gizmo"""
 
-        get_img = (
-            lambda data: data.meta.image_overlay
+        get_img = lambda data: (
+            data.meta.image_overlay
             if self._show_ai_overlay
             and isinstance(data.meta, dg.postprocessor.InferenceResults)
             else data.data
