@@ -205,11 +205,16 @@ class CompoundModelBase(ModelLike):
                 self.queue_result1(result1)
 
             # process all results ready so far
+            no_results = True
             while result2 := next(model2_iter):
                 if (transformed_result2 := self.transform_result2(result2)) is not None:
                     # restore original frame info to support nested compound models
                     transformed_result2._frame_info = result2.info.original_info
                     yield transformed_result2
+                    no_results = False
+
+            if no_results and self.model1.non_blocking_batch_predict:
+                yield None  # in case of empty queue, yield None to let things moving
 
         self.queue.put(None)  # signal end of queue to nested model
         self.model2.non_blocking_batch_predict = False  # restore blocking mode
