@@ -208,7 +208,7 @@ class CompoundModelBase(ModelLike):
             while result2 := next(model2_iter):
                 if (transformed_result2 := self.transform_result2(result2)) is not None:
                     # restore original frame info to support nested compound models
-                    transformed_result2.info = result2.info.original_info
+                    transformed_result2._frame_info = result2.info.original_info
                     yield transformed_result2
 
         self.queue.put(None)  # signal end of queue to nested model
@@ -218,7 +218,7 @@ class CompoundModelBase(ModelLike):
         for result2 in model2_iter:
             if (transformed_result2 := self.transform_result2(result2)) is not None:
                 # restore original frame info to support nested compound models
-                transformed_result2.info = result2.info.original_info
+                transformed_result2._frame_info = result2.info.original_info
                 yield transformed_result2
 
 
