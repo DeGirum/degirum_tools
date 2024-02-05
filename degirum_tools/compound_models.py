@@ -226,6 +226,14 @@ class CompoundModelBase(ModelLike):
                 transformed_result2._frame_info = result2.info.original_info
                 yield transformed_result2
 
+    @property
+    def non_blocking_batch_predict(self):
+        return self.model1.non_blocking_batch_predict
+
+    @non_blocking_batch_predict.setter
+    def non_blocking_batch_predict(self, val: bool):
+        self.model1.non_blocking_batch_predict = val
+
 
 class CombiningCompoundModel(CompoundModelBase):
     """
@@ -539,6 +547,22 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
         self._add_model1_results = add_model1_results
         self._nms_options: Optional[NmsOptions] = nms_options
 
+    def _finalize_current_result(self, result1):
+        if self._current_result is not None:
+            # patch combined result image to be original image
+            self._current_result._input_image = result1.image
+
+            if self._nms_options is not None:
+                # apply NMS to combined result
+                nms(
+                    self._current_result,
+                    iou_threshold=self._nms_options.threshold,
+                    use_iou=self._nms_options.use_iou,
+                    box_select=self._nms_options.box_select,
+                )
+            return self._current_result
+        return None
+
     def transform_result2(self, result2):
         """
         Transform result of the second model.
@@ -575,23 +599,8 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
                 )
 
         else:
-            # new frame comes
-            if self._current_result is not None:
-                # patch combined result image to be original image
-                self._current_result._input_image = result1.image
-
-                if self._nms_options is not None:
-                    # apply NMS to combined result
-                    nms(
-                        self._current_result,
-                        iou_threshold=self._nms_options.threshold,
-                        use_iou=self._nms_options.use_iou,
-                        box_select=self._nms_options.box_select,
-                    )
-
-                # return combined result of previous frame
-                ret = self._current_result
-
+            # new frame comes: return combined result of previous frame
+            ret = self._finalize_current_result(result1)
             self._current_result = result2
             self._current_result1 = result1
 
@@ -613,7 +622,7 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
         for result in super().predict_batch(data):
             yield result
         if self._current_result is not None:
-            yield self._current_result
+            yield self._finalize_current_result(self._current_result1)
 
 
 class RegionExtractionPseudoModel(ModelLike):
@@ -649,10 +658,15 @@ class RegionExtractionPseudoModel(ModelLike):
         self._model2 = model2
         self._base_img: list = []  # base image for motion detection
         self._motion_detect = motion_detect
+        self._non_blocking_batch_predict = False
 
     @property
-    def non_blocking_batch_predict(self) -> bool:
-        return False
+    def non_blocking_batch_predict(self):
+        return self._non_blocking_batch_predict
+
+    @non_blocking_batch_predict.setter
+    def non_blocking_batch_predict(self, val: bool):
+        self._non_blocking_batch_predict = val
 
     @property
     def image_backend(self) -> str:
@@ -682,6 +696,14 @@ class RegionExtractionPseudoModel(ModelLike):
         all_rois = [True] * len(self._roi_list)
 
         for element in data:
+            if element is None:
+                if self._non_blocking_batch_predict:
+                    yield None
+                else:
+                    raise Exception(
+                        "Model misconfiguration: input data iterator returns None but non-blocking batch predict mode is not enabled"
+                    )
+
             # extract frame and frame info from data
             if isinstance(element, tuple):
                 # if data is tuple, we treat first element as frame data and second element as frame info
