@@ -380,7 +380,8 @@ def _generate_tiles_core(
         np.meshgrid(np.arange(tiles_cnt[0]), np.arange(tiles_cnt[1]), indexing="ij")
     ).T.reshape(-1, 2)
     top_left = np.floor(tile_inds * tile_size * (1 - overlaps))
-    return np.column_stack((top_left, top_left + tile_size)).astype(np.int32)
+    flat = np.column_stack((top_left, top_left + tile_size)).astype(np.int32)
+    return np.reshape(flat, (-1, tiles_cnt[0], 4))
 
 
 def _tiles_count(

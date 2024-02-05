@@ -122,7 +122,6 @@ def test_nms():
         use_iou=True,
         box_select=NmsBoxSelectionPolicy.MERGE,
     )
-    print(res_merge.results)
     assert len(res_merge.results) == len(res_merge.results)
     assert (
         sum(
@@ -153,19 +152,27 @@ def test_generate_tiles():
     from degirum_tools import generate_tiles_fixed_size, generate_tiles_fixed_ratio
 
     # single tile
-    assert generate_tiles_fixed_size([200, 150], [200, 150], [0, 0]).shape == (1, 4)
+    assert generate_tiles_fixed_size([200, 150], [200, 150], [0, 0]).shape == (1, 1, 4)
 
     # 4x2 tiles, zero overlap
-    assert generate_tiles_fixed_size([200, 150], [800, 300], [0, 0]).shape == (8, 4)
+    assert generate_tiles_fixed_size([200, 150], [800, 300], [0, 0]).shape == (2, 4, 4)
 
     # 5x3 tiles, some overlap
-    assert generate_tiles_fixed_size([200, 150], [800, 300], [10, 20]).shape == (15, 4)
+    assert generate_tiles_fixed_size([200, 150], [800, 300], [10, 20]).shape == (
+        3,
+        5,
+        4,
+    )
 
     # single tile
-    assert generate_tiles_fixed_ratio(2.0, [1, 0], [200, 100], 0).shape == (1, 4)
+    assert generate_tiles_fixed_ratio(2.0, [1, 0], [200, 100], 0).shape == (1, 1, 4)
 
     # 2x2 tiles
-    assert generate_tiles_fixed_ratio(0.5, [2, 0], [200, 300], [10, 20]).shape == (4, 4)
+    assert generate_tiles_fixed_ratio(0.5, [2, 0], [200, 300], [10, 20]).shape == (
+        2,
+        2,
+        4,
+    )
 
     # 3x3 tiles
-    assert generate_tiles_fixed_ratio(1.5, [0, 3], [600, 400], 10).shape == (12, 4)
+    assert generate_tiles_fixed_ratio(1.5, [0, 3], [600, 400], 10).shape == (3, 4, 4)

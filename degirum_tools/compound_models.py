@@ -633,19 +633,30 @@ class RegionExtractionPseudoModel(ModelLike):
 
         Args:
             roi_list: list of ROI boxes in [x1, y1, x2, y2] format
+                or 2D array of shape (N,4)
+                or 3D array of shape (K,M,4)
             model2: model, which will be used as a second step of the compound model pipeline
             motion_detect: motion detection options.
                 When None, motion detection is disabled.
                 When enabled, ROI boxes where motion is not detected will be skipped.
         """
+
+        if isinstance(roi_list, np.ndarray) and len(roi_list.shape) == 3:
+            # flatten 3D array to 2D array
+            roi_list = roi_list.reshape(-1, roi_list.shape[-1])
+
         self._roi_list = roi_list
         self._model2 = model2
         self._base_img: list = []  # base image for motion detection
         self._motion_detect = motion_detect
 
-    # fallback all model-like attributes to the second model
-    def __getattr__(self, attr):
-        return getattr(self._model2, attr)
+    @property
+    def non_blocking_batch_predict(self) -> bool:
+        return False
+
+    @property
+    def image_backend(self) -> str:
+        return self._model2.image_backend
 
     def predict_batch(self, data):
         """
