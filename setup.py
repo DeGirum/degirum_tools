@@ -1,15 +1,28 @@
-#!/usr/bin/env python3
+#
+# setup.py: degirum_tools package setup file
+#
+# Copyright DeGirum Corporation 2024
+# All rights reserved
+#
+# NOTE: before making new degirum_tools package release,
+# increment the version number in `degirum_tools/_version.py`
+#
+
 
 from setuptools import setup
-
 from pathlib import Path
 
-with open(Path(__file__).resolve().parent / "README.md", encoding="utf-8") as f:
-    readme = f.read()
+root_path = Path(__file__).resolve().parent
+
+# get version
+exec(open(root_path / "degirum_tools/_version.py").read())
+
+# load README.md
+readme = open(root_path / "README.md", encoding="utf-8").read()
 
 setup(
     name="degirum_tools",
-    version="0.5.2",
+    version=__version__,
     description="Tools for PySDK",
     author="DeGirum",
     license="",

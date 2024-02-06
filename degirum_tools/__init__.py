@@ -7,6 +7,7 @@
 
 # flake8: noqa
 
+from ._version import __version__, __version_info__
 from .audio_support import *
 from .compound_models import *
 from .environment import *
