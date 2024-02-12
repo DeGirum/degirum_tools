@@ -138,9 +138,7 @@ class ObjectDetectionModelEvaluator:
         self.pred_path = pred_path
 
         if (
-            self.dg_model.output_postprocess_type == "Detection"
-            or "DetectionYolo"
-            or "DetectionYoloV8"
+            self.dg_model.output_postprocess_type in ["Detection", "DetectionYolo", "DetectionYoloV8"]
         ):
             self.dg_model.output_confidence_threshold = output_confidence_threshold
             self.dg_model.output_nms_threshold = output_nms_threshold
@@ -226,7 +224,7 @@ class ObjectDetectionModelEvaluator:
         sorted_path_list = [path_list[i] for i in sorted_indices]
 
         if num_val_images > 0:
-            path_list = sorted_path_list[0:num_val_images]
+            sorted_path_list = sorted_path_list[0:num_val_images]
 
         with self.dg_model:
             for image_number, predictions in enumerate(
