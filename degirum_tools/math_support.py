@@ -29,7 +29,7 @@
 
 import numpy as np
 from enum import Enum
-from typing import Union
+from typing import Union, Sequence
 
 
 def area(box: np.ndarray) -> np.ndarray:
@@ -127,6 +127,152 @@ def box_iou_batch(boxes_true: np.ndarray, boxes_detection: np.ndarray) -> np.nda
     return area_inter / (area_true[:, None] + area_detection - area_inter)
 
 
+class NmsBoxSelectionPolicy(Enum):
+    """Bounding box selection policy for non-maximum suppression"""
+
+    MOST_PROBABLE = 1  # traditional NMS: select box with highest probability
+    LARGEST_AREA = 2  # select box with largest area
+    AVERAGE = 3  # average all boxes in a cluster
+    MERGE = 4  # merge all boxes in a cluster
+
+
+def _nms_custom(
+    bboxes: np.ndarray,
+    scores: np.ndarray,
+    classes: np.ndarray,
+    iou_threshold: float,
+    use_iou: bool,
+    box_select: NmsBoxSelectionPolicy,
+    max_wh: int,
+):
+    """
+    Perform non-maximum suppression on a set of detections.
+
+    Args:
+        bboxes (np.ndarray): 2D `np.ndarray` representing bboxes in (x1, y1, x2, y2) format
+        scores (np.ndarray): 1D `np.ndarray` representing confidence scores of detections
+        classes (np.ndarray): 1D `np.ndarray` representing class IDs
+        iou_threshold (float): IoU/IoS threshold used for detecting overlapping boxes.
+        use_iou (bool): If True, IoU is used for detecting overlapping boxes. Otherwise, IoS is used.
+        box_select (NmsBoxSelectionPolicy): bounding box selection policy
+        max_wh (int): maximum width/height of an image. Used for category separation.
+
+    Returns:
+        np.ndarray: An array of indices of detections that have survived non-maximum suppression.
+        If `box_select` option dictates box coordinates update, the survived object box coordinates are modified in-place
+
+    """
+
+    # adjust bboxes by class offset so bboxes of different classes would never overlap
+    class_offsets = classes * float(max_wh)
+    bboxes[:, 0:4] += class_offsets[:, None]
+
+    x1 = bboxes[:, 0]
+    y1 = bboxes[:, 1]
+    x2 = bboxes[:, 2]
+    y2 = bboxes[:, 3]
+
+    areas = (x2 - x1 + 1) * (y2 - y1 + 1)
+    order = scores.argsort()  # sort boxes by IoUs in ascending order
+
+    keep = []
+    while order.size > 0:
+        i = order[-1]  # pick maximum IoU box
+        keep.append(i)
+
+        xx1 = np.maximum(x1[i], x1[order])
+        yy1 = np.maximum(y1[i], y1[order])
+        xx2 = np.minimum(x2[i], x2[order])
+        yy2 = np.minimum(y2[i], y2[order])
+
+        w = np.maximum(0.0, xx2 - xx1 + 1)  # maximum width
+        h = np.maximum(0.0, yy2 - yy1 + 1)  # maximum height
+
+        inter = w * h
+        if use_iou:
+            overlap = inter / (areas[i] + areas[order] - inter)
+        else:  # use IoS
+            overlap = inter / np.minimum(areas[i], areas[order])
+
+        if box_select == NmsBoxSelectionPolicy.MOST_PROBABLE:
+            pass
+        elif box_select == NmsBoxSelectionPolicy.LARGEST_AREA:
+            sel = order[overlap > iou_threshold]
+            bboxes[i] = bboxes[sel[np.argmax(areas[sel])]] - class_offsets[i]
+        elif box_select == NmsBoxSelectionPolicy.AVERAGE:
+            sel = order[overlap > iou_threshold]
+            bboxes[i] = (
+                np.average(bboxes[sel], axis=0, weights=scores[sel]) - class_offsets[i]
+            )
+        elif box_select == NmsBoxSelectionPolicy.MERGE:
+            sel = order[overlap > iou_threshold]
+            enclosing_rect = np.array(
+                [np.min(x1[sel]), np.min(y1[sel]), np.max(x2[sel]), np.max(y2[sel])]
+            )
+            bboxes[i] = enclosing_rect - class_offsets[i]
+
+        order = order[overlap <= iou_threshold]
+
+    return keep
+
+
+def nms(
+    detections,
+    iou_threshold: float = 0.3,
+    use_iou: bool = True,
+    box_select: NmsBoxSelectionPolicy = NmsBoxSelectionPolicy.MOST_PROBABLE,
+    max_wh: int = 10000,
+):
+    """
+    Perform non-maximum suppression on a set of detections.
+
+    Args:
+        detections (InferenceResults): PySDK inference result object
+        iou_threshold (float): IoU/IoS threshold used for detecting overlapping boxes.
+        use_iou (bool): If True, IoU is used for detecting overlapping boxes. Otherwise, IoS is used.
+        box_select (NmsBoxSelectionPolicy): bounding box selection policy
+        max_wh (int): Maximum width/height of an image. Used for category separation.
+
+    `detections` will be updated with objects, which survived non-maximum suppression.
+    If `box_select` option dictates box coordinates update, the survived object box coordinates are modified in-place
+
+    """
+
+    result_list = detections._inference_results
+    n_results = len(result_list)
+    bboxes = np.empty((n_results, 4), dtype=np.float64)
+    scores = np.empty(n_results, dtype=np.float64)
+    classes = np.empty(n_results, dtype=np.int32)
+    unique_ids: dict = {}
+
+    try:
+        for i, r in enumerate(result_list):
+            bboxes[i] = r["bbox"]
+            scores[i] = r["score"]
+            classes[i] = unique_ids.setdefault(r["label"], len(unique_ids))
+    except KeyError as e:
+        raise Exception(
+            "Detections must be a list of dicts with 'bbox', 'score' and 'category_id' keys"
+        ) from e
+
+    if use_iou and box_select == NmsBoxSelectionPolicy.MOST_PROBABLE:
+        import cv2
+
+        # use fast OpenCV implementation when possible
+        bboxes[:, 2:4] = bboxes[:, 2:4] - bboxes[:, 0:2]  # TLBR to TLWH
+        keep = cv2.dnn.NMSBoxesBatched(bboxes, scores, classes, 0, iou_threshold)  # type: ignore[arg-type]
+    else:
+        keep = _nms_custom(
+            bboxes, scores, classes, iou_threshold, use_iou, box_select, max_wh
+        )
+
+        if box_select != NmsBoxSelectionPolicy.MOST_PROBABLE:
+            for i in keep:
+                result_list[i]["bbox"] = bboxes[i].tolist()
+
+    detections._inference_results = [result_list[i] for i in keep]
+
+
 class AnchorPoint(Enum):
     """Position of a point of interest within the bounding box"""
 
@@ -221,3 +367,118 @@ def intersect(a, b, c, d) -> bool:
     if np.sign(s) == np.sign(t):
         return False
     return True
+
+
+def _generate_tiles_core(
+    tile_size: np.ndarray, tiles_cnt: np.ndarray, image_size: np.ndarray
+):
+    overlaps = 1.0 - (image_size - tile_size) / (
+        np.maximum(1, (tiles_cnt - 1)) * tile_size
+    )
+
+    tile_inds = np.array(
+        np.meshgrid(np.arange(tiles_cnt[0]), np.arange(tiles_cnt[1]), indexing="ij")
+    ).T.reshape(-1, 2)
+    top_left = np.floor(tile_inds * tile_size * (1 - overlaps))
+    flat = np.column_stack((top_left, top_left + tile_size)).astype(np.int32)
+    return np.reshape(flat, (-1, tiles_cnt[0], 4))
+
+
+def _tiles_count(
+    tile_size: np.ndarray, image_size: np.ndarray, min_overlap_percent: np.ndarray
+):
+    return 1 + np.ceil(
+        (image_size - tile_size) / (tile_size * (1.0 - 0.01 * min_overlap_percent))
+    ).astype(np.int32)
+
+
+def generate_tiles_fixed_size(
+    tile_size: Union[np.ndarray, Sequence],
+    image_size: Union[np.ndarray, Sequence],
+    min_overlap_percent: Union[np.ndarray, Sequence],
+):
+    """
+    Generate a set of rectangular boxes (tiles) of given fixed size
+    covering given rectangular area (image) with given overlap.
+
+    Args:
+        tile_size: desired tile size (width,height)
+        image_size: image size (width,height)
+        min_overlap_percent: minimum overlaps between tiles in percent (x_overlap,y_overlap)
+
+    Returns:
+        np.ndarray: array of tile coordinates in format (x0, y0, x1, y1)
+    """
+
+    if not isinstance(tile_size, np.ndarray):
+        tile_size = np.array(tile_size)
+    if not isinstance(image_size, np.ndarray):
+        image_size = np.array(image_size)
+    if not isinstance(min_overlap_percent, np.ndarray):
+        min_overlap_percent = np.array(min_overlap_percent)
+    if min_overlap_percent.size < 2:
+        min_overlap_percent = np.repeat(min_overlap_percent, 2)
+
+    return _generate_tiles_core(
+        tile_size, _tiles_count(tile_size, image_size, min_overlap_percent), image_size
+    )
+
+
+def generate_tiles_fixed_ratio(
+    tile_aspect_ratio: Union[float, np.ndarray, Sequence],
+    grid_size: Union[np.ndarray, Sequence],
+    image_size: Union[np.ndarray, Sequence],
+    min_overlap_percent: Union[np.ndarray, Sequence],
+):
+    """
+    Generate a set of rectangular boxes (tiles) of given fixed size
+    covering given rectangular area (image) with given overlap.
+
+    Args:
+        tile_aspect_ratio: desired tile aspect ratio,
+            it can be number width/height or 2-element sequence [width,height]
+        grid_size: desired number of tiles in each direction (column,rows);
+            only one of the values (which is non-zero) is used to compute the other one
+        image_size: image size (width,height)
+        min_overlap_percent: minimum overlaps between tiles in percent (x_overlap,y_overlap)
+
+    Returns:
+        np.ndarray: array of tile coordinates in format (x0, y0, x1, y1)
+    """
+
+    if not isinstance(grid_size, np.ndarray):
+        grid_size = np.array(grid_size)
+    if not isinstance(image_size, np.ndarray):
+        image_size = np.array(image_size)
+    if not isinstance(min_overlap_percent, np.ndarray):
+        min_overlap_percent = np.array(min_overlap_percent)
+    if min_overlap_percent.size < 2:
+        min_overlap_percent = np.repeat(min_overlap_percent, 2)
+
+    if not isinstance(tile_aspect_ratio, float):
+        tile_aspect_ratio = tile_aspect_ratio[0] / tile_aspect_ratio[1]
+
+    def get_tile_dimension(dim):
+        return np.round(
+            image_size[dim]
+            / (1 + (grid_size[dim] - 1) * (1.0 - 0.01 * min_overlap_percent[dim]))
+        )
+
+    tile_size = np.zeros(2)
+    if grid_size[0] != 0:
+        tile_size[0] = get_tile_dimension(0)
+        tile_size[1] = np.round(tile_size[0] / tile_aspect_ratio)
+        grid_size[1:] = _tiles_count(
+            tile_size[1:], image_size[1:], min_overlap_percent[1:]
+        )
+
+    elif grid_size[1] != 0:
+        tile_size[1] = get_tile_dimension(1)
+        tile_size[0] = np.round(tile_size[1] * tile_aspect_ratio)
+        grid_size[:1] = _tiles_count(
+            tile_size[:1], image_size[:1], min_overlap_percent[:1]
+        )
+    else:
+        raise ValueError("At least one of grid_size values must be non-zero")
+
+    return _generate_tiles_core(tile_size, grid_size, image_size)

@@ -10,14 +10,61 @@
 import queue, cv2, numpy as np, degirum as dg
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Union, Optional
 from .image_tools import detect_motion
-from typing import Union
+from .math_support import nms, NmsBoxSelectionPolicy
 from enum import Enum
 
-class CropExtentOption(Enum):
+
+@dataclass
+class NmsOptions:
+    """
+    Options for non-maximum suppression (NMS) algorithm.
+    """
+
+    threshold: float  # IoU or IoS threshold for box clustering [0..1]
+    use_iou: bool = True  # use IoU for box clustering (otherwise use IoS)
+    box_select: NmsBoxSelectionPolicy = NmsBoxSelectionPolicy.MOST_PROBABLE
+
+
+@dataclass
+class MotionDetectOptions:
+    """
+    Options for motion detection algorithm.
+    """
+
+    threshold: float  # threshold for motion detection [0..1]: fraction of changed pixels in respect to frame size
+    look_back: int = 1  # number of frames to look back to detect motion
+
+
+class CropExtentOptions(Enum):
+    """
+    Options for applying extending crop to the input image.
+    """
+
     ASPECT_RATIO_NO_ADJUSTMENT = 1
+    """
+    Each dimension of the bounding box is extended by 'crop_extent' parameter
+    """
+
     ASPECT_RATIO_ADJUSTMENT_BY_LONG_SIDE = 2
+    """
+    The longer dimension of the bounding box is extended by 'crop_extent' parameter, and the other side is 
+    calculated as new_bbox_h * aspect_ratio (if the longer dimension is the height of the bounding box)
+    or new_bbox_w / aspect_ratio (if the longer dimension is the width of the bounding box),
+    aspect_ratio is defined as the ratio of model2's input width to model2's input height
+    """
+
     ASPECT_RATIO_ADJUSTMENT_BY_AREA = 3
+    """
+    The bounding box is extended by an area factor of ('crop_extent' * 0.01 + 1) ^ 2; the new height
+    is determined from the desired area and aspect ratio, and is adjusted to be at least as long as 
+    the original bounding box height; the new width is calculated as new_bbox_h * aspect_ratio, where
+    aspect_ratio is defined as the ratio of model2's input width to model2's input height,
+    and then adjusted to be at least as long as the original bounding box width; the new
+    height is then adjusted as new_bbox_w / aspect_ratio
+    """
+
 
 class ModelLike(ABC):
     """
@@ -68,12 +115,13 @@ class ModelLike(ABC):
         return self.predict(data)
 
 
-@dataclass
 class _FrameInfo:
     """Class to hold frame info"""
 
-    result1: dg.postprocessor.InferenceResults  # model 1 result
-    sub_result: int  # sub-result index in model 1 result
+    def __init__(self, result1, sub_result):
+        self.result1 = result1  # model 1 result
+        self.original_info = result1.info  # original frame info
+        self.sub_result = sub_result  # sub-result index in model 1 result
 
 
 class CompoundModelBase(ModelLike):
@@ -146,7 +194,6 @@ class CompoundModelBase(ModelLike):
         """
 
         # use non-blocking mode for nested model and regular mode for the first model
-        self.model1.non_blocking_batch_predict = False
         self.model2.non_blocking_batch_predict = True
 
         # iterator over predictions of nested model
@@ -154,19 +201,38 @@ class CompoundModelBase(ModelLike):
 
         for result1 in self.model1.predict_batch(data):
             # put result of the first model into the queue
-            self.queue_result1(result1)
+            if result1 is not None:
+                self.queue_result1(result1)
 
-            # process all recognized license plates ready so far
+            # process all results ready so far
+            no_results = True
             while result2 := next(model2_iter):
                 if (transformed_result2 := self.transform_result2(result2)) is not None:
+                    # restore original frame info to support nested compound models
+                    transformed_result2._frame_info = result2.info.original_info
                     yield transformed_result2
+                    no_results = False
+
+            if no_results and self.model1.non_blocking_batch_predict:
+                yield None  # in case of empty queue, yield None to let things moving
 
         self.queue.put(None)  # signal end of queue to nested model
         self.model2.non_blocking_batch_predict = False  # restore blocking mode
-        # process all remaining recognized license plates
+
+        # process all remaining results
         for result2 in model2_iter:
             if (transformed_result2 := self.transform_result2(result2)) is not None:
+                # restore original frame info to support nested compound models
+                transformed_result2._frame_info = result2.info.original_info
                 yield transformed_result2
+
+    @property
+    def non_blocking_batch_predict(self):
+        return self.model1.non_blocking_batch_predict
+
+    @non_blocking_batch_predict.setter
+    def non_blocking_batch_predict(self, val: bool):
+        self.model1.non_blocking_batch_predict = val
 
 
 class CombiningCompoundModel(CompoundModelBase):
@@ -214,7 +280,13 @@ class CroppingCompoundModel(CompoundModelBase):
     Restriction: first model should be of object detection type.
     """
 
-    def __init__(self, model1, model2, crop_extent=0, crop_extent_option=CropExtentOption.ASPECT_RATIO_NO_ADJUSTMENT):
+    def __init__(
+        self,
+        model1,
+        model2,
+        crop_extent=0,
+        crop_extent_option=CropExtentOptions.ASPECT_RATIO_NO_ADJUSTMENT,
+    ):
         """
         Constructor.
 
@@ -222,24 +294,7 @@ class CroppingCompoundModel(CompoundModelBase):
             model1: PySDK object detection model
             model2: PySDK classification model
             crop_extent: extent of cropping in percent of bbox size
-            crop_extent_option: method of applying extending crop to the input image for model2;
-                can be one of the following:
-                    - CropExtentOption.ASPECT_RATIO_NO_ADJUSTMENT: each dimension of the bounding box
-                      is extended by 'crop_extent'.
-                      
-                    - CropExtentOption.ASPECT_RATIO_ADJUSTMENT_BY_LONG_SIDE: the longer dimension of the
-                      bounding box is extended by 'crop_extent', and the other side is calculated as
-                      new_bbox_h * aspect_ratio (if the longer dimension is the height of the bounding box)
-                      or new_bbox_w / aspect_ratio (if the longer dimension is the width of the bounding box),
-                      aspect_ratio is defined as the ratio of model2's input width to model2's input height
-                      
-                    - CropExtentOption.ASPECT_RATIO_ADJUSTMENT_BY_AREA: the bounding box is extended by an
-                      area factor of ('crop_extent' * 0.01 + 1) ^ 2; the new height is determined from the
-                      desired area and aspect ratio, and is adjusted to be at least as long as the original
-                      bounding box height; the new width is calculated as new_bbox_h * aspect_ratio, where
-                      aspect_ratio is defined as the ratio of model2's input width to model2's input height,
-                      and then adjusted to be at least as long as the original bounding box width; the new
-                      height is then adjusted as new_bbox_w / aspect_ratio
+            crop_extent_option: method of applying extending crop to the input image for model2
         """
 
         super().__init__(model1, model2)
@@ -306,15 +361,20 @@ class CroppingCompoundModel(CompoundModelBase):
             image_size: image size in (width, height) format
         """
         bbox_w, bbox_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
-        
-        if self._crop_extent_option == CropExtentOption.ASPECT_RATIO_NO_ADJUSTMENT:
+
+        if self._crop_extent_option == CropExtentOptions.ASPECT_RATIO_NO_ADJUSTMENT:
             scale = self._crop_extent * 0.01 * 0.5
             dx = bbox_w * scale
             dy = bbox_h * scale
-            
-        elif self._crop_extent_option == CropExtentOption.ASPECT_RATIO_ADJUSTMENT_BY_LONG_SIDE:
+
+        elif (
+            self._crop_extent_option
+            == CropExtentOptions.ASPECT_RATIO_ADJUSTMENT_BY_LONG_SIDE
+        ):
             scale = self._crop_extent * 0.01 + 1.0
-            aspect_ratio = self.model2.model_info.InputW[0] / self.model2.model_info.InputH[0]
+            aspect_ratio = (
+                self.model2.model_info.InputW[0] / self.model2.model_info.InputH[0]
+            )
             if bbox_h > bbox_w:
                 new_bbox_h = bbox_h * scale
                 new_bbox_w = new_bbox_h * aspect_ratio
@@ -323,10 +383,15 @@ class CroppingCompoundModel(CompoundModelBase):
                 new_bbox_h = new_bbox_w / aspect_ratio
             dx = (new_bbox_w - bbox_w) / 2
             dy = (new_bbox_h - bbox_h) / 2
-            
-        elif self._crop_extent_option == CropExtentOption.ASPECT_RATIO_ADJUSTMENT_BY_AREA:
+
+        elif (
+            self._crop_extent_option
+            == CropExtentOptions.ASPECT_RATIO_ADJUSTMENT_BY_AREA
+        ):
             expansion_factor = np.power(self._crop_extent * 0.01 + 1, 2)
-            aspect_ratio = self.model2.model_info.InputW[0] / self.model2.model_info.InputH[0]
+            aspect_ratio = (
+                self.model2.model_info.InputW[0] / self.model2.model_info.InputH[0]
+            )
             new_bbox_h = np.sqrt(bbox_w * bbox_h * expansion_factor / aspect_ratio)
             new_bbox_h = max(new_bbox_h, bbox_h)
             new_bbox_w = new_bbox_h * aspect_ratio
@@ -334,7 +399,7 @@ class CroppingCompoundModel(CompoundModelBase):
             new_bbox_h = new_bbox_w / aspect_ratio
             dx = (new_bbox_w - bbox_w) / 2
             dy = (new_bbox_h - bbox_h) / 2
-            
+
         maxval = [image_size[0], image_size[1], image_size[0], image_size[1]]
         adjust = [-dx, -dy, dx, dy]
         return [min(maxval[i], max(0, round(bbox[i] + adjust[i]))) for i in range(4)]
@@ -352,7 +417,13 @@ class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
     second model should be of classification type.
     """
 
-    def __init__(self, model1, model2, crop_extent=0, crop_extent_option=CropExtentOption.ASPECT_RATIO_NO_ADJUSTMENT):
+    def __init__(
+        self,
+        model1,
+        model2,
+        crop_extent=0,
+        crop_extent_option=CropExtentOptions.ASPECT_RATIO_NO_ADJUSTMENT,
+    ):
         """
         Constructor.
 
@@ -360,24 +431,7 @@ class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
             model1: PySDK object detection model
             model2: PySDK classification model
             crop_extent: extent of cropping in percent of bbox size
-            crop_extent_option: method of applying extending crop to the input image for model2;
-                can be one of the following:
-                    - CropExtentOption.ASPECT_RATIO_NO_ADJUSTMENT: each dimension of the bounding box
-                      is extended by 'crop_extent'.
-                      
-                    - CropExtentOption.ASPECT_RATIO_ADJUSTMENT_BY_LONG_SIDE: the longer dimension of the
-                      bounding box is extended by 'crop_extent', and the other side is calculated as
-                      new_bbox_h * aspect_ratio (if the longer dimension is the height of the bounding box)
-                      or new_bbox_w / aspect_ratio (if the longer dimension is the width of the bounding box),
-                      aspect_ratio is defined as the ratio of model2's input width to model2's input height
-                      
-                    - CropExtentOption.ASPECT_RATIO_ADJUSTMENT_BY_AREA: the bounding box is extended by an
-                      area factor of ('crop_extent' * 0.01 + 1) ^ 2; the new height is determined from the
-                      desired area and aspect ratio, and is adjusted to be at least as long as the original
-                      bounding box height; the new width is calculated as new_bbox_h * aspect_ratio, where
-                      aspect_ratio is defined as the ratio of model2's input width to model2's input height,
-                      and then adjusted to be at least as long as the original bounding box width; the new
-                      height is then adjusted as new_bbox_w / aspect_ratio
+            crop_extent_option: method of applying extending crop to the input image for model2
         """
 
         if model1.image_backend != model2.image_backend:
@@ -460,7 +514,16 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
     second model should be of object detection type.
     """
 
-    def __init__(self, model1, model2, *, crop_extent=0, add_model1_results=False, crop_extent_option=CropExtentOption.ASPECT_RATIO_NO_ADJUSTMENT):
+    def __init__(
+        self,
+        model1,
+        model2,
+        *,
+        crop_extent=0,
+        crop_extent_option=CropExtentOptions.ASPECT_RATIO_NO_ADJUSTMENT,
+        add_model1_results=False,
+        nms_options: Optional[NmsOptions] = None,
+    ):
         """
         Constructor.
 
@@ -468,8 +531,9 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
             model1: PySDK object detection model
             model2: PySDK object detection model
             crop_extent: extent of cropping in percent of bbox size
+            crop_extent_option: method of applying extending crop to the input image for model2
             add_model1_results: True to add detections of model1 to the combined result
-            keep_aspect_ratio: preserve model2's input aspect ratio when applying extending crop
+            nms_options: non-maximum suppression (NMS) options
         """
 
         if model1.image_backend != model2.image_backend:
@@ -478,9 +542,26 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
             )
 
         super().__init__(model1, model2, crop_extent, crop_extent_option)
-        self._current_result = None
-        self._current_result1 = None
+        self._current_result: Optional[dg.postprocessor.InferenceResults] = None
+        self._current_result1: Optional[dg.postprocessor.InferenceResults] = None
         self._add_model1_results = add_model1_results
+        self._nms_options: Optional[NmsOptions] = nms_options
+
+    def _finalize_current_result(self, result1):
+        if self._current_result is not None:
+            # patch combined result image to be original image
+            self._current_result._input_image = result1.image
+
+            if self._nms_options is not None:
+                # apply NMS to combined result
+                nms(
+                    self._current_result,
+                    iou_threshold=self._nms_options.threshold,
+                    use_iou=self._nms_options.use_iou,
+                    box_select=self._nms_options.box_select,
+                )
+            return self._current_result
+        return None
 
     def transform_result2(self, result2):
         """
@@ -518,13 +599,8 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
                 )
 
         else:
-            # new frame comes
-            if self._current_result is not None:
-                # patch combined result image to be original image
-                self._current_result._input_image = result1.image
-                # return combined result of previous frame
-                ret = self._current_result
-
+            # new frame comes: return combined result of previous frame
+            ret = self._finalize_current_result(result1)
             self._current_result = result2
             self._current_result1 = result1
 
@@ -546,7 +622,7 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
         for result in super().predict_batch(data):
             yield result
         if self._current_result is not None:
-            yield self._current_result
+            yield self._finalize_current_result(self._current_result1)
 
 
 class RegionExtractionPseudoModel(ModelLike):
@@ -556,31 +632,45 @@ class RegionExtractionPseudoModel(ModelLike):
 
     def __init__(
         self,
-        roi_list: list,
+        roi_list: Union[list, np.ndarray],
         model2: dg.model.Model,
         *,
-        motion_detect: Union[bool, int] = False,
+        motion_detect: Optional[MotionDetectOptions] = None,
     ):
         """
         Constructor.
 
         Args:
             roi_list: list of ROI boxes in [x1, y1, x2, y2] format
+                or 2D array of shape (N,4)
+                or 3D array of shape (K,M,4)
             model2: model, which will be used as a second step of the compound model pipeline
-            motion_detect: True or non-zero int to enable motion detection.
+            motion_detect: motion detection options.
+                When None, motion detection is disabled.
                 When enabled, ROI boxes where motion is not detected will be skipped.
-                When `motion_detect` is integer, it specifies how many frames to look back
-                to detect motion. When `motion_detect` is boolean, it is equivalent to
-                `motion_detect=1` (look back one frame).
         """
+
+        if isinstance(roi_list, np.ndarray) and len(roi_list.shape) == 3:
+            # flatten 3D array to 2D array
+            roi_list = roi_list.reshape(-1, roi_list.shape[-1])
+
         self._roi_list = roi_list
         self._model2 = model2
         self._base_img: list = []  # base image for motion detection
         self._motion_detect = motion_detect
+        self._non_blocking_batch_predict = False
 
-    # fallback all model-like attributes to the second model
-    def __getattr__(self, attr):
-        return getattr(self._model2, attr)
+    @property
+    def non_blocking_batch_predict(self):
+        return self._non_blocking_batch_predict
+
+    @non_blocking_batch_predict.setter
+    def non_blocking_batch_predict(self, val: bool):
+        self._non_blocking_batch_predict = val
+
+    @property
+    def image_backend(self) -> str:
+        return self._model2.image_backend
 
     def predict_batch(self, data):
         """
@@ -606,6 +696,14 @@ class RegionExtractionPseudoModel(ModelLike):
         all_rois = [True] * len(self._roi_list)
 
         for element in data:
+            if element is None:
+                if self._non_blocking_batch_predict:
+                    yield None
+                else:
+                    raise Exception(
+                        "Model misconfiguration: input data iterator returns None but non-blocking batch predict mode is not enabled"
+                    )
+
             # extract frame and frame info from data
             if isinstance(element, tuple):
                 # if data is tuple, we treat first element as frame data and second element as frame info
@@ -619,12 +717,12 @@ class RegionExtractionPseudoModel(ModelLike):
 
             image = preprocessed_data["image_input"]
 
-            if self._motion_detect:
+            if self._motion_detect is not None:
                 motion_img, base_img = detect_motion(
                     self._base_img[0] if self._base_img else None, image
                 )
                 self._base_img.append(base_img)
-                if len(self._base_img) > int(self._motion_detect):
+                if len(self._base_img) > int(self._motion_detect.look_back):
                     self._base_img.pop(0)
 
                 if motion_img is None:
@@ -632,14 +730,16 @@ class RegionExtractionPseudoModel(ModelLike):
                 else:
                     motion_detected = [
                         cv2.countNonZero(motion_img[roi[1] : roi[3], roi[0] : roi[2]])
-                        > 0
+                        > self._motion_detect.threshold
+                        * (roi[2] - roi[0])
+                        * (roi[3] - roi[1])
                         for roi in self._roi_list
                     ]
             else:
                 motion_detected = all_rois
 
             roi_list = [
-                {"bbox": roi, "label": "ROI", "score": idx, "category_id": idx}
+                {"bbox": roi, "label": f"ROI{idx}", "score": 1.0, "category_id": idx}
                 for idx, roi in enumerate(self._roi_list)
                 if motion_detected[idx]
             ]

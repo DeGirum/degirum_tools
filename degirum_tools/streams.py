@@ -245,8 +245,6 @@ class Composition:
         for t in self._threads:
             t.start()
 
-        print("Composition started")
-
         if wait or get_test_mode():
             self.stop(force_stop=False)
 
@@ -282,37 +280,34 @@ class Composition:
         if len(self._threads) == 0:
             raise Exception("Composition not started")
 
-        def do_join():
-            if force_stop:
-                # first signal abort to all gizmos
-                for gizmo in self._gizmos:
-                    gizmo.abort()
+        if force_stop:
+            # first signal abort to all gizmos
+            for gizmo in self._gizmos:
+                gizmo.abort()
 
-                # then empty all streams
-                for gizmo in self._gizmos:
-                    for i in gizmo._inputs:
-                        while not i.empty():
-                            try:
-                                i.get_nowait()
-                            except queue.Empty:
-                                break
+            # then empty all streams
+            for gizmo in self._gizmos:
+                for i in gizmo._inputs:
+                    while not i.empty():
+                        try:
+                            i.get_nowait()
+                        except queue.Empty:
+                            break
 
-            # finally wait for completion of all threads
-            for t in self._threads:
+        # finally wait for completion of all threads
+        for t in self._threads:
+            if t.name != threading.current_thread().name:
                 t.join()
 
-        # do it in a separate thread, because stop() may be called by some gizmo
-        joiner = threading.Thread(target=do_join)
-        joiner.start()
-        joiner.join()
-
         self._threads = []
-        print("Composition stopped")
+
+        # error handling
+        errors = ""
         for gizmo in self._gizmos:
             if gizmo.error is not None:
-                print(
-                    f"Error detected during execution of {gizmo.name}:\n  {type(gizmo.error)}: {str(gizmo.error)}"
-                )
+                errors += f"Error detected during execution of {gizmo.name}:\n  {type(gizmo.error)}: {str(gizmo.error)}\n\n"
+        if errors:
+            raise Exception(errors)
 
 
 class VideoSourceGizmo(Gizmo):
@@ -455,12 +450,13 @@ class VideoSaverGizmo(Gizmo):
     def run(self):
         """Run gizmo"""
 
-        get_img = (
-            lambda data: data.meta.image_overlay
-            if self._show_ai_overlay
-            and isinstance(data.meta, dg.postprocessor.InferenceResults)
-            else data.data
-        )
+        def get_img(data):
+            return (
+                data.meta.image_overlay
+                if self._show_ai_overlay
+                and isinstance(data.meta, dg.postprocessor.InferenceResults)
+                else data.data
+            )
 
         img = get_img(self.get_input(0).get())
         with open_video_writer(self._filename, img.shape[1], img.shape[0]) as writer:
