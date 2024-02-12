@@ -39,7 +39,7 @@ setup(
         "numpy",
         "scipy",
         "pillow",
-        "dotenv",
+        "python-dotenv",
         "requests",
         "psutil",
         "opencv-python",
