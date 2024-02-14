@@ -25,7 +25,6 @@ class TileModel():
     _model = None
     _model_attrs = set()
 
-
     def __init__(self, model: Model, tile_strategy: BaseTileStrategy):
         self._model = model
         self._model_attrs = set(model.__dir__()).difference(self._model_attr_blacklist)
