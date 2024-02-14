@@ -3,14 +3,15 @@ from __future__ import annotations
 import copy
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Any, Generator, List, Sequence, Tuple, Union
+from typing import Any, Generator, Iterable, List, Sequence, Tuple, Union
 
 import numpy as np
 from degirum_tools.math_support import weighted_boxes_fusion
 from degirum.aiclient import ModelParams
 
 
-_reverse_enumerate = lambda l: zip(range(len(l) - 1, -1, -1), reversed(l))
+def _reverse_enumerate(l: Iterable):
+    return zip(range(len(l) - 1, -1, -1), reversed(l))
 
 
 class _TileType(Enum):
@@ -96,7 +97,6 @@ class BaseTileStrategy(ABC):
     def _set_label_dict(self, label_dict: dict):
         self._label_dict = label_dict
 
-    
     @staticmethod
     def _translate_box_abs(tl: Sequence[Union[int, float]], 
                            box: Sequence[Union[int, float]], 
@@ -131,7 +131,7 @@ class BaseTileStrategy(ABC):
         if isinstance(scale, tuple):
             scale_x = scale[0]
             scale_y = scale[1]
-        elif type(scale) == float:
+        elif isinstance(scale, float):
             scale_x = scale
             scale_y = scale
         else:
@@ -191,7 +191,6 @@ class SimpleTiling(BaseTileStrategy):
 
         return [tile_width, tile_height] + expand_offsets
     
-
     def _get_slice(self, row: int, col: int) -> Tuple[np.ndarray, Tuple[_TileType, List[int]]]:
         tile_width, tile_height, expand_col, expand_row = self._tile_params
 
@@ -251,23 +250,20 @@ class SimpleTiling(BaseTileStrategy):
         
         return source()
 
-
     def _accumulate_results(self, results: Sequence[dict], info: Tuple[_TileType, List]):
         if info[0] == _TileType.BASIC_SLICE:
             for res in results:
-                if res.get('bbox') == None:
+                if res.get('bbox') is None:
                     continue
                 
                 SimpleTiling._translate_box_abs(info[1][0:2], res['bbox'], in_place=True)
 
             self._results.extend(results)
         
-
     def _get_results(self) -> List[dict]:
         results = copy.deepcopy(self._results)
         self._results.clear()
         return results
-    
     
     def __str__(self) -> str:
         return '{}x{} tiles, {}% overlap.'.format(self._num_cols, self._num_rows, self._overlap_percent * 100)
@@ -277,7 +273,6 @@ class LocalGlobalTiling(SimpleTiling):
     def __init__(self, cols: int, rows: int, overlap_percent: float, large_obj_threshold: float):
         super().__init__(cols, rows, overlap_percent)
         self._large_obj_thr = large_obj_threshold
-
 
     def _generate_tiles(self, image: np.ndarray) -> Generator[Tuple[np.ndarray, Tuple[_TileType, List]], None, None]:
         super_gen = super(LocalGlobalTiling, self)._generate_tiles(image)
@@ -289,7 +284,6 @@ class LocalGlobalTiling(SimpleTiling):
 
         yield image, (_TileType.GLOBAL, [0, 0])
 
-
     def _accumulate_results(self, results: Sequence[dict], info: Tuple[_TileType, List]):
         def _is_large_object(box):
             area = (box[2] - box[0]) * (box[3] - box[1])
@@ -299,13 +293,13 @@ class LocalGlobalTiling(SimpleTiling):
         # This indicates the global image scope/large object detections.
         if info[0] == _TileType.GLOBAL:
             for i, res in _reverse_enumerate(results):
-                if res.get('bbox') == None:
+                if res.get('bbox') is None:
                     continue
                 if not _is_large_object(res['bbox']):
                     del results[i]
         elif info[0] == _TileType.BASIC_SLICE:
             for i, res in _reverse_enumerate(results):
-                if res.get('bbox') == None:
+                if res.get('bbox') is None:
                     continue
                 if _is_large_object(res['bbox']):
                     del results[i]
@@ -340,11 +334,11 @@ class WBFSimpleTiling(_EdgeMixin, SimpleTiling):
         central_boxes, edge_boxes = self._categorize(results)
 
         for res in central_boxes:
-            if res.get('bbox') == None:
+            if res.get('bbox') is None:
                     continue
             SimpleTiling._translate_box_abs(info[1][0:2], res['bbox'], in_place=True)
         for res in edge_boxes:
-            if res.get('bbox') == None:
+            if res.get('bbox') is None:
                     continue
             SimpleTiling._translate_box_abs(info[1][0:2], res['bbox'], in_place=True)
             x1,y1,x2,y2 = res['bbox']
@@ -423,13 +417,13 @@ class WBFLocalGlobalTiling(WBFSimpleTiling):
 
         if info[0] == _TileType.GLOBAL:
             for i, res in _reverse_enumerate(results):
-                if res.get('bbox') == None:
+                if res.get('bbox') is None:
                     continue
                 if not _is_large_object(res['bbox'], self._large_obj_thr * self._overlap_percent * 5):
                     del results[i]
         elif info[0] == _TileType.BASIC_SLICE:
             for i, res in _reverse_enumerate(results):
-                if res.get('bbox') == None:
+                if res.get('bbox') is None:
                     continue
                 if _is_large_object(res['bbox'], self._large_obj_thr):
                     del results[i]

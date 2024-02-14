@@ -44,7 +44,6 @@ def test_wbf():
     assert len(res) == 4
 
 
-
 def test_generate_tiles():
     # Tolerance accounts for rounding errors due to discrete nature of pixels.
     tolerance = 0.01
@@ -147,8 +146,3 @@ def test_generate_tiles():
         assert tile[1][1][1] >= 0 and tile[1][1][1] <= 640
         assert tile[1][1][2] >= 0 and tile[1][1][2] <= 640
         assert tile[1][1][3] >= 0 and tile[1][1][3] <= 640
-
-
-
-test_generate_tiles()
-test_wbf()

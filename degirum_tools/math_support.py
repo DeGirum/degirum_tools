@@ -285,8 +285,6 @@ def _prefilter_boxes(boxes: Sequence[Sequence[Sequence]],
         for j in range(len(boxes[t])):
             score = scores[t][j]
 
-
-
             label = int(labels[t][j])
             box_part = boxes[t][j]
             x1 = float(box_part[0])
@@ -442,7 +440,6 @@ def weighted_boxes_fusion(
         det['bbox'] = boxes[i].tolist()
         det['category_id'] = int(labels[i])
         results.append(det)
-
 
     if not destructive:
         for box in low_boxes:

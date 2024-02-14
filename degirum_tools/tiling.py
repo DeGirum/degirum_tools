@@ -1,22 +1,17 @@
+from io import BytesIO
 from pathlib import Path
 from typing import Any, Iterator, Iterable, TypeAlias, Union
 
 import cv2
-import degirum as dg
 import numpy as np
-from degirum.exceptions import DegirumException
-from degirum.postprocessor import DetectionResults, InferenceResults, _inference_result_type
-from degirum.model import Model
 from PIL.Image import Image as PILImageClass
 from PIL import Image as PILImage
 
-#from .nms import _nms
-
-from io import BytesIO
-
 from degirum_tools.tile_strategy import BaseTileStrategy
 from degirum_tools.math_support import nms
-
+from degirum.exceptions import DegirumException
+from degirum.postprocessor import DetectionResults, InferenceResults, _inference_result_type
+from degirum.model import Model
 
 
 _ImageType: TypeAlias = Union[str, PILImageClass, np.ndarray, bytes]
@@ -44,7 +39,6 @@ class TileModel():
         self._tile_strategy._set_model_parameters(model.model_info)
         self._tile_strategy._set_label_dict(self._model.label_dictionary)
 
-
     # Override necessary to access dg.model.Model interface.
     def __getattr__(self, attr):
         try: 
@@ -54,14 +48,12 @@ class TileModel():
 
         return attr_value
     
-
     # Override necessary to access dg.model.Model interface.
     def __setattr__(self, attr, obj):
         if attr in self._model_attrs:
             return self._model.__setattr__(attr, obj)
         return super().__setattr__(attr, obj)
     
-
     # Override to make some attributes pseudo private.        
     def __dir__(self):
         return self._model.__dir__()
@@ -76,7 +68,6 @@ class TileModel():
 
     def __call__(self, input):
         return self.predict(input)
-
 
     def predict(self, input: _ImageType, frame_info: Any=None) -> DetectionResults:
         def _identity_conversion(x,y):
@@ -117,7 +108,6 @@ class TileModel():
 
         return results
     
-
     # predict_batch copied and modified from degirum.model.Model
     def predict_batch(self, input: Iterable)-> Iterator[InferenceResults]:
         def source():

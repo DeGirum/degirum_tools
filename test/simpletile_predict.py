@@ -5,7 +5,6 @@ import time
 import cv2
 import degirum as dg
 import matplotlib.pyplot as plt
-from degirum_tools.detection_eval import ObjectDetectionModelEvaluator
 
 from degirum_tools.tiling import TileModel
 from degirum_tools.tile_strategy import SimpleTiling, WBFSimpleTiling
