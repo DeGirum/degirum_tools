@@ -29,7 +29,7 @@
 
 import numpy as np
 from enum import Enum
-from typing import Union, Sequence
+from typing import List, Union, Sequence, Tuple
 
 
 def area(box: np.ndarray) -> np.ndarray:
@@ -272,6 +272,187 @@ def nms(
 
     detections._inference_results = [result_list[i] for i in keep]
 
+def _prefilter_boxes(boxes: Sequence[Sequence[Sequence]], 
+                    scores: Sequence[Sequence[float]], 
+                    labels: Sequence[Sequence[int]], 
+                    weights: np.ndarray, 
+                    thr: float) -> dict:
+    # dict with boxes stored by label
+    new_boxes = dict()
+    low_boxes = []
+
+    for t in range(len(boxes)):
+        for j in range(len(boxes[t])):
+            score = scores[t][j]
+
+
+
+            label = int(labels[t][j])
+            box_part = boxes[t][j]
+            x1 = float(box_part[0])
+            y1 = float(box_part[1])
+            x2 = float(box_part[2])
+            y2 = float(box_part[3])
+
+            # [label, score, weight, model index, x1, y1, x2, y2]
+            b = [int(label), float(score) * weights[t], weights[t], t, x1, y1, x2, y2]
+
+            if score < thr:
+                low_boxes.append(b)
+                continue
+
+            if label not in new_boxes:
+                new_boxes[label] = []
+
+            new_boxes[label].append(b)
+
+    # Sort each list in dict by score and transform it to numpy array
+    for k in new_boxes:
+        current_boxes = np.array(new_boxes[k])
+        new_boxes[k] = current_boxes[current_boxes[:, 1].argsort()[::-1]]
+
+    return new_boxes, low_boxes
+
+def _find_matching_box(boxes: np.ndarray, 
+                       new_box: np.ndarray, 
+                       match_iou: float) -> Tuple[int, float]:
+    
+    def _bb_1d_iou(boxes: np.ndarray, new_box: np.ndarray) -> np.ndarray:
+        # Returns the larger of the x or y 1D-IoU if the boxes overlap.
+        xA = np.maximum(boxes[:, 0], new_box[0])
+        yA = np.maximum(boxes[:, 1], new_box[1])
+        xB = np.minimum(boxes[:, 2], new_box[2])
+        yB = np.minimum(boxes[:, 3], new_box[3])
+
+        # Mask out boxes with no overlap in one of the dimensions dimensions.
+        inter_x, inter_y = np.maximum(xB - xA, 0), np.maximum(yB - yA, 0)
+        mask = np.minimum(inter_x, inter_y) == 0
+        inter_x[mask] = 0
+        inter_y[mask] = 0
+
+        w_a, h_a = boxes[:, 2] - boxes[:, 0], boxes[:, 3] - boxes[:, 1]
+        w_b, h_b = new_box[2] - new_box[0],  new_box[3] - new_box[1]
+
+        iou_x, iou_y = inter_x / (w_a + w_b - inter_x), inter_y / (h_a + h_b - inter_y)
+
+        return np.maximum(iou_x, iou_y)
+
+    if boxes.shape[0] == 0:
+        return -1, match_iou
+
+    ious = _bb_1d_iou(boxes[:, 4:], new_box[4:])
+
+    ious[boxes[:, 0] != new_box[0]] = -1
+
+    best_idx = np.argmax(ious)
+    best_iou = ious[best_idx]
+
+    if best_iou <= match_iou:
+        best_iou = match_iou
+        best_idx = -1
+
+    return best_idx, best_iou
+
+def weighted_boxes_fusion(
+        results: Sequence[dict],
+        weights: Union[Sequence[float], None]= None,
+        iou_thr: float= 0.55,
+        skip_box_thr: float= 0.0,
+        destructive=True
+) -> List[dict]:
+    '''
+    :results, a list of results e.g. [InferenceResults.results, InferenceResults.results, ...] with an added key, wbf_info.
+    : wbf_info is bbox but normalized to [0,1]
+    :weights: list of weights for each model. Default: None, which means weight == 1 for each model
+    :iou_thr: IoU value for boxes to be a match
+    :skip_box_thr: exclude boxes with score lower than this variable for fusion
+    :destructive: If true, boxes below the score threshold will not be placed back into the results.
+    '''
+
+    boxes_list = []
+    scores_list = []
+    labels_list = []
+
+    if len(results[0]) == 0:
+        return []
+    
+    for results in results:
+        boxes = []
+        scores = []
+        labels = []
+
+        for det in results:
+            boxes.append(det['wbf_info'])
+            scores.append(det['score'])
+            labels.append(det['category_id'])
+
+        boxes_list.append(boxes)
+        scores_list.append(scores)
+        labels_list.append(labels)
+
+    if weights is None:
+        weights = np.ones(len(boxes_list))
+
+    weights = np.array(weights)
+
+    filtered_boxes, low_boxes = _prefilter_boxes(boxes_list, scores_list, labels_list, weights, skip_box_thr)
+
+    if len(filtered_boxes) == 0:
+        return np.zeros((0, 4)), np.zeros((0,)), np.zeros((0,))
+
+    overall_boxes = []
+
+    # Only fuse same category id.
+    for label in filtered_boxes:
+        boxes = filtered_boxes[label]
+        new_boxes = []
+        weighted_boxes = np.empty((0, 8))
+
+        # Clusterize boxes
+        for j in range(0, len(boxes)):
+            index, best_iou = _find_matching_box(weighted_boxes, boxes[j], iou_thr)
+
+            if index != -1:
+                new_boxes[index] = np.vstack((new_boxes[index], boxes[j]))
+            else:
+                new_boxes.append(boxes[j].copy())
+                weighted_boxes = np.vstack((weighted_boxes, boxes[j].copy()))
+
+        for boxes in new_boxes:
+            if len(boxes.shape) > 1:
+                avg_confidence = np.average(boxes, axis=0)[1]
+                # Normalize confidence scores to the max confidence score in a cluster.
+                amax = np.amax(boxes, axis=0)
+                amin = np.amin(boxes, axis=0)
+                boxes = np.concatenate((amin[:6],amax[6:8])) 
+                boxes[1] = avg_confidence
+
+            overall_boxes.append(boxes)
+        
+    overall_boxes = np.vstack(overall_boxes)
+    overall_boxes = overall_boxes[overall_boxes[:, 1].argsort()[::-1]]
+    boxes = overall_boxes[:, 4:]
+    scores = overall_boxes[:, 1]
+    labels = overall_boxes[:, 0]
+
+    results = []
+    for i in range(boxes.shape[0]):
+        det = dict()
+        det['score'] = float(scores[i])
+        det['bbox'] = boxes[i].tolist()
+        det['category_id'] = int(labels[i])
+        results.append(det)
+
+
+    if not destructive:
+        for box in low_boxes:
+            det = dict()
+            det['score'] = float(box[1])
+            det['bbox'] = box[4:8]
+            det['category_id'] = int(box[0])
+            results.append(det)
+
+    return results
 
 class AnchorPoint(Enum):
     """Position of a point of interest within the bounding box"""
