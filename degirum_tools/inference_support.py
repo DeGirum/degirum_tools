@@ -68,6 +68,79 @@ def connect_model_zoo(
     return zoo
 
 
+def attach_analyzers(
+    model: dg.model.Model,
+    analyzers: Union[ResultAnalyzerBase, List[ResultAnalyzerBase], None],
+):
+    """
+    Attach analyzers to given model object.
+
+    Args:
+        model: Model object to attach analyzers to
+        analyzers: List of analyzer objects to attach to model,
+            or `None` to detach all analyzers if any were attached before
+
+    Returns:
+        Model object with attached analyzers
+    """
+
+    class AnalyzingPostprocessor:
+        def __init__(self, *args, **kwargs):
+            # create postprocessor of proper type
+            self._result = AnalyzingPostprocessor._postprocessor_type(*args, **kwargs)
+
+            # apply all analyzers to analyze result
+            for analyzer in AnalyzingPostprocessor._analyzers:
+                analyzer.analyze(self._result)
+
+        @property
+        def image_overlay(self):
+            img = self._result.image_overlay
+            if not isinstance(img, np.ndarray):
+                raise Exception(
+                    "Only OpenCV image backend is supported. Please set model.image_backend = 'opencv'"
+                )
+            # apply all analyzers to annotate overlay image
+            for analyzer in AnalyzingPostprocessor._analyzers:
+                img = analyzer.annotate(self._result, img)
+            return img
+
+        # delegate all other attributes to wrapped postprocessor
+        def __getattr__(self, attr):
+            return getattr(self._postprocessor, attr)
+
+        # deduce postprocessor type from model
+        if model.custom_postprocessor is not None:
+            _postprocessor_type = model.custom_postprocessor
+            _was_custom = True
+        else:
+            _postprocessor_type = dg.postprocessor._inference_result_type(
+                model._model_parameters
+            )()
+            _was_custom = False
+
+        _analyzers = (
+            analyzers
+            if isinstance(analyzers, list)
+            else ([analyzers] if analyzers is not None else [])
+        )
+
+    if analyzers:
+        # attach custom postprocessor to model
+        model._custom_postprocessor = AnalyzingPostprocessor
+    else:
+        # remove analyzing custom postprocessor from model if any
+        if model._custom_postprocessor.__name__ == AnalyzingPostprocessor.__name__:
+            if model._custom_postprocessor._was_custom:
+                model._custom_postprocessor = (
+                    model._custom_postprocessor._postprocessor_type
+                )
+            else:
+                model._custom_postprocessor = None
+
+    return model
+
+
 def predict_stream(
     model: dg.model.Model,
     video_source_id: Union[int, str, Path, None],
@@ -91,38 +164,12 @@ def predict_stream(
         Also prediction result object has overridden `image_overlay` method which additionally displays analyzers' annotations.
     """
 
-    # select OpenCV backend and matching colorspace
-    model.image_backend = "opencv"
-    model.input_numpy_colorspace = "BGR"
-
-    class AnalyzerResult:
-        def __init__(self, res, analyzers):
-            self._result = res
-            self._analyzers = (
-                analyzers
-                if isinstance(analyzers, list)
-                else ([analyzers] if analyzers is not None else [])
-            )
-            # apply all analyzers to the result
-            for analyzer in self._analyzers:
-                analyzer.analyze(res)
-
-        def __getattr__(self, item):
-            return getattr(self._result, item)
-
-        @property
-        def image_overlay(self):
-            img = self._result.image_overlay
-            for analyzer in self._analyzers:
-                img = analyzer.annotate(self._result, img)
-            return img
+    if analyzers:
+        attach_analyzers(model, analyzers)
 
     with open_video_stream(video_source_id) as stream:
         for res in model.predict_batch(video_source(stream)):
-            if analyzers is not None:
-                yield AnalyzerResult(res, analyzers)
-            else:
-                yield res
+            yield res
 
 
 def annotate_video(
@@ -149,9 +196,6 @@ def annotate_video(
         analyzers - optional analyzer or list of analyzers to be applied to model inference results
     """
 
-    model.image_backend = "opencv"
-    model.input_numpy_colorspace = "BGR"
-
     win_name = f"Annotating {video_source_id}"
 
     analyzer_list = (
@@ -160,9 +204,11 @@ def annotate_video(
         else ([analyzers] if analyzers is not None else [])
     )
 
-    for analyzer in analyzer_list:
-        if hasattr(analyzer, "window_attach"):
-            analyzer.window_attach(win_name)
+    if analyzer_list:
+        attach_analyzers(model, analyzer_list)
+        for analyzer in analyzer_list:
+            if hasattr(analyzer, "window_attach"):
+                analyzer.window_attach(win_name)
 
     with ExitStack() as stack:
         if visual_display:
@@ -184,9 +230,6 @@ def annotate_video(
 
         for res in model.predict_batch(video_source(stream)):
             img = res.image_overlay
-
-            for analyzer in analyzer_list:
-                img = analyzer.analyze_and_annotate(res, img)
 
             writer.write(img)
 
