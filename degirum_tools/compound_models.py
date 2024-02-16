@@ -226,6 +226,7 @@ class CompoundModelBase(ModelLike):
                 transformed_result2._frame_info = result2.info.original_info
                 yield transformed_result2
 
+    # explicitly redirect setting of `non_blocking_batch_predict` to the first model
     @property
     def non_blocking_batch_predict(self):
         return self.model1.non_blocking_batch_predict
@@ -233,6 +234,10 @@ class CompoundModelBase(ModelLike):
     @non_blocking_batch_predict.setter
     def non_blocking_batch_predict(self, val: bool):
         self.model1.non_blocking_batch_predict = val
+
+    # fallback all getters of model-like attributes to the first model
+    def __getattr__(self, attr):
+        return getattr(self.model1, attr)
 
 
 class CombiningCompoundModel(CompoundModelBase):
