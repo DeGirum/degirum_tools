@@ -1,5 +1,5 @@
 from degirum_tools.tile_strategy import SimpleTiling
-from degirum_tools.math_support import weighted_boxes_fusion
+from degirum_tools.math_support import edge_box_fusion
 import numpy as np
 
 def test_wbf():
@@ -11,37 +11,52 @@ def test_wbf():
                 {"bbox": [11, 45, 21, 55], "score": 0.9, "category_id": "1"}
     ]
 
+    res_list_2 = [
+                  {"bbox": [0, 0, 10, 10], "score": 0.8, "category_id": "1"},
+                  {"bbox": [9, 0, 19, 10], "score": 0.8, "category_id": "1"},
+                  {"bbox": [0, 9, 10, 19], "score": 0.8, "category_id": "1"},
+                  {"bbox": [9, 9, 19, 19], "score": 0.8, "category_id": "1"}
+    ]
     # Normalize for WBF
     for res in res_list:
         res['wbf_info'] = [res['bbox'][0] / 500, res['bbox'][1] / 500, res['bbox'][2] / 500, res['bbox'][3] / 500]
+    for res in res_list_2:
+        res['wbf_info'] = [res['bbox'][0] / 500, res['bbox'][1] / 500, res['bbox'][2] / 500, res['bbox'][3] / 500]
 
     # overlap > 0.8 y dimension, no overlap x dimension
-    res = weighted_boxes_fusion([[res_list[1], res_list[2]]], None, 0.8, 0.3)
+    res = edge_box_fusion([res_list[1], res_list[2]], 0.8, 0.3)
     assert len(res) == 2
 
     # overlap both dimensions, 1D-IOU < 0.8
-    res = weighted_boxes_fusion([[res_list[2], res_list[3]]], None, 0.8, 0.3)
+    res = edge_box_fusion([res_list[2], res_list[3]], 0.8, 0.3)
     assert len(res) == 2
 
     # overlap both dimensions, X 1D-IOU > 0.8
-    res = weighted_boxes_fusion([[res_list[0], res_list[4]]], None, 0.8, 0.3)
+    res = edge_box_fusion([res_list[0], res_list[4]], 0.8, 0.3)
     assert len(res) == 1
 
     # overlap both dimensions, X 1D-IOU > 0.8, not same class
     res_list[4]['category_id'] = 2
-    res = weighted_boxes_fusion([[res_list[0], res_list[4]]], None, 0.8, 0.3)
+    res = edge_box_fusion([res_list[0], res_list[4]], 0.8, 0.3)
     assert len(res) == 2
     res_list[4]['category_id'] = 1
 
     # overlap both dimensions, X 1D-IOU > 0.8, one box score is less than the score threshold
     res_list[4]['score'] = 0.2
-    res = weighted_boxes_fusion([[res_list[0], res_list[4]]], None, 0.8, 0.3, destructive=False)
+    res = edge_box_fusion([res_list[0], res_list[4]], 0.8, 0.3, destructive=False)
     assert len(res) == 2
-    res_list[4]['category_id'] = 0.8
+    res_list[4]['score'] = 0.8
 
-    # All boxes
-    res = weighted_boxes_fusion([res_list], None, 0.8, 0.3)
+    # All boxes (order matters to check if masking feature works in the IoU matching)
+    res_list.append(res_list[1])
+    res_list[1] = res_list[4]
+    res_list.pop(4)
+    res = edge_box_fusion(res_list, 0.8, 0.3)
     assert len(res) == 4
+
+    # Corner case, fusion of four boxes at corners
+    res = edge_box_fusion(res_list_2, 0.8, 0.3)
+    assert len(res) == 1
 
 
 def test_generate_tiles():
@@ -146,3 +161,5 @@ def test_generate_tiles():
         assert tile[1][1][1] >= 0 and tile[1][1][1] <= 640
         assert tile[1][1][2] >= 0 and tile[1][1][2] <= 640
         assert tile[1][1][3] >= 0 and tile[1][1][3] <= 640
+
+test_wbf()

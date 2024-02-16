@@ -3,14 +3,14 @@ from __future__ import annotations
 import copy
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Any, Generator, Iterable, List, Sequence, Tuple, Union
+from typing import Any, Generator, List, MutableSequence, Sequence, Tuple, Union
 
 import numpy as np
-from degirum_tools.math_support import weighted_boxes_fusion
+from degirum_tools.math_support import edge_box_fusion
 from degirum.aiclient import ModelParams
 
 
-def _reverse_enumerate(l: Iterable):
+def _reverse_enumerate(l: Sequence):
     return zip(range(len(l) - 1, -1, -1), reversed(l))
 
 
@@ -22,6 +22,11 @@ class _TileType(Enum):
 class _EdgeMixin:
     # Make sure that in accumulate_results, you increment _slice_id
     _slice_id = 0
+
+    _top_edge: Tuple[int, int, int, int]
+    _bot_edge: Tuple[int, int, int, int]
+    _left_edge: Tuple[int, int, int, int]
+    _right_edge: Tuple[int, int, int, int]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)  # forwards all unused arguments
@@ -39,7 +44,7 @@ class _EdgeMixin:
         return relevant_edge
     
     def _calculate_overlapped_edges(self, 
-                                    box: Sequence[Union[int, float]], 
+                                    box: MutableSequence[Union[int, float]], 
                                     relevant_edges: Sequence[bool], 
                                     compensation: float=1.0) -> Tuple[bool, bool, bool, bool]:
         overlap_top, overlap_bot, overlap_left, overlap_right = False, False, False, False
@@ -85,7 +90,7 @@ class BaseTileStrategy(ABC):
     def _generate_tiles(self, image: np.ndarray):
         ''''''
     @abstractmethod
-    def _accumulate_results(self, results: Sequence[dict], info: Any):
+    def _accumulate_results(self, results: MutableSequence[dict], info: Any):
         ''''''
     @abstractmethod
     def _get_results(self):
@@ -99,7 +104,7 @@ class BaseTileStrategy(ABC):
 
     @staticmethod
     def _translate_box_abs(tl: Sequence[Union[int, float]], 
-                           box: Sequence[Union[int, float]], 
+                           box: MutableSequence[Union[int, float]], 
                            in_place: bool=False) -> Sequence[Union[int, float]]:
         """ Translates bounding box to original image based on the position of a slice's top left corner.
         Args:
@@ -119,7 +124,7 @@ class BaseTileStrategy(ABC):
     
     @staticmethod
     def _translate_box_scaled(scale: Sequence[float], 
-                              box: Sequence[Union[int, float]], 
+                              box: MutableSequence[Union[int, float]], 
                               in_place: bool=False) -> Sequence[float]:
         """Translates bounding box to original image based on the scaling factor.
         Args:
@@ -153,7 +158,7 @@ class SimpleTiling(BaseTileStrategy):
         self._num_cols = cols
         self._num_rows = rows
         self._overlap_percent = overlap_percent
-        self._results = []
+        self._results: List[dict] = []
         self._aspect_aware = True
 
     def _calculate_tile_parameters(self) -> List[float]:
@@ -162,7 +167,7 @@ class SimpleTiling(BaseTileStrategy):
         tile_width  = self._width  / (self._num_cols - self._overlap_percent * (self._num_cols - 1))
         tile_height = self._height / (self._num_rows - self._overlap_percent * (self._num_rows - 1))
 
-        expand_offsets = [0, 0]
+        expand_offsets = [0.0, 0.0]
 
         if self._aspect_aware:
             tile_aspect_ratio = tile_width / tile_height
@@ -250,7 +255,7 @@ class SimpleTiling(BaseTileStrategy):
         
         return source()
 
-    def _accumulate_results(self, results: Sequence[dict], info: Tuple[_TileType, List]):
+    def _accumulate_results(self, results: MutableSequence[dict], info: Tuple[_TileType, List]):
         if info[0] == _TileType.BASIC_SLICE:
             for res in results:
                 if res.get('bbox') is None:
@@ -284,7 +289,7 @@ class LocalGlobalTiling(SimpleTiling):
 
         yield image, (_TileType.GLOBAL, [0, 0])
 
-    def _accumulate_results(self, results: Sequence[dict], info: Tuple[_TileType, List]):
+    def _accumulate_results(self, results: MutableSequence[dict], info: Tuple[_TileType, List]):
         def _is_large_object(box):
             area = (box[2] - box[0]) * (box[3] - box[1])
 
@@ -315,13 +320,13 @@ class WBFSimpleTiling(_EdgeMixin, SimpleTiling):
         super().__init__(cols, rows, overlap_percent)
         self._edge_thr = edge_thr
         self._wbf_thr = wbf_thr
-        self._edge_results = []
+        self._edge_results: List[dict]= []
 
     def _generate_tiles(self, image: np.ndarray) -> Generator[Tuple[np.ndarray, Tuple[_TileType, List]], None, None]:
         super_gen = super(WBFSimpleTiling, self)._generate_tiles(image)
 
-        w = self._tile_params[0] + self._tile_params[2]
-        h = self._tile_params[1] + self._tile_params[3]
+        w = int(self._tile_params[0] + self._tile_params[2])
+        h = int(self._tile_params[1] + self._tile_params[3])
         self._top_edge = (0, 0, w, int(self._edge_thr * h))
         self._bot_edge = (0, int(h - self._edge_thr * h), w, h)
         self._left_edge = (0, 0, int(w * self._edge_thr), h)
@@ -330,7 +335,7 @@ class WBFSimpleTiling(_EdgeMixin, SimpleTiling):
         for tile in super_gen:
             yield tile
 
-    def _accumulate_results(self, results: Sequence[dict], info: Tuple[_TileType, List]):
+    def _accumulate_results(self, results: MutableSequence[dict], info: Tuple[_TileType, List]):
         central_boxes, edge_boxes = self._categorize(results)
 
         for res in central_boxes:
@@ -342,7 +347,7 @@ class WBFSimpleTiling(_EdgeMixin, SimpleTiling):
                     continue
             SimpleTiling._translate_box_abs(info[1][0:2], res['bbox'], in_place=True)
             x1,y1,x2,y2 = res['bbox']
-            # WBF requires normalized coordinates.
+            # Box fusion requires normalized coordinates.
             res['wbf_info'] = [x1/self._width, y1/self._height, x2/self._width, y2/self._height]
         
         self._results.extend(central_boxes)
@@ -350,7 +355,7 @@ class WBFSimpleTiling(_EdgeMixin, SimpleTiling):
         self._slice_id += 1
     
     def _get_results(self) -> List[dict]:
-        edge_results = weighted_boxes_fusion([self._edge_results], iou_thr=self._wbf_thr)
+        edge_results = edge_box_fusion(self._edge_results, iou_threshold=self._wbf_thr)
 
         for det in edge_results:
             det['label'] = self._label_dict[det['category_id']]
@@ -367,7 +372,7 @@ class WBFSimpleTiling(_EdgeMixin, SimpleTiling):
         self._edge_results.clear()
         return results
 
-    def _categorize(self, dets: List[dict]):
+    def _categorize(self, dets: MutableSequence[dict]):
         slice_id = self._slice_id
         cols = self._num_cols
         rows = self._num_rows
@@ -409,7 +414,7 @@ class WBFLocalGlobalTiling(WBFSimpleTiling):
 
         yield image, (_TileType.GLOBAL, [0, 0])
     
-    def _accumulate_results(self, results: Sequence[dict], info: Tuple[_TileType, List]):
+    def _accumulate_results(self, results: MutableSequence[dict], info: Tuple[_TileType, List]):
         def _is_large_object(box, thr):
             area = (box[2] - box[0]) * (box[3] - box[1])
 

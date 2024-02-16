@@ -1,6 +1,12 @@
+import sys
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Iterator, Iterable, TypeAlias, Union
+from typing import Any, Iterator, Iterable, Sequence, Set, Union
+
+if sys.version_info == (3, 9): # TypeAlias dissapears in version 3.9 but reappears in version 3.10
+    from typing_extensions import TypeAlias
+else:
+    from typing import TypeAlias
 
 import cv2
 import numpy as np
@@ -22,8 +28,8 @@ class TileModel():
 
     # These two variables must remain outside the constructor. They also must be the first variables
     # set in the constructor in order for the pseudo-subclassing trick to work.
-    _model = None
-    _model_attrs = set()
+    _model: Union[Model, None] = None
+    _model_attrs: Set[str] = set()
 
     def __init__(self, model: Model, tile_strategy: BaseTileStrategy):
         self._model = model
@@ -43,7 +49,10 @@ class TileModel():
         try: 
             attr_value = self._model.__getattribute__(attr)
         except AttributeError as e: 
-            raise AttributeError("'{}' object has no attribute '{}'", name=e.name, obj=type(self).__name__)
+            if sys.version_info >= (3, 10):
+                raise AttributeError("'{}' object has no attribute '{}'", name=e.name, obj=type(self).__name__)
+            else:
+                raise AttributeError("'{}' object has no attribute '{}'".format(type(self).__name__, e.args[0].split("'")[3]))
 
         return attr_value
     
@@ -128,7 +137,7 @@ class TileModel():
             path: str,
             *,
             recursive: bool= False,
-            extensions: list[str]=[".jpg", ".jpeg", ".png", ".bmp"],
+            extensions: Union[Sequence[str], str]=[".jpg", ".jpeg", ".png", ".bmp"],
         ) -> Iterator[InferenceResults]:
 
             if len(self._model_params.InputType) > 1:

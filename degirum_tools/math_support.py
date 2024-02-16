@@ -29,7 +29,7 @@
 
 import numpy as np
 from enum import Enum
-from typing import List, Union, Sequence, Tuple
+from typing import Any, Dict, List, Union, Sequence, Tuple
 
 
 def area(box: np.ndarray) -> np.ndarray:
@@ -272,48 +272,46 @@ def nms(
 
     detections._inference_results = [result_list[i] for i in keep]
 
-def _prefilter_boxes(boxes: Sequence[Sequence[Sequence]], 
-                    scores: Sequence[Sequence[float]], 
-                    labels: Sequence[Sequence[int]], 
-                    weights: np.ndarray, 
-                    thr: float) -> dict:
-    # dict with boxes stored by label
-    new_boxes = dict()
-    low_boxes = []
+def _prefilter_boxes(boxes: Sequence[Sequence], 
+                    scores: Sequence[float], 
+                    labels: Sequence[int], 
+                    thr: float) -> Tuple[Dict[int, np.ndarray], List]:
+    # dict with boxes stored by category id
+    new_boxes: Dict[int, Any] = dict()
+    skipped_boxes = []
 
-    for t in range(len(boxes)):
-        for j in range(len(boxes[t])):
-            score = scores[t][j]
+    for j in range(len(boxes)):
+        score = scores[j]
 
-            label = int(labels[t][j])
-            box_part = boxes[t][j]
-            x1 = float(box_part[0])
-            y1 = float(box_part[1])
-            x2 = float(box_part[2])
-            y2 = float(box_part[3])
+        label = int(labels[j])
+        box_part = boxes[j]
+        x1 = float(box_part[0])
+        y1 = float(box_part[1])
+        x2 = float(box_part[2])
+        y2 = float(box_part[3])
 
-            # [label, score, weight, model index, x1, y1, x2, y2]
-            b = [int(label), float(score) * weights[t], weights[t], t, x1, y1, x2, y2]
+        # [label, score, x1, y1, x2, y2]
+        b = [label, float(score), x1, y1, x2, y2]
 
-            if score < thr:
-                low_boxes.append(b)
-                continue
+        if score < thr:
+            skipped_boxes.append(b)
+            continue
 
-            if label not in new_boxes:
-                new_boxes[label] = []
+        if label not in new_boxes:
+            new_boxes[label] = []
 
-            new_boxes[label].append(b)
+        new_boxes[label].append(b)
 
     # Sort each list in dict by score and transform it to numpy array
     for k in new_boxes:
         current_boxes = np.array(new_boxes[k])
         new_boxes[k] = current_boxes[current_boxes[:, 1].argsort()[::-1]]
 
-    return new_boxes, low_boxes
+    return (new_boxes, skipped_boxes)
 
-def _find_matching_box(boxes: np.ndarray, 
+def _find_matching_box(boxes: Sequence[np.ndarray], 
                        new_box: np.ndarray, 
-                       match_iou: float) -> Tuple[int, float]:
+                       match_iou: float) -> Tuple[int, Union[float, int]]:
     
     def _bb_1d_iou(boxes: np.ndarray, new_box: np.ndarray) -> np.ndarray:
         # Returns the larger of the x or y 1D-IoU if the boxes overlap.
@@ -322,7 +320,7 @@ def _find_matching_box(boxes: np.ndarray,
         xB = np.minimum(boxes[:, 2], new_box[2])
         yB = np.minimum(boxes[:, 3], new_box[3])
 
-        # Mask out boxes with no overlap in one of the dimensions dimensions.
+        # Mask out boxes with no overlap in one of the dimensions.
         inter_x, inter_y = np.maximum(xB - xA, 0), np.maximum(yB - yA, 0)
         mask = np.minimum(inter_x, inter_y) == 0
         inter_x[mask] = 0
@@ -335,14 +333,25 @@ def _find_matching_box(boxes: np.ndarray,
 
         return np.maximum(iou_x, iou_y)
 
-    if boxes.shape[0] == 0:
-        return -1, match_iou
+    if len(boxes) == 0:
+         return -1, match_iou
+    
+    # Create a mask for already matched boxes.
+    matched_mask = np.full(len(boxes), False)
+    masked_boxes = np.empty((0,6))
 
-    ious = _bb_1d_iou(boxes[:, 4:], new_box[4:])
+    for i, box_set in enumerate(boxes):
+        if len(box_set) >= 2:
+            matched_mask[i] = True
+        
+        masked_boxes = np.vstack((masked_boxes, box_set[0]))
 
-    ious[boxes[:, 0] != new_box[0]] = -1
+    ious = _bb_1d_iou(masked_boxes[:, 2:], new_box[2:])
 
-    best_idx = np.argmax(ious)
+    ious[masked_boxes[:, 0] != new_box[0]] = -1
+    ious[matched_mask] = -1
+    
+    best_idx = int(np.argmax(ious)) # for type checker.
     best_iou = ious[best_idx]
 
     if best_iou <= match_iou:
@@ -351,87 +360,108 @@ def _find_matching_box(boxes: np.ndarray,
 
     return best_idx, best_iou
 
-def weighted_boxes_fusion(
-        results: Sequence[dict],
-        weights: Union[Sequence[float], None]= None,
-        iou_thr: float= 0.55,
-        skip_box_thr: float= 0.0,
+def _fuse_boxes(box_sets: Sequence[np.ndarray]) -> np.ndarray:
+    fused_boxes = []
+
+    for box_set in box_sets:
+        if len(box_set) == 1:
+            fused_boxes.append(box_set[0])
+        else:
+            score = (box_set[0][1] + box_set[1][1]) / 2
+            coord_max = np.amax(box_set, axis=0)
+            coord_min = np.amin(box_set, axis=0)
+            bbox = np.concatenate((coord_min[2:4], coord_max[4:6]))
+
+            fused_box = np.zeros(6, dtype=np.float32)
+            fused_box[0] = box_set[0][0] 
+            fused_box[1] = score
+            fused_box[2:] = bbox
+            fused_boxes.append(fused_box)
+    
+    return np.vstack(fused_boxes)
+                    
+def edge_box_fusion(
+        detections: Sequence[dict],
+        iou_threshold: float= 0.55,
+        skip_threshold: float= 0.0,
         destructive=True
 ) -> List[dict]:
-    '''
-    :results, a list of results e.g. [InferenceResults.results, InferenceResults.results, ...] with an added key, wbf_info.
-    : wbf_info is bbox but normalized to [0,1]
-    :weights: list of weights for each model. Default: None, which means weight == 1 for each model
-    :iou_thr: IoU value for boxes to be a match
-    :skip_box_thr: exclude boxes with score lower than this variable for fusion
-    :destructive: If true, boxes below the score threshold will not be placed back into the results.
-    '''
+    """
+    Perform box fusion on a set of edge detections. Edge detections are detections within a certain threshold of a 
+    Args:
+        detections (DetectionResults.results): A list of dictionaries that contain detection results as defined in PySDK.
+        iou_threshold (float): 1D-IoU threshold used for selecting boxes for fusion.
+        skip_threshold (float): Score threshold for which boxes to fuse.
+        destructive (bool): Keep skipped boxes (underneath the `score_threshold`) in the results.
+
+    Returns:
+        DetectionResult.results: A list of dictionaries that contain detection results as defined in PySDK.
+        Boxes that are not fused are kept if destructive is False, otherwise they are discarded.
+    """
 
     boxes_list = []
     scores_list = []
     labels_list = []
 
-    if len(results[0]) == 0:
+    if len(detections) == 0:
         return []
     
-    for results in results:
-        boxes = []
-        scores = []
-        labels = []
+    for det in detections:
+        boxes_list.append(det['wbf_info'])
+        scores_list.append(det['score'])
+        labels_list.append(det['category_id'])
 
-        for det in results:
-            boxes.append(det['wbf_info'])
-            scores.append(det['score'])
-            labels.append(det['category_id'])
-
-        boxes_list.append(boxes)
-        scores_list.append(scores)
-        labels_list.append(labels)
-
-    if weights is None:
-        weights = np.ones(len(boxes_list))
-
-    weights = np.array(weights)
-
-    filtered_boxes, low_boxes = _prefilter_boxes(boxes_list, scores_list, labels_list, weights, skip_box_thr)
+    filtered_boxes, skipped_boxes = _prefilter_boxes(boxes_list, scores_list, labels_list, skip_threshold)
 
     if len(filtered_boxes) == 0:
-        return np.zeros((0, 4)), np.zeros((0,)), np.zeros((0,))
+        if not destructive:
+            if len(skipped_boxes) > 0:
+                results = []
+                for box in skipped_boxes:
+                    det = dict()
+                    det['score'] = float(box[1])
+                    det['bbox'] = box[2:6]
+                    det['category_id'] = int(box[0])
+                    results.append(det)
+                
+                return results
+            
+        return []
 
     overall_boxes = []
 
     # Only fuse same category id.
     for label in filtered_boxes:
         boxes = filtered_boxes[label]
-        new_boxes = []
-        weighted_boxes = np.empty((0, 8))
+        new_boxes: List[np.ndarray] = []
 
-        # Clusterize boxes
-        for j in range(0, len(boxes)):
-            index, best_iou = _find_matching_box(weighted_boxes, boxes[j], iou_thr)
+        # Initial fusion, max two boxes in one fused box.
+        for j in range(len(boxes)):
+            index, _ = _find_matching_box(new_boxes, boxes[j], iou_threshold)
 
             if index != -1:
                 new_boxes[index] = np.vstack((new_boxes[index], boxes[j]))
             else:
-                new_boxes.append(boxes[j].copy())
-                weighted_boxes = np.vstack((weighted_boxes, boxes[j].copy()))
+                new_boxes.append(np.expand_dims(boxes[j].copy(), axis=0))
 
-        for boxes in new_boxes:
-            if len(boxes.shape) > 1:
-                avg_confidence = np.average(boxes, axis=0)[1]
-                # Normalize confidence scores to the max confidence score in a cluster.
-                amax = np.amax(boxes, axis=0)
-                amin = np.amin(boxes, axis=0)
-                boxes = np.concatenate((amin[:6],amax[6:8])) 
-                boxes[1] = avg_confidence
+        # Second fusion, max two boxes, fuses corner detections if all four were detected.
+        boxes = _fuse_boxes(new_boxes)
+        new_boxes = []
+        for j in range(len(boxes)):
+            index, _ = _find_matching_box(new_boxes, boxes[j], iou_threshold)
 
-            overall_boxes.append(boxes)
-        
-    overall_boxes = np.vstack(overall_boxes)
-    overall_boxes = overall_boxes[overall_boxes[:, 1].argsort()[::-1]]
-    boxes = overall_boxes[:, 4:]
-    scores = overall_boxes[:, 1]
-    labels = overall_boxes[:, 0]
+            if index != -1:
+                new_boxes[index] = np.vstack((new_boxes[index], boxes[j]))
+            else:
+                new_boxes.append(np.expand_dims(boxes[j].copy(), axis=0))
+    
+        overall_boxes.append(_fuse_boxes(new_boxes))
+    
+    fused_boxes = np.vstack(overall_boxes)
+    fused_boxes = fused_boxes[fused_boxes[:, 1].argsort()[::-1]]
+    boxes = fused_boxes[:, 2:]
+    scores = fused_boxes[:, 1]
+    labels = fused_boxes[:, 0]
 
     results = []
     for i in range(boxes.shape[0]):
@@ -442,10 +472,10 @@ def weighted_boxes_fusion(
         results.append(det)
 
     if not destructive:
-        for box in low_boxes:
+        for box in skipped_boxes:
             det = dict()
             det['score'] = float(box[1])
-            det['bbox'] = box[4:8]
+            det['bbox'] = box[2:6]
             det['category_id'] = int(box[0])
             results.append(det)
 
