@@ -1,3 +1,12 @@
+#
+# test_box_util.py: unit tests for bbox processing functions
+#
+# Copyright DeGirum Corporation 2024
+# All rights reserved
+#
+# Implements unit tests for bbox processing functions
+#
+
 import numpy as np
 
 

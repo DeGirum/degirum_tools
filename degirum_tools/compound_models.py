@@ -16,56 +16,6 @@ from .math_support import nms, NmsBoxSelectionPolicy
 from enum import Enum
 
 
-@dataclass
-class NmsOptions:
-    """
-    Options for non-maximum suppression (NMS) algorithm.
-    """
-
-    threshold: float  # IoU or IoS threshold for box clustering [0..1]
-    use_iou: bool = True  # use IoU for box clustering (otherwise use IoS)
-    box_select: NmsBoxSelectionPolicy = NmsBoxSelectionPolicy.MOST_PROBABLE
-
-
-@dataclass
-class MotionDetectOptions:
-    """
-    Options for motion detection algorithm.
-    """
-
-    threshold: float  # threshold for motion detection [0..1]: fraction of changed pixels in respect to frame size
-    look_back: int = 1  # number of frames to look back to detect motion
-
-
-class CropExtentOptions(Enum):
-    """
-    Options for applying extending crop to the input image.
-    """
-
-    ASPECT_RATIO_NO_ADJUSTMENT = 1
-    """
-    Each dimension of the bounding box is extended by 'crop_extent' parameter
-    """
-
-    ASPECT_RATIO_ADJUSTMENT_BY_LONG_SIDE = 2
-    """
-    The longer dimension of the bounding box is extended by 'crop_extent' parameter, and the other side is 
-    calculated as new_bbox_h * aspect_ratio (if the longer dimension is the height of the bounding box)
-    or new_bbox_w / aspect_ratio (if the longer dimension is the width of the bounding box),
-    aspect_ratio is defined as the ratio of model2's input width to model2's input height
-    """
-
-    ASPECT_RATIO_ADJUSTMENT_BY_AREA = 3
-    """
-    The bounding box is extended by an area factor of ('crop_extent' * 0.01 + 1) ^ 2; the new height
-    is determined from the desired area and aspect ratio, and is adjusted to be at least as long as 
-    the original bounding box height; the new width is calculated as new_bbox_h * aspect_ratio, where
-    aspect_ratio is defined as the ratio of model2's input width to model2's input height,
-    and then adjusted to be at least as long as the original bounding box width; the new
-    height is then adjusted as new_bbox_w / aspect_ratio
-    """
-
-
 class ModelLike(ABC):
     """
     A base class which provides a common interface for all models, similar to PySDK model class
@@ -155,6 +105,8 @@ class CompoundModelBase(ModelLike):
         self.model1 = model1
         self.model2 = model2
         self.queue = CompoundModelBase.NonBlockingQueue()
+        # soft limit for the queue size
+        self._queue_soft_limit = model1.frame_queue_depth
 
     @abstractmethod
     def queue_result1(self, result1):
@@ -204,17 +156,23 @@ class CompoundModelBase(ModelLike):
             if result1 is not None:
                 self.queue_result1(result1)
 
-            # process all results ready so far
-            no_results = True
-            while result2 := next(model2_iter):
-                if (transformed_result2 := self.transform_result2(result2)) is not None:
-                    # restore original frame info to support nested compound models
-                    transformed_result2._frame_info = result2.info.original_info
-                    yield transformed_result2
-                    no_results = False
+            while True:
+                # process all results ready so far
+                no_results = True
+                while result2 := next(model2_iter):
+                    if (
+                        transformed_result2 := self.transform_result2(result2)
+                    ) is not None:
+                        # restore original frame info to support nested compound models
+                        transformed_result2._frame_info = result2.info.original_info
+                        yield transformed_result2
+                        no_results = False
 
-            if no_results and self.model1.non_blocking_batch_predict:
-                yield None  # in case of empty queue, yield None to let things moving
+                if no_results and self.model1.non_blocking_batch_predict:
+                    yield None  # in case of empty queue, yield None to let things moving
+
+                if self.queue.qsize() < self._queue_soft_limit:
+                    break
 
         self.queue.put(None)  # signal end of queue to nested model
         self.model2.non_blocking_batch_predict = False  # restore blocking mode
@@ -226,6 +184,7 @@ class CompoundModelBase(ModelLike):
                 transformed_result2._frame_info = result2.info.original_info
                 yield transformed_result2
 
+    # explicitly redirect setting of `non_blocking_batch_predict` to the first model
     @property
     def non_blocking_batch_predict(self):
         return self.model1.non_blocking_batch_predict
@@ -233,6 +192,18 @@ class CompoundModelBase(ModelLike):
     @non_blocking_batch_predict.setter
     def non_blocking_batch_predict(self, val: bool):
         self.model1.non_blocking_batch_predict = val
+
+    @property
+    def _custom_postprocessor(self) -> Optional[type]:
+        return None
+
+    @_custom_postprocessor.setter
+    def _custom_postprocessor(self, val: type):
+        raise Exception("Custom postprocessor is not supported for compound models")
+
+    # fallback all getters of model-like attributes to the first model
+    def __getattr__(self, attr):
+        return getattr(self.model1, attr)
 
 
 class CombiningCompoundModel(CompoundModelBase):
@@ -269,6 +240,35 @@ class CombiningCompoundModel(CompoundModelBase):
         """
         result2.results.extend(result2.info.result1.results)
         return result2
+
+
+class CropExtentOptions(Enum):
+    """
+    Options for applying extending crop to the input image.
+    """
+
+    ASPECT_RATIO_NO_ADJUSTMENT = 1
+    """
+    Each dimension of the bounding box is extended by 'crop_extent' parameter
+    """
+
+    ASPECT_RATIO_ADJUSTMENT_BY_LONG_SIDE = 2
+    """
+    The longer dimension of the bounding box is extended by 'crop_extent' parameter, and the other side is
+    calculated as new_bbox_h * aspect_ratio (if the longer dimension is the height of the bounding box)
+    or new_bbox_w / aspect_ratio (if the longer dimension is the width of the bounding box),
+    aspect_ratio is defined as the ratio of model2's input width to model2's input height
+    """
+
+    ASPECT_RATIO_ADJUSTMENT_BY_AREA = 3
+    """
+    The bounding box is extended by an area factor of ('crop_extent' * 0.01 + 1) ^ 2; the new height
+    is determined from the desired area and aspect ratio, and is adjusted to be at least as long as
+    the original bounding box height; the new width is calculated as new_bbox_h * aspect_ratio, where
+    aspect_ratio is defined as the ratio of model2's input width to model2's input height,
+    and then adjusted to be at least as long as the original bounding box width; the new
+    height is then adjusted as new_bbox_w / aspect_ratio
+    """
 
 
 class CroppingCompoundModel(CompoundModelBase):
@@ -501,6 +501,17 @@ class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
             yield self._current_result
 
 
+@dataclass
+class NmsOptions:
+    """
+    Options for non-maximum suppression (NMS) algorithm.
+    """
+
+    threshold: float  # IoU or IoS threshold for box clustering [0..1]
+    use_iou: bool = True  # use IoU for box clustering (otherwise use IoS)
+    box_select: NmsBoxSelectionPolicy = NmsBoxSelectionPolicy.MOST_PROBABLE
+
+
 class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
     """
     Compound model class which crops original image according to results of the first model
@@ -625,6 +636,16 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
             yield self._finalize_current_result(self._current_result1)
 
 
+@dataclass
+class MotionDetectOptions:
+    """
+    Options for motion detection algorithm.
+    """
+
+    threshold: float  # threshold for motion detection [0..1]: fraction of changed pixels in respect to frame size
+    look_back: int = 1  # number of frames to look back to detect motion
+
+
 class RegionExtractionPseudoModel(ModelLike):
     """
     Pseudo model class which extracts regions from given image according to given ROI boxes.
@@ -659,6 +680,7 @@ class RegionExtractionPseudoModel(ModelLike):
         self._base_img: list = []  # base image for motion detection
         self._motion_detect = motion_detect
         self._non_blocking_batch_predict = False
+        self._custom_postprocessor: Optional[type] = None
 
     @property
     def non_blocking_batch_predict(self):
@@ -669,8 +691,16 @@ class RegionExtractionPseudoModel(ModelLike):
         self._non_blocking_batch_predict = val
 
     @property
-    def image_backend(self) -> str:
-        return self._model2.image_backend
+    def custom_postprocessor(self) -> Optional[type]:
+        return self._custom_postprocessor
+
+    @custom_postprocessor.setter
+    def custom_postprocessor(self, val: type):
+        self._custom_postprocessor = val
+
+    # fallback all getters of model-like attributes to the first model
+    def __getattr__(self, attr):
+        return getattr(self._model2, attr)
 
     def predict_batch(self, data):
         """
@@ -745,7 +775,12 @@ class RegionExtractionPseudoModel(ModelLike):
             ]
 
             # generate pseudo inference results
-            result = dg.postprocessor.DetectionResults(
+            pp = (
+                self._custom_postprocessor
+                if self._custom_postprocessor
+                else dg.postprocessor.DetectionResults
+            )
+            result = pp(
                 model_params=self._model2._model_parameters,
                 input_image=image,
                 model_image=image,
