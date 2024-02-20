@@ -107,11 +107,11 @@ def attach_analyzers(
 
         # delegate all other attributes to wrapped postprocessor
         def __getattr__(self, attr):
-            return getattr(self._postprocessor, attr)
+            return getattr(self._result, attr)
 
         # deduce postprocessor type from model
-        if model.custom_postprocessor is not None:
-            _postprocessor_type = model.custom_postprocessor
+        if model._custom_postprocessor is not None:
+            _postprocessor_type = model._custom_postprocessor
             _was_custom = True
         else:
             _postprocessor_type = dg.postprocessor._inference_result_type(
@@ -130,7 +130,11 @@ def attach_analyzers(
         model._custom_postprocessor = AnalyzingPostprocessor
     else:
         # remove analyzing custom postprocessor from model if any
-        if model._custom_postprocessor.__name__ == AnalyzingPostprocessor.__name__:
+        if (
+            model._custom_postprocessor is not None
+            and isinstance(model._custom_postprocessor, type)
+            and model._custom_postprocessor.__name__ == AnalyzingPostprocessor.__name__
+        ):
             if model._custom_postprocessor._was_custom:
                 model._custom_postprocessor = (
                     model._custom_postprocessor._postprocessor_type

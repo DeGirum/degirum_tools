@@ -1,0 +1,28 @@
+{
+  "ConfigVersion": 1,
+  "Checksum": "a10d6dc1da601ee1b4c9f536d2012d093bede71c5370e1f7118789021a5b4eae",
+  "DEVICE": [
+    {
+      "DeviceType": "DUMMY",
+      "RuntimeAgent": "DUMMY"
+    }
+  ],
+  "PRE_PROCESS": [
+    {
+      "InputW": 256,
+      "InputH": 256,
+      "InputC": 3,
+      "InputN": 1
+    }
+  ],
+  "MODEL_PARAMETERS": [
+    {
+      "ModelPath": "model.dummy"
+    }
+  ],
+  "POST_PROCESS": [
+    {
+      "LabelsPath": "dummy_labels.json"
+    }
+  ]
+}

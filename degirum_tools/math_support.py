@@ -428,7 +428,7 @@ def generate_tiles_fixed_ratio(
     tile_aspect_ratio: Union[float, np.ndarray, Sequence],
     grid_size: Union[np.ndarray, Sequence],
     image_size: Union[np.ndarray, Sequence],
-    min_overlap_percent: Union[np.ndarray, Sequence],
+    min_overlap_percent: Union[np.ndarray, Sequence, float],
 ):
     """
     Generate a set of rectangular boxes (tiles) of given fixed size

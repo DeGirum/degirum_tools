@@ -3,5 +3,5 @@ filename =
     ./setup.py,
     ./degirum_tools/*.py,
     ./test/*.py
-select=F,W6,E71,E72,E112,E113,E124,E272,E303,E304,E502,E702,E703,E731,W191
+ignore=E203,E401,E402,E501,W503
 indent-size=4
