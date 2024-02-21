@@ -11,7 +11,7 @@ import cv2, numpy as np
 import degirum as dg  # import DeGirum PySDK
 from contextlib import ExitStack
 from pathlib import Path
-from typing import Union, List
+from typing import Union, List, Optional
 from dataclasses import dataclass
 from .video_support import (
     open_video_stream,
@@ -68,26 +68,30 @@ def connect_model_zoo(
     return zoo
 
 
-def attach_analyzers(
-    model: dg.model.Model,
+def _create_analyzing_postprocessor_class(
     analyzers: Union[ResultAnalyzerBase, List[ResultAnalyzerBase], None],
+    model: Optional[dg.model.Model] = None,
 ):
-    """
-    Attach analyzers to given model object.
+    """Helper function to create postprocessor class entity which
+    wraps original postprocessor and applies analyzers to its results.
 
     Args:
-        model: Model object to attach analyzers to
-        analyzers: List of analyzer objects to attach to model,
-            or `None` to detach all analyzers if any were attached before
+        analyzers: list of analyzers to apply to postprocessor results
+        model: model object (to be used to deduce postprocessor type), optional
 
     Returns:
-        Model object with attached analyzers
+        AnalyzingPostprocessor class
     """
 
     class AnalyzingPostprocessor:
         def __init__(self, *args, **kwargs):
-            # create postprocessor of proper type
-            self._result = AnalyzingPostprocessor._postprocessor_type(*args, **kwargs)
+            if AnalyzingPostprocessor._postprocessor_type is not None:
+                # create postprocessor of proper type
+                self._result = AnalyzingPostprocessor._postprocessor_type(
+                    *args, **kwargs
+                )
+            else:
+                self._result = kwargs.get("result")
 
             # apply all analyzers to analyze result
             for analyzer in AnalyzingPostprocessor._analyzers:
@@ -109,31 +113,57 @@ def attach_analyzers(
         def __getattr__(self, attr):
             return getattr(self._result, attr)
 
-        # deduce postprocessor type from model
-        if model._custom_postprocessor is not None:
-            _postprocessor_type = model._custom_postprocessor
-            _was_custom = True
-        else:
-            _postprocessor_type = dg.postprocessor._inference_result_type(
-                model._model_parameters
-            )()
-            _was_custom = False
-
+        # store analyzers
         _analyzers = (
             analyzers
             if isinstance(analyzers, list)
             else ([analyzers] if analyzers is not None else [])
         )
 
+        # deduce postprocessor type from model
+        if model is not None:
+            if model._custom_postprocessor is not None:
+                _postprocessor_type = model._custom_postprocessor
+                _was_custom = True
+            else:
+                _postprocessor_type = dg.postprocessor._inference_result_type(
+                    model._model_parameters
+                )()
+                _was_custom = False
+        else:
+            _postprocessor_type = None
+            _was_custom = False
+
+    return AnalyzingPostprocessor
+
+
+def attach_analyzers(
+    model: dg.model.Model,
+    analyzers: Union[ResultAnalyzerBase, List[ResultAnalyzerBase], None],
+):
+    """
+    Attach analyzers to given model object.
+
+    Args:
+        model: Model object to attach analyzers to
+        analyzers: List of analyzer objects to attach to model,
+            or `None` to detach all analyzers if any were attached before
+
+    Returns:
+        Model object with attached analyzers
+    """
+
+    analyzing_postprocessor = _create_analyzing_postprocessor_class(analyzers, model)
+
     if analyzers:
         # attach custom postprocessor to model
-        model._custom_postprocessor = AnalyzingPostprocessor
+        model._custom_postprocessor = analyzing_postprocessor
     else:
         # remove analyzing custom postprocessor from model if any
         if (
             model._custom_postprocessor is not None
             and isinstance(model._custom_postprocessor, type)
-            and model._custom_postprocessor.__name__ == AnalyzingPostprocessor.__name__
+            and model._custom_postprocessor.__name__ == analyzing_postprocessor.__name__
         ):
             if model._custom_postprocessor._was_custom:
                 model._custom_postprocessor = (
@@ -168,12 +198,14 @@ def predict_stream(
         Also prediction result object has overridden `image_overlay` method which additionally displays analyzers' annotations.
     """
 
-    if analyzers:
-        attach_analyzers(model, analyzers)
+    analyzing_postprocessor = _create_analyzing_postprocessor_class(analyzers)
 
     with open_video_stream(video_source_id) as stream:
         for res in model.predict_batch(video_source(stream)):
-            yield res
+            if analyzers is not None:
+                yield analyzing_postprocessor(result=res)
+            else:
+                yield res
 
 
 def annotate_video(
@@ -208,11 +240,9 @@ def annotate_video(
         else ([analyzers] if analyzers is not None else [])
     )
 
-    if analyzer_list:
-        attach_analyzers(model, analyzer_list)
-        for analyzer in analyzer_list:
-            if hasattr(analyzer, "window_attach"):
-                analyzer.window_attach(win_name)
+    for analyzer in analyzer_list:
+        if hasattr(analyzer, "window_attach"):
+            analyzer.window_attach(win_name)
 
     with ExitStack() as stack:
         if visual_display:
@@ -234,6 +264,9 @@ def annotate_video(
 
         for res in model.predict_batch(video_source(stream)):
             img = res.image_overlay
+
+            for analyzer in analyzer_list:
+                img = analyzer.analyze_and_annotate(res, img)
 
             writer.write(img)
 
