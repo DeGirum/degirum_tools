@@ -4,14 +4,13 @@
 # Copyright DeGirum Corporation 2023
 # All rights reserved
 #
-
 import yaml
 import json
 import os
 from typing import List
 import numpy as np
-from pycocotools.coco import COCO
-from pycocotools.cocoeval import COCOeval
+from xtcocotools.coco import COCO
+from xtcocotools.cocoeval import COCOeval
 from .math_support import xyxy2xywh
 
 
@@ -61,7 +60,7 @@ def save_results_coco_json(results, jdict, image_id, class_map=None):
 
 
 def evaluate_coco(
-    anno: COCO, pred: COCO, mAP_type: str = "bbox", img_id_list: List[str] = []
+    anno: COCO, pred: COCO, sigmas: List[float], mAP_type: str = "bbox", img_id_list: List[str] = []
 ):
     """Evaluation process based on the annotation COCO object and the predic
 
@@ -72,7 +71,8 @@ def evaluate_coco(
 
     Returns the mAP statistics.
     """
-    eval_obj = COCOeval(anno, pred, mAP_type)
+
+    eval_obj = COCOeval(anno, pred, mAP_type, np.array(sigmas), use_area=True)
     if img_id_list:
         eval_obj.params.imgIds = [id for id in img_id_list]  # image IDs to evaluate
     eval_obj.evaluate()
@@ -97,6 +97,7 @@ class ObjectDetectionModelEvaluator:
         self,
         dg_model,
         classmap=None,
+        sigmas = None,
         pred_path="predictions.json",
         output_confidence_threshold=0.001,
         output_nms_threshold=0.7,
@@ -136,9 +137,12 @@ class ObjectDetectionModelEvaluator:
         self.dg_model = dg_model
         self.classmap = classmap
         self.pred_path = pred_path
+        self.sigmas =  sigmas
 
         if (
-            self.dg_model.output_postprocess_type in ["Detection", "DetectionYolo", "DetectionYoloV8"]
+            self.dg_model.output_postprocess_type == "Detection"
+            or "DetectionYolo"
+            or "DetectionYoloV8"
         ):
             self.dg_model.output_confidence_threshold = output_confidence_threshold
             self.dg_model.output_nms_threshold = output_nms_threshold
@@ -168,6 +172,12 @@ class ObjectDetectionModelEvaluator:
         with open(config_yaml) as f:
             args = yaml.load(f, Loader=yaml.FullLoader)
 
+        if args["sigmas"] is not None:
+            sigmas = args["sigmas"]
+        else:
+            # The default sigmas are used for COCO dataset.
+            sigmas = [0.026, 0.025, 0.025, 0.035, 0.035, 0.079, 0.079, 0.072, 0.072, 0.062, 0.062, 0.107, 0.107, 0.087,0.087, 0.089, 0.089]
+            
         return cls(
             dg_model=dg_model,
             classmap=args["classmap"],
@@ -184,6 +194,7 @@ class ObjectDetectionModelEvaluator:
             input_img_fmt=args["input_img_fmt"],
             input_letterbox_fill_color=tuple(args["input_letterbox_fill_color"]),
             input_numpy_colorspace=args["input_numpy_colorspace"],
+            sigmas=sigmas,
         )
 
     def evaluate(
@@ -224,7 +235,7 @@ class ObjectDetectionModelEvaluator:
         sorted_path_list = [path_list[i] for i in sorted_indices]
 
         if num_val_images > 0:
-            sorted_path_list = sorted_path_list[0:num_val_images]
+            path_list = sorted_path_list[0:num_val_images]
 
         with self.dg_model:
             for image_number, predictions in enumerate(
@@ -245,13 +256,13 @@ class ObjectDetectionModelEvaluator:
         stats = []
         # bounding box map calculation
         bbox_stats = evaluate_coco(
-            anno, pred, mAP_type="bbox", img_id_list=sorted_img_id_list
+            anno, pred, self.sigmas, mAP_type="bbox", img_id_list=sorted_img_id_list
         )
         stats.append(bbox_stats)
         # pose keypoint map calculation
         if is_pose_model(jdict[0]):
             kp_stats = evaluate_coco(
-                anno, pred, mAP_type="keypoints", img_id_list=sorted_img_id_list
+                anno, pred, self.sigmas, mAP_type="keypoints", img_id_list=sorted_img_id_list
             )
             stats.append(kp_stats)
         return stats
