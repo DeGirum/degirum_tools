@@ -237,7 +237,7 @@ class ObjectDetectionModelEvaluator:
                 save_results_coco_json(
                     predictions.results, jdict, image_id, self.classmap
                 )
-        
+
         # save the predictions to a json file
         if self.pred_path:
             with open(self.pred_path, "w") as f:
