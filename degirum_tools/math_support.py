@@ -503,7 +503,9 @@ class FIRFilterLP:
         self._fir_coeffs = scipy.signal.firwin(
             taps_cnt, normalized_cutoff, window="blackmanharris"
         )
-        self._buffer = np.zeros((dimension, taps_cnt))
+        self._buffer = np.array([])
+        self._taps_cnt = taps_cnt
+        self._initialized = False
         self._result = np.zeros(dimension)
 
     def update(self, sample: Union[float, np.ndarray]) -> np.ndarray:
@@ -517,6 +519,9 @@ class FIRFilterLP:
         Returns:
             filtered signal
         """
+        if not self._initialized:
+            self._buffer = np.column_stack((sample,) * self._taps_cnt)
+            self._initialized = True
         self._buffer = np.column_stack((self._buffer[:, 1:], sample))
         self._result = np.dot(self._buffer, self._fir_coeffs)
         return self._result
