@@ -11,6 +11,7 @@ import numpy as np
 
 
 def test_area():
+    """Test area function."""
     from degirum_tools import area
 
     unit_square = np.array([0, 0, 1, 1])
@@ -20,6 +21,7 @@ def test_area():
 
 
 def test_intersection():
+    """Test intersection function."""
     from degirum_tools import intersection
 
     unit_square_origin0 = np.array([0, 0, 1, 1])
@@ -29,6 +31,7 @@ def test_intersection():
 
 
 def test_nms():
+    """Test non-maximum suppression function."""
     from degirum_tools import nms, NmsBoxSelectionPolicy
     import degirum as dg
     from copy import deepcopy
@@ -158,6 +161,7 @@ def test_nms():
 
 
 def test_generate_tiles():
+    """Test tile generation functions."""
     from degirum_tools import generate_tiles_fixed_size, generate_tiles_fixed_ratio
 
     # single tile
@@ -185,3 +189,33 @@ def test_generate_tiles():
 
     # 3x3 tiles
     assert generate_tiles_fixed_ratio(1.5, [0, 3], [600, 400], 10).shape == (3, 4, 4)
+
+
+def test_lpf():
+    """Test low-pass filter"""
+    from degirum_tools import FIRFilterLP
+
+    signal = np.array([0, 1] * 100)
+
+    taps = 11
+    lpf = FIRFilterLP(0.1, taps, 1)
+    filtered_signal = []
+    for s in signal:
+        filtered = lpf(s)
+        assert filtered == lpf.get()
+        filtered_signal.append(filtered)
+
+    filtered_signal = filtered_signal[taps:]
+    assert np.allclose(filtered_signal, [0.5] * len(filtered_signal))
+
+    signal2 = np.array([[0, 0], [1, 2]] * 100)
+    taps = 15
+    lpf = FIRFilterLP(0.1, taps, 2)
+    filtered_signal = []
+    for s in signal2:
+        filtered = lpf(s)
+        assert np.all(filtered == lpf.get())
+        filtered_signal.append(filtered)
+
+    filtered_signal = filtered_signal[taps:]
+    assert np.allclose(filtered_signal, [[0.5, 1]] * len(filtered_signal))

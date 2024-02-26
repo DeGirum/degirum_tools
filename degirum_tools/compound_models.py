@@ -320,6 +320,7 @@ class CroppingCompoundModel(CompoundModelBase):
             image_size = self.image_size(result1.image)
             for idx, obj in enumerate(result1.results):
                 adj_bbox = self._adjust_bbox(obj["bbox"], image_size)
+                obj["bbox"] = adj_bbox
                 if hasattr(result1.image, "crop"):
                     cropped_img = result1.image.crop(adj_bbox)
                 else:
@@ -596,7 +597,14 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
             # adjust bbox coordinates to original image coordinates
             x, y = result1.results[idx]["bbox"][:2]
             for r in result2._inference_results:
-                r["bbox"] = np.add(r["bbox"], [x, y, x, y]).tolist()
+                if "bbox" in r:
+                    r["bbox"] = np.add(r["bbox"], [x, y, x, y]).tolist()
+
+                if "landmarks" in r:
+                    for m in r["landmarks"]:
+                        m["landmark"][0] += x
+                        m["landmark"][1] += y
+
             if self._add_model1_results:
                 # prepend result from the first model to the combined result if requested
                 result2._inference_results.insert(0, result1.results[idx])

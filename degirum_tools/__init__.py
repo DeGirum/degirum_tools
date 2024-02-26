@@ -14,6 +14,7 @@ from .environment import *
 from .inference_support import *
 from .line_count import *
 from .math_support import *
+from .object_selector import *
 from .object_tracker import *
 from .ui_support import *
 from .video_support import *
