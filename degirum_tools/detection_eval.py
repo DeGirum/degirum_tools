@@ -97,7 +97,7 @@ class ObjectDetectionModelEvaluator:
         self,
         dg_model,
         classmap=None,
-        pred_path="predictions.json",
+        pred_path=None,
         output_confidence_threshold=0.001,
         output_nms_threshold=0.7,
         output_max_detections=300,
@@ -237,10 +237,13 @@ class ObjectDetectionModelEvaluator:
                 save_results_coco_json(
                     predictions.results, jdict, image_id, self.classmap
                 )
-        with open(self.pred_path, "w") as f:
-            json.dump(jdict, f, indent=4)
 
-        pred = anno.loadRes(self.pred_path)
+        # save the predictions to a json file
+        if self.pred_path:
+            with open(self.pred_path, "w") as f:
+                json.dump(jdict, f, indent=4)
+
+        pred = anno.loadRes(jdict)
 
         stats = []
         # bounding box map calculation
