@@ -32,7 +32,7 @@ def model_prediction(model, validation_images_dir, label, labelsmap, k=1):
                 sorted_predictions = sorted(
                     res.results, key=lambda x: x["score"], reverse=True
                 )
-                top_predictions = sorted_predictions[:k]  ## get the top k predictions
+                top_predictions = sorted_predictions[:k]  # get the top k predictions
                 top_labels = [pred["label"] for pred in top_predictions]
                 prediction.append(
                     [labelsmap[top_labels[i]] for i in range(len(top_labels))]
