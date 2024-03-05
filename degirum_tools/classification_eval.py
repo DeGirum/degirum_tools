@@ -33,9 +33,12 @@ def model_prediction(model, validation_images_dir, label, labelsmap, k=1):
                     res.results, key=lambda x: x["score"], reverse=True
                 )
                 top_predictions = sorted_predictions[:k]  # get the top k predictions
-                top_labels = [pred["label"] for pred in top_predictions]
+                top_categories = [pred["category_id"] for pred in top_predictions]
                 prediction.append(
-                    [labelsmap[top_labels[i]] for i in range(len(top_labels))]
+                    [
+                        labelsmap[int(top_categories[i])]
+                        for i in range(len(top_categories))
+                    ]
                 )
     return (prediction, val_data)
 
@@ -58,7 +61,7 @@ class ImageClassificationModelEvaluator:
     def __init__(
         self,
         dg_model,
-        classmap,
+        foldermap,
         top_k,
         output_confidence_threshold=0.001,
         input_resize_method="bicubic",
@@ -73,8 +76,8 @@ class ImageClassificationModelEvaluator:
             Args:
                 dg_model (Detection model): Classification model from the Degirum model zoo.
                 k (int) : The value of `k` in top-k.
-                classmap (dict): The key represents the actual labels (as specified in the model JSON file) and values represent the class names (folder names) of the validation dataset.
-                                 - For example : Gender Classification model - classmap = {"Male": "male", "Female": "female"}
+                foldermap (dict): The key represents integer (starting from 0) and values represent the class names (folder names) of the validation dataset.
+                                 - For example : Gender Classification model - foldermap = {0: "0", 1: "1"}
                 input_resize_method (str): Input Resize Method.
                 input_pad_method (str): Input Pad Method.
                 image_backend (str): Image Backend.
@@ -82,7 +85,7 @@ class ImageClassificationModelEvaluator:
         """
 
         self.dg_model = dg_model
-        self.classmap = classmap
+        self.foldermap = foldermap
         self.top_k = top_k
         if self.dg_model.output_postprocess_type == "Classification":
             self.dg_model.output_confidence_threshold = output_confidence_threshold
@@ -100,7 +103,7 @@ class ImageClassificationModelEvaluator:
 
         return cls(
             dg_model=dg_model,
-            classmap=args["classmap"],
+            foldermap=args["foldermap"],
             top_k=args["top_k"],
             output_confidence_threshold=args["output_confidence_threshold"],
             input_resize_method=args["input_resize_method"],
@@ -128,7 +131,7 @@ class ImageClassificationModelEvaluator:
             print(f"Class : {label}, Count of Groundtruth labels : {len(gndtruth)}")
 
             prediction, val_data = model_prediction(
-                self.dg_model, image_folder_path, label, self.classmap, k=self.top_k
+                self.dg_model, image_folder_path, label, self.foldermap, k=self.top_k
             )
 
             misclassified_images = identify_misclassified_examples(
