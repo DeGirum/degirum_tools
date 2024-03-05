@@ -3,40 +3,29 @@ from tqdm import tqdm
 from pathlib import Path
 
 
-def count_files_in_directory(directory_path):
-    # Ensure the directory path exists
-    if not os.path.exists(directory_path):
-        print(f"The directory path '{directory_path}' does not exist.")
-        return -1
-    # List all files in the directory
-    files = [
-        f
-        for f in os.listdir(directory_path)
-        if os.path.isfile(os.path.join(directory_path, f))
-    ]
-    # Count the number of files
-    file_count = len(files)
-    return file_count
-
-
-def model_prediction(model, validation_images_dir, label, labelsmap, k=1):
+def model_prediction(model, validation_images_dir, label, foldermap, top_k=[1, 5]):
     image_dir_path = Path(validation_images_dir + "/" + label)
-    all_images = [str(image_path) for image_path in image_dir_path.glob("*")]
-    val_data, prediction = [], []
+    image_extensions = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
+    all_images = [
+        str(image_path)
+        for image_path in image_dir_path.glob("*")
+        if image_path.suffix.lower() in image_extensions
+    ]
+    val_data = []
+    prediction = {k: [] for k in top_k}  # Initialize prediction dictionary
     for img in tqdm(all_images, desc="Processing Images"):
         val_data.append(img)
-        # Check if the current item is a file
-        if os.path.isfile(img):
-            with model:
-                res = model(img)
-                sorted_predictions = sorted(
-                    res.results, key=lambda x: x["score"], reverse=True
-                )
+        with model:
+            res = model(img)
+            sorted_predictions = sorted(
+                res.results, key=lambda x: x["score"], reverse=True
+            )
+            for k in top_k:
                 top_predictions = sorted_predictions[:k]  # get the top k predictions
                 top_categories = [pred["category_id"] for pred in top_predictions]
-                prediction.append(
+                prediction[k].append(
                     [
-                        labelsmap[int(top_categories[i])]
+                        foldermap[int(top_categories[i])]
                         for i in range(len(top_categories))
                     ]
                 )
@@ -44,17 +33,37 @@ def model_prediction(model, validation_images_dir, label, labelsmap, k=1):
 
 
 def identify_misclassified_examples(prediction, gndtruth, val_data):
-    misclassified_images = []
-    for i in range(len(prediction)):
-        if gndtruth[i] not in prediction[i]:
-            misclassified_images.append(val_data[i])
-    return misclassified_images
+    misclassified_images = {
+        k: [] for k in prediction.keys()
+    }  # Initialize misclassified_images dictionary
+
+    for k, preds in prediction.items():  # Iterate over each top-k prediction
+        for i in range(len(preds)):  # Iterate over predictions for each image
+            if (
+                gndtruth[i] not in preds[i]
+            ):  # Check if ground truth is in top-k predictions
+                misclassified_images[k].append(
+                    val_data[i]
+                )  # Append misclassified image to the corresponding list
+        print(
+            f"Count of misclassified examples for Top-{k}: {len(misclassified_images[k])}\n"
+        )
 
 
-def top_k_accuracy(total_data, total_misclassified):
-    correct_predictions = total_data - total_misclassified
-    accuracy = correct_predictions / total_data
-    return accuracy
+def calculate_accuracy(predictions, ground_truth, top_k):
+    total_correct_predictions = {k: 0 for k in top_k}
+    total_predictions = {k: 0 for k in top_k}
+
+    for category_id, category_predictions in predictions.items():
+        for k in top_k:
+            if k in category_predictions:
+                for i, pred in enumerate(category_predictions[k]):
+                    if ground_truth[category_id][i] in pred[:k]:
+                        total_correct_predictions[k] += 1
+                    total_predictions[k] += 1
+
+    accuracies = {k: total_correct_predictions[k] / total_predictions[k] for k in top_k}
+    return accuracies
 
 
 class ImageClassificationModelEvaluator:
@@ -75,7 +84,7 @@ class ImageClassificationModelEvaluator:
 
             Args:
                 dg_model (Detection model): Classification model from the Degirum model zoo.
-                k (int) : The value of `k` in top-k.
+                top_k (list) : List of `k` values in top-k, default:[1,5].
                 foldermap (dict): The key represents integer (starting from 0) and values represent the class names (folder names) of the validation dataset.
                                  - For example : Gender Classification model - foldermap = {0: "0", 1: "1"}
                 input_resize_method (str): Input Resize Method.
@@ -112,34 +121,28 @@ class ImageClassificationModelEvaluator:
             input_img_fmt=args["input_img_fmt"],
         )
 
-    def evaluate(
-        self,
-        image_folder_path: str,
-        print_frequency: int = 0,  # print_frequency (int): Number of image batches to be evaluated at a time.
-    ):
-        total_data = 0
-        total_misclassified = 0
-        misclassified_count_dct = {}
-
-        for label in os.listdir(image_folder_path):
-            gndtruth = []
-            data_per_class = count_files_in_directory(
-                os.path.join(image_folder_path, label)
-            )
-            total_data += data_per_class
-            gndtruth = [label for _ in range(data_per_class)]
-            print(f"Class : {label}, Count of Groundtruth labels : {len(gndtruth)}")
-
+    def evaluate(self, image_folder_path: str):
+        predictions = {}
+        gndtruth = []
+        ground_truth = {}
+        for category_folder in os.listdir(image_folder_path):
             prediction, val_data = model_prediction(
-                self.dg_model, image_folder_path, label, self.foldermap, k=self.top_k
+                self.dg_model,
+                image_folder_path,
+                category_folder,
+                self.foldermap,
+                self.top_k,
             )
-
-            misclassified_images = identify_misclassified_examples(
-                prediction, gndtruth, val_data
+            gndtruth = [category_folder for _ in range(len(val_data))]
+            print(
+                f"Class : {category_folder}, Count of Groundtruth labels : {len(gndtruth)}\n"
             )
-            print(f"Count of misclassified examples : {len(misclassified_images)}\n")
-            misclassified_count_dct[label] = len(misclassified_images)
-            total_misclassified += len(misclassified_images)
+            identify_misclassified_examples(prediction, gndtruth, val_data)
 
-        accuracy = top_k_accuracy(total_data, total_misclassified)
-        print(f"Top-{self.top_k} Accuracy for classification model: {accuracy}")
+            predictions[category_folder] = prediction
+            ground_truth[category_folder] = gndtruth
+
+        top_k_accuracy = calculate_accuracy(predictions, ground_truth, self.top_k)
+
+        for k, accuracy in top_k_accuracy.items():
+            print(f"Top-{k} Accuracy for classification model: {accuracy}")
