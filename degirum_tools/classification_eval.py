@@ -1,6 +1,7 @@
 import yaml, os
 from tqdm import tqdm
 from pathlib import Path
+from typing import Dict, List
 
 
 def model_prediction(model, validation_images_dir, label, foldermap, top_k=[1, 5]):
@@ -12,7 +13,9 @@ def model_prediction(model, validation_images_dir, label, foldermap, top_k=[1, 5
         if image_path.suffix.lower() in image_extensions
     ]
     val_data = []
-    prediction = {k: [] for k in top_k}  # Initialize prediction dictionary
+    prediction: Dict[int, List[List[str]]] = {
+        k: [] for k in top_k
+    }  # Initialize prediction dictionary
     for img in tqdm(all_images, desc="Processing Images"):
         val_data.append(img)
         with model:
@@ -33,7 +36,7 @@ def model_prediction(model, validation_images_dir, label, foldermap, top_k=[1, 5
 
 
 def identify_misclassified_examples(prediction, gndtruth, val_data):
-    misclassified_images = {
+    misclassified_images: Dict[int, List[List[str]]] = {
         k: [] for k in prediction.keys()
     }  # Initialize misclassified_images dictionary
 
