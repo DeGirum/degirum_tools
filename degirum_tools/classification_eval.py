@@ -149,3 +149,4 @@ class ImageClassificationModelEvaluator:
 
         for k, accuracy in top_k_accuracy.items():
             print(f"Top-{k} Accuracy for classification model: {accuracy}")
+        return top_k_accuracy
