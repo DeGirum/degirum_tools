@@ -4,71 +4,6 @@ from pathlib import Path
 from typing import Dict, List
 
 
-def model_prediction(model, validation_images_dir, label, foldermap, top_k=[1, 5]):
-    image_dir_path = Path(validation_images_dir + "/" + label)
-    image_extensions = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
-    all_images = [
-        str(image_path)
-        for image_path in image_dir_path.glob("*")
-        if image_path.suffix.lower() in image_extensions
-    ]
-    val_data = []
-    prediction: Dict[int, List[List[str]]] = {
-        k: [] for k in top_k
-    }  # Initialize prediction dictionary
-    for img in tqdm(all_images, desc="Processing Images"):
-        val_data.append(img)
-        with model:
-            res = model(img)
-            sorted_predictions = sorted(
-                res.results, key=lambda x: x["score"], reverse=True
-            )
-            for k in top_k:
-                top_predictions = sorted_predictions[:k]  # get the top k predictions
-                top_categories = [pred["category_id"] for pred in top_predictions]
-                prediction[k].append(
-                    [
-                        foldermap[int(top_categories[i])]
-                        for i in range(len(top_categories))
-                    ]
-                )
-    return (prediction, val_data)
-
-
-def identify_misclassified_examples(prediction, gndtruth, val_data):
-    misclassified_images: Dict[int, List[List[str]]] = {
-        k: [] for k in prediction.keys()
-    }  # Initialize misclassified_images dictionary
-
-    for k, preds in prediction.items():  # Iterate over each top-k prediction
-        for i in range(len(preds)):  # Iterate over predictions for each image
-            if (
-                gndtruth[i] not in preds[i]
-            ):  # Check if ground truth is in top-k predictions
-                misclassified_images[k].append(
-                    val_data[i]
-                )  # Append misclassified image to the corresponding list
-        print(
-            f"Count of misclassified examples for Top-{k}: {len(misclassified_images[k])}\n"
-        )
-
-
-def calculate_accuracy(predictions, ground_truth, top_k):
-    total_correct_predictions = {k: 0 for k in top_k}
-    total_predictions = {k: 0 for k in top_k}
-
-    for category_id, category_predictions in predictions.items():
-        for k in top_k:
-            if k in category_predictions:
-                for i, pred in enumerate(category_predictions[k]):
-                    if ground_truth[category_id][i] in pred[:k]:
-                        total_correct_predictions[k] += 1
-                    total_predictions[k] += 1
-
-    accuracies = {k: total_correct_predictions[k] / total_predictions[k] for k in top_k}
-    return accuracies
-
-
 class ImageClassificationModelEvaluator:
     def __init__(
         self,
@@ -125,28 +60,41 @@ class ImageClassificationModelEvaluator:
         )
 
     def evaluate(self, image_folder_path: str):
-        predictions = {}
-        gndtruth = []
-        ground_truth = {}
+        accuracies: Dict[int, float] = {}
+        total_images = 0
+        total_correct_predictions: Dict[int, int] = {k: 0 for k in self.top_k}
+        misclassified_examples: Dict[int, int] = {k: 0 for k in self.top_k}
         for category_folder in os.listdir(image_folder_path):
-            prediction, val_data = model_prediction(
-                self.dg_model,
-                image_folder_path,
-                category_folder,
-                self.foldermap,
-                self.top_k,
-            )
-            gndtruth = [category_folder for _ in range(len(val_data))]
+            image_dir_path = Path(image_folder_path + "/" + category_folder)
+            image_extensions = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
+            all_images = [
+                str(image_path)
+                for image_path in image_dir_path.glob("*")
+                if image_path.suffix.lower() in image_extensions
+            ]
+            for predictions in tqdm(self.dg_model.predict_batch(all_images)):
+                # Iterate over each top_k value
+                for k in self.top_k:
+                    # Sort predictions and get top-k results
+                    sorted_predictions = sorted(
+                        predictions.results, key=lambda x: x["score"], reverse=True
+                    )[:k]
+                    top_categories = [
+                        pred["category_id"] for pred in sorted_predictions
+                    ]
+                    top_classes = [self.foldermap[int(top)] for top in top_categories]
+                    # Check if ground truth is in top-k predictions
+                    if category_folder in top_classes:
+                        total_correct_predictions[k] += 1
+                    else:
+                        misclassified_examples[k] += 1
+            total_images += len(all_images)
+
+        # Calculate accuracy for each top_k
+        for k in self.top_k:
+            accuracies[k] = total_correct_predictions[k] / total_images
             print(
-                f"Class : {category_folder}, Count of Groundtruth labels : {len(gndtruth)}\n"
+                f"Total misclassified examples for Top-{k}: {misclassified_examples[k]}"
             )
-            identify_misclassified_examples(prediction, gndtruth, val_data)
-
-            predictions[category_folder] = prediction
-            ground_truth[category_folder] = gndtruth
-
-        top_k_accuracy = calculate_accuracy(predictions, ground_truth, self.top_k)
-
-        for k, accuracy in top_k_accuracy.items():
-            print(f"Top-{k} Accuracy for classification model: {accuracy}")
-        return top_k_accuracy
+            print(f"Top-{k} Accuracy for classification model: {accuracies[k]}")
+        return accuracies
