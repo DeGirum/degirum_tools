@@ -1,7 +1,7 @@
 import yaml, os
 from tqdm import tqdm
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict
 
 
 class ImageClassificationModelEvaluator:
