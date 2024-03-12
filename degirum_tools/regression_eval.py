@@ -55,8 +55,6 @@ class ImageRegressionModelEvaluator:
 
         return cls(
             dg_model=dg_model,
-            classmap=args["classmap"],
-            pred_path=args["pred_path"],
             input_resize_method=args["input_resize_method"],
             input_pad_method=args["input_pad_method"],
             image_backend=args["image_backend"],
@@ -88,11 +86,11 @@ class ImageRegressionModelEvaluator:
         gt = [anno["images"][i]["value"] for i in range(len(anno["images"]))]
         img_path = os.path.split(ground_truth_annotations_path)[0]
         img_paths = [img_path + "/" + imn for imn in img_names]
-        
+
         if num_val_images > 0:
             img_paths = img_paths[0:num_val_images]
             gt = gt[0:num_val_images]
-        
+
         pred = []
 
         with self.dg_model:
@@ -109,5 +107,5 @@ class ImageRegressionModelEvaluator:
         mse = np.mean(np.multiply(diff, diff))
 
         metrics = [mae, mse]
-        
-        return metrics
+
+        return [metrics]
