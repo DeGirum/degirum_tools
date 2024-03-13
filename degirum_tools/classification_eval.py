@@ -2,7 +2,7 @@ import yaml, os
 from tqdm import tqdm
 from pathlib import Path
 from typing import Dict, List
-
+from collections import OrderedDict
 
 class ImageClassificationModelEvaluator:
     def __init__(
@@ -71,7 +71,7 @@ class ImageClassificationModelEvaluator:
         per_class_accuracies = [0 for _ in range(len(self.top_k))]
         total_correct_predictions = [[0 for _ in range(len(self.top_k))] for _ in range(len(self.foldermap))]
         total_images_in_folder = [0 for _ in range(len(self.foldermap))]
-        for folder_idx, category_folder in enumerate(self.foldermap):
+        for folder_idx, category_folder in enumerate(self.foldermap.values()):
             image_dir_path = Path(image_folder_path) / category_folder            
             image_extensions = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
             all_images = [
@@ -79,8 +79,8 @@ class ImageClassificationModelEvaluator:
                 for image_path in image_dir_path.glob("*")
                 if image_path.suffix.lower() in image_extensions
             ]
-            pbar = tqdm(self.dg_model.predict_batch(all_images), total=len(all_images))
             print(f"Processing {category_folder} folder")
+            pbar = tqdm(self.dg_model.predict_batch(all_images), total=len(all_images))
             for predictions in pbar:
                 # Iterate over each top_k value
                 for k_i, k in enumerate(self.top_k):
@@ -98,9 +98,9 @@ class ImageClassificationModelEvaluator:
 
                 total_images_in_folder[folder_idx] += 1
                 per_class_accuracies = [total_correct_predictions[k_i][folder_idx] / total_images_in_folder[folder_idx] for k_i, _ in enumerate(self.top_k)]
-                accuracy_str = ", ".join([f"Top{k}: {per_class_accuracies[k_i] * 100}% " for k_i, k in enumerate(self.top_k)])
+                accuracy_dict = OrderedDict((f"Top{k}", per_class_accuracies[k_i] * 100) for k_i, k in enumerate(self.top_k))
 
-                pbar.set_postfix(accuracy_str)
+                pbar.set_postfix(accuracy_dict)
             
         total_images = sum(total_images_in_folder)
         accuracies = [sum(total_correct_predictions[k_i]) / total_images for k_i, _ in enumerate(self.top_k)]
