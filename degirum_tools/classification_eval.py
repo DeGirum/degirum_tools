@@ -50,7 +50,7 @@ class ImageClassificationModelEvaluator:
 
         return cls(
             dg_model=dg_model,
-            foldermap=args.get("foldermap", None)
+            foldermap=args.get("foldermap", None),
             top_k=args.get("top_k", [1, 5]),
             output_confidence_threshold=args.get("output_confidence_threshold", [1, 5]),
             input_resize_method=args["input_resize_method"],
