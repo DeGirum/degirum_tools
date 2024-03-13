@@ -1,7 +1,7 @@
 import yaml, os
 from tqdm import tqdm
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List
 
 
 class ImageClassificationModelEvaluator:
@@ -50,22 +50,28 @@ class ImageClassificationModelEvaluator:
 
         return cls(
             dg_model=dg_model,
-            foldermap=args["foldermap"],
-            top_k=args["top_k"],
-            output_confidence_threshold=args["output_confidence_threshold"],
+            foldermap=args.get("foldermap", None)
+            top_k=args.get("top_k", [1, 5]),
+            output_confidence_threshold=args.get("output_confidence_threshold", [1, 5]),
             input_resize_method=args["input_resize_method"],
             input_pad_method=args["input_pad_method"],
             image_backend=args["image_backend"],
             input_img_fmt=args["input_img_fmt"],
         )
 
+    @staticmethod
+    def default_foldermap(folder_list: List[str]) -> Dict[int, str]:
+        return {i: folder for i, folder in enumerate(folder_list)}
+
     def evaluate(self, image_folder_path: str):
-        folder_list = os.listdir(image_folder_path)
+        folder_list = sorted(os.listdir(image_folder_path))
+        if self.foldermap is None:
+            self.foldermap = self.default_foldermap(folder_list)
         # initialize
         per_class_accuracies = [0 for _ in range(len(self.top_k))]
-        total_correct_predictions = [[0 for _ in range(len(self.top_k))] for _ in range(len(folder_list))]
-        total_images_in_folder = [0 for _ in range(len(folder_list))]
-        for folder_idx, category_folder in enumerate(folder_list):
+        total_correct_predictions = [[0 for _ in range(len(self.top_k))] for _ in range(len(self.foldermap))]
+        total_images_in_folder = [0 for _ in range(len(self.foldermap))]
+        for folder_idx, category_folder in enumerate(self.foldermap):
             image_dir_path = Path(image_folder_path) / category_folder            
             image_extensions = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
             all_images = [
