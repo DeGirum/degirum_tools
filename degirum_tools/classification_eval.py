@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Dict, List
 from collections import OrderedDict
 
+
 class ImageClassificationModelEvaluator:
     def __init__(
         self,
@@ -72,7 +73,7 @@ class ImageClassificationModelEvaluator:
         total_correct_predictions = [[0 for _ in range(len(self.top_k))] for _ in range(len(self.foldermap))]
         total_images_in_folder = [0 for _ in range(len(self.foldermap))]
         for folder_idx, category_folder in enumerate(self.foldermap.values()):
-            image_dir_path = Path(image_folder_path) / category_folder            
+            image_dir_path = Path(image_folder_path) / category_folder
             image_extensions = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
             all_images = [
                 str(image_path)
@@ -99,9 +100,8 @@ class ImageClassificationModelEvaluator:
                 total_images_in_folder[folder_idx] += 1
                 per_class_accuracies = [total_correct_predictions[k_i][folder_idx] / total_images_in_folder[folder_idx] for k_i, _ in enumerate(self.top_k)]
                 accuracy_dict = OrderedDict((f"Top{k}", per_class_accuracies[k_i] * 100) for k_i, k in enumerate(self.top_k))
-
                 pbar.set_postfix(accuracy_dict)
-            
+
         total_images = sum(total_images_in_folder)
         accuracies = [sum(total_correct_predictions[k_i]) / total_images for k_i, _ in enumerate(self.top_k)]
         accuracy_str = ", ".join([f"Top{k}: {accuracies[i] * 100}% " for i, k in enumerate(self.top_k)])
