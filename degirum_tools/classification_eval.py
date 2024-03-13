@@ -69,7 +69,6 @@ class ImageClassificationModelEvaluator:
         if self.foldermap is None:
             self.foldermap = self.default_foldermap(folder_list)
         # initialize
-        per_class_accuracies = [0 for _ in range(len(self.top_k))]
         total_correct_predictions = [[0 for _ in range(len(self.top_k))] for _ in range(len(self.foldermap))]
         total_images_in_folder = [0 for _ in range(len(self.foldermap))]
         for folder_idx, category_folder in enumerate(self.foldermap.values()):
