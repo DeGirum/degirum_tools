@@ -53,11 +53,11 @@ class ImageClassificationModelEvaluator:
             dg_model=dg_model,
             foldermap=args.get("foldermap", None),
             top_k=args.get("top_k", [1, 5]),
-            output_confidence_threshold=args.get("output_confidence_threshold", [1, 5]),
-            input_resize_method=args["input_resize_method"],
-            input_pad_method=args["input_pad_method"],
-            image_backend=args["image_backend"],
-            input_img_fmt=args["input_img_fmt"],
+            output_confidence_threshold=args.get("output_confidence_threshold", 0.001),
+            input_resize_method=args.get("input_resize_method", "bilinear"),
+            input_pad_method=args.get("input_pad_method", "crop-last"),
+            image_backend=args.get("image_backend", "opencv"),
+            input_img_fmt=args.get("input_img_fmt", "JPEG"),
         )
 
     @staticmethod
