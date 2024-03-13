@@ -144,6 +144,7 @@ def _nms_custom(
     use_iou: bool,
     box_select: NmsBoxSelectionPolicy,
     max_wh: int,
+    agnostic: bool,
 ):
     """
     Perform non-maximum suppression on a set of detections.
@@ -164,8 +165,9 @@ def _nms_custom(
     """
 
     # adjust bboxes by class offset so bboxes of different classes would never overlap
-    class_offsets = classes * float(max_wh)
-    bboxes[:, 0:4] += class_offsets[:, None]
+    if not agnostic:
+        class_offsets = classes * float(max_wh)
+        bboxes[:, 0:4] += class_offsets[:, None]
 
     x1 = bboxes[:, 0]
     y1 = bboxes[:, 1]
@@ -198,18 +200,27 @@ def _nms_custom(
             pass
         elif box_select == NmsBoxSelectionPolicy.LARGEST_AREA:
             sel = order[overlap > iou_threshold]
-            bboxes[i] = bboxes[sel[np.argmax(areas[sel])]] - class_offsets[i]
+            if not agnostic:
+                bboxes[i] = bboxes[sel[np.argmax(areas[sel])]] - class_offsets[i]
+            else:
+                bboxes[i] = bboxes[sel[np.argmax(areas[sel])]]
         elif box_select == NmsBoxSelectionPolicy.AVERAGE:
             sel = order[overlap > iou_threshold]
-            bboxes[i] = (
-                np.average(bboxes[sel], axis=0, weights=scores[sel]) - class_offsets[i]
-            )
+            if not agnostic:
+                bboxes[i] = (
+                    np.average(bboxes[sel], axis=0, weights=scores[sel]) - class_offsets[i]
+                )
+            else:
+                bboxes[i] = np.average(bboxes[sel], axis=0, weights=scores[sel])
         elif box_select == NmsBoxSelectionPolicy.MERGE:
             sel = order[overlap > iou_threshold]
             enclosing_rect = np.array(
                 [np.min(x1[sel]), np.min(y1[sel]), np.max(x2[sel]), np.max(y2[sel])]
             )
-            bboxes[i] = enclosing_rect - class_offsets[i]
+            if not agnostic:
+                bboxes[i] = enclosing_rect - class_offsets[i]
+            else:
+                bboxes[i] = enclosing_rect
 
         order = order[overlap <= iou_threshold]
 
@@ -222,6 +233,7 @@ def nms(
     use_iou: bool = True,
     box_select: NmsBoxSelectionPolicy = NmsBoxSelectionPolicy.MOST_PROBABLE,
     max_wh: int = 10000,
+    agnostic: bool = False,
 ):
     """
     Perform non-maximum suppression on a set of detections.
@@ -247,6 +259,11 @@ def nms(
 
     try:
         for i, r in enumerate(result_list):
+            # Need this to benchmark blank image. Not sure if its necessary for a real image.
+            if 'bbox' not in r:
+                continue
+            if 'score' not in r:
+                continue
             bboxes[i] = r["bbox"]
             scores[i] = r["score"]
             classes[i] = unique_ids.setdefault(r["label"], len(unique_ids))
@@ -260,10 +277,13 @@ def nms(
 
         # use fast OpenCV implementation when possible
         bboxes[:, 2:4] = bboxes[:, 2:4] - bboxes[:, 0:2]  # TLBR to TLWH
-        keep = cv2.dnn.NMSBoxesBatched(bboxes, scores, classes, 0, iou_threshold)  # type: ignore[arg-type]
+        if not agnostic:
+            keep = cv2.dnn.NMSBoxesBatched(bboxes, scores, classes, 0, iou_threshold)  # type: ignore[arg-type]
+        else:
+            keep = cv2.dnn.NMSBoxes(boxes, scores, 0, iou_threshold)
     else:
         keep = _nms_custom(
-            bboxes, scores, classes, iou_threshold, use_iou, box_select, max_wh
+            bboxes, scores, classes, iou_threshold, use_iou, box_select, max_wh, agnostic
         )
 
         if box_select != NmsBoxSelectionPolicy.MOST_PROBABLE:

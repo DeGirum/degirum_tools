@@ -14,7 +14,7 @@ from PIL.Image import Image as PILImageClass
 from PIL import Image as PILImage
 
 from degirum_tools.tile_strategy import BaseTileStrategy
-from degirum_tools.math_support import nms
+from degirum_tools.math_support import nms, NmsBoxSelectionPolicy
 from degirum.exceptions import DegirumException
 from degirum.postprocessor import DetectionResults, InferenceResults, _inference_result_type
 from degirum.model import Model
@@ -113,7 +113,8 @@ class TileModel():
                                 label_dictionary=self._model.label_dictionary)
         
         nms(results, iou_threshold=self._model.output_nms_threshold)
-
+        # Optional to remove boxes that are within each other. Not sure if it should be agnostic or not, can argue for either.
+        nms(results, 0.95, use_iou=False, box_select=NmsBoxSelectionPolicy.LARGEST_AREA, agnostic=True)
         return results
     
     # predict_batch copied and modified from degirum.model.Model
