@@ -1,0 +1,37 @@
+{
+  "ConfigVersion": 2,
+  "MODEL_PARAMETERS": [
+    {
+      "ModelPath": "mobilenet_v2_generic_object--224x224_quant_n2x_cpu_1.n2x",
+      "ModelQuantEn": true,
+      "ModelInputN": 1,
+      "ModelInputH": 224,
+      "ModelInputW": 224,
+      "ModelInputC": 3
+    }
+  ],
+  "PRE_PROCESS": [
+    {
+      "InputImgFmt": "JPEG",
+      "InputImgNormEn": false
+    }
+  ],
+  "POST_PROCESS": [
+    {
+      "OutputPostprocessType": "Classification",
+      "LabelsPath": "labels_generic_object.json",
+      "OutputTopK": 5,
+      "OutputNumClasses": 631,
+      "PostProcessorInputs": [
+        1
+      ]
+    }
+  ],
+  "DEVICE": [
+    {
+      "RuntimeAgent": "N2X",
+      "DeviceType": "CPU"
+    }
+  ],
+  "Checksum": "4f04421ad44e3fa8f0fc98d23d5b9c50ef6a15d553e1735096cf7a88fe3b968c"
+}
