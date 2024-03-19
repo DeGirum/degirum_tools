@@ -7,7 +7,7 @@
 # Implements classes and functions to handle image display, progress indication, etc.
 #
 
-import cv2, os, time, PIL.Image, numpy as np, random, string
+import cv2, sys, os, time, PIL.Image, numpy as np, random, string
 from .environment import get_test_mode, in_colab, in_notebook, to_valid_filename
 from .image_tools import crop, luminance
 from dataclasses import dataclass
@@ -451,6 +451,7 @@ class Progress:
         self._start_step = start_step
         self._time_to_refresh = lambda: time.time() - self._last_update_time > 0.5
         self._speed_units = speed_units
+        self._message = ""
         self.reset()
 
     def reset(self):
@@ -460,19 +461,27 @@ class Progress:
         self._last_updated_percent = self._percent
         self._last_update_time = 0.0
         self._tip_phase = 0
+        self._longest_line = 0
         self._update()
 
-    def step(self, steps: int = 1):
+    def step(self, steps: int = 1, *, message: Optional[str] = None):
         """Update progress by given number of steps
         steps - number of steps to advance
+        message - optional message to display
         """
         assert (
             self._last_step is not None
         ), "Progress indicator: to do stepping last step must be assigned on construction"
+        assert (
+            self._last_step > self._start_step
+        ), f"Progress indicator: last step {self._last_step} must be greater than start step {self._start_step}"
+
         self._step += steps
         self._percent = (
             100 * (self._step - self._start_step) / (self._last_step - self._start_step)
         )
+        if message is not None:
+            self._message = message
         if (
             self._percent - self._last_updated_percent >= 100 / self._len
             or self._percent >= 100
@@ -505,6 +514,15 @@ class Progress:
         if delta >= 100 / self._len or self._time_to_refresh():
             self._update()
 
+    @property
+    def message(self) -> str:
+        return self._message
+
+    @message.setter
+    def message(self, value: str):
+        self._message = value
+        self._update()
+
     def _update(self):
         """Update progress bar"""
         self._last_updated_percent = self._percent
@@ -524,17 +542,18 @@ class Progress:
             remaining_est_s = elapsed_s * (100 - self._percent) / self._percent
             prog_str += f", {remaining_est_s:.1f}s remaining"
         if self._last_step is not None and elapsed_s > 0:
-            prog_str += f", {(self._step - self._start_step) / elapsed_s:.1f} {self._speed_units}]"
+            prog_str += f", {(self._step - self._start_step) / elapsed_s:.1f} {self._speed_units}] {self._message}"
         else:
             prog_str += "]"
 
-        class printer(str):
-            def __repr__(self):
-                return self
-
-        prog_str = printer(prog_str)
-
         if in_notebook():
+
+            class printer(str):
+                def __repr__(self):
+                    return self
+
+            prog_str = printer(prog_str)
+
             import IPython.display
 
             if self._display_id is None:
@@ -545,5 +564,31 @@ class Progress:
             else:
                 IPython.display.update_display(prog_str, display_id=self._display_id)
         else:
+            if len(prog_str) < self._longest_line:
+                prog_str += " " * (self._longest_line - len(prog_str))
+            else:
+                self._longest_line = len(prog_str)
+
             print(prog_str, end="\r")
+
         self._last_update_time = time.time()
+
+
+class stdoutRedirector:
+    """Redirect stdout to another stream"""
+
+    def __init__(self, stream: Optional[str] = None):
+        """
+        Constructor
+
+        Args:
+            stream: output stream to redirect to; None to redirect to null device
+        """
+        self._stdout = sys.stdout
+        self._stream = stream
+
+    def __enter__(self):
+        sys.stdout = open(os.devnull if self._stream is None else self._stream, "w")
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        sys.stdout = self._stdout
