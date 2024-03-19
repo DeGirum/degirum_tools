@@ -1,87 +1,123 @@
-import yaml, os
-from tqdm import tqdm
+#
+# classification_eval.py: classification models evaluator
+#
+# Copyright DeGirum Corporation 2024
+# All rights reserved
+#
+
+import os
+import degirum as dg
 from pathlib import Path
-from typing import Dict, List
-from collections import OrderedDict
+from typing import Dict, List, Optional
+from .eval_support import ModelEvaluatorBase
+from .ui_support import Progress
 
 
-class ImageClassificationModelEvaluator:
-    def __init__(
-        self,
-        dg_model,
-        foldermap,
-        top_k,
-        output_confidence_threshold=0.001,
-        input_resize_method="bicubic",
-        input_pad_method="crop-last",
-        image_backend="opencv",
-        input_img_fmt="JPEG",
-    ):
+class ImageClassificationModelEvaluator(ModelEvaluatorBase):
+    """
+    This class computes the Top-k Accuracy for Classification models.
+    """
+
+    def __init__(self, model: dg.model.Model, **kwargs):
         """
         Constructor.
-            This class computes the Top-k Accuracy for Classification models.
 
-            Args:
-                dg_model (Detection model): Classification model from the Degirum model zoo.
+        Args:
+            model (Detection model): PySDK classification model object
+            kwargs (dict): arbitrary set of PySDK model parameters and the following evaluation parameters:
+                show_progress (bool): show progress bar
                 top_k (list) : List of `k` values in top-k, default:[1,5].
-                foldermap (dict): The key represents integer (starting from 0) and values represent the class names (folder names) of the validation dataset.
-                                 - For example : Gender Classification model - foldermap = {0: "0", 1: "1"}
-                input_resize_method (str): Input Resize Method.
-                input_pad_method (str): Input Pad Method.
-                image_backend (str): Image Backend.
-                input_img_fmt (str): InputImgFmt.
+                foldermap (dict): mapping of model category IDs to image folder names.
+                    For example: {0: "person", 1: "car"}
         """
 
-        self.dg_model = dg_model
-        self.foldermap = foldermap
-        self.top_k = top_k
-        if self.dg_model.output_postprocess_type == "Classification":
-            self.dg_model.output_confidence_threshold = output_confidence_threshold
-            self.dg_model.input_resize_method = input_resize_method
-            self.dg_model.input_pad_method = input_pad_method
-            self.dg_model.image_backend = image_backend
-            self.dg_model.input_image_format = input_img_fmt
-        else:
+        #
+        # classification evaluator parameters:
+        #
+
+        # List of `k` values in top-k, default:[1,5].
+        self.top_k: list = [1, 5]
+
+        # Mapping of model category IDs to image folder names.
+        # For example: {0: "person", 1: "car"}
+        self.foldermap: Optional[dict] = None
+
+        if not model.output_postprocess_type == "Classification":
             raise Exception("Model loaded for evaluation is not a Classification Model")
 
-    @classmethod
-    def init_from_yaml(cls, dg_model, config_yaml):
-        with open(config_yaml) as f:
-            args = yaml.load(f, Loader=yaml.FullLoader)
-
-        return cls(
-            dg_model=dg_model,
-            foldermap=args.get("foldermap", None),
-            top_k=args.get("top_k", [1, 5]),
-            output_confidence_threshold=args.get("output_confidence_threshold", 0.001),
-            input_resize_method=args.get("input_resize_method", "bilinear"),
-            input_pad_method=args.get("input_pad_method", "crop-last"),
-            image_backend=args.get("image_backend", "opencv"),
-            input_img_fmt=args.get("input_img_fmt", "JPEG"),
-        )
+        # base constructor assigns kwargs to model or to self
+        super().__init__(model, **kwargs)
 
     @staticmethod
     def default_foldermap(folder_list: List[str]) -> Dict[int, str]:
+        """
+        Constructs a default foldermap from the folder list:
+        a key is just an index of the corresponding folder.
+        """
         return {i: folder for i, folder in enumerate(folder_list)}
 
-    def evaluate(self, image_folder_path: str):
+    def evaluate(
+        self,
+        image_folder_path: str,
+        ground_truth_annotations_path: str,
+        max_images: int = 0,
+    ) -> list:
+        """
+        Evaluation for the classification model.
+
+        Args:
+            image_folder_path (str): Path to images
+            ground_truth_annotations_path (str): not used
+            max_images (int): not used
+
+        Returns 2-element list: Top-k accuracy and per-class accuracy statistics.
+        """
+
+        #
+        # initialization
+        #
+
         folder_list = sorted(os.listdir(image_folder_path))
         if self.foldermap is None:
             self.foldermap = self.default_foldermap(folder_list)
-        # initialize
-        total_correct_predictions = [[0 for _ in range(len(self.top_k))] for _ in range(len(self.foldermap))]
-        total_images_in_folder = [0 for _ in range(len(self.foldermap))]
+
+        total_correct_predictions = [
+            [0] * len(self.foldermap) for _ in range(len(self.top_k))
+        ]
+        images_in_folder = []
+        total_images_in_folder = []
+        all_per_class_accuracies = []
+        image_extensions = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
+
+        # scan folders for images
         for folder_idx, category_folder in enumerate(self.foldermap.values()):
             image_dir_path = Path(image_folder_path) / category_folder
-            image_extensions = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
+
             all_images = [
                 str(image_path)
                 for image_path in image_dir_path.glob("*")
                 if image_path.suffix.lower() in image_extensions
             ]
-            print(f"Processing {category_folder} folder")
-            pbar = tqdm(self.dg_model.predict_batch(all_images), total=len(all_images))
-            for predictions in pbar:
+            images_in_folder.append(all_images)
+            total_images_in_folder.append(len(all_images))
+
+        total_images = sum(total_images_in_folder)
+
+        #
+        # evaluation loop
+        #
+
+        max_images = min(max_images, total_images) if max_images > 0 else total_images
+        if self.show_progress:
+            progress = Progress(max_images)
+
+        processed_images = 0
+
+        for folder_idx, category_folder in enumerate(self.foldermap.values()):
+
+            per_class_accuracies = [-1.0] * len(self.top_k)
+            processed_images_in_class = 0
+            for predictions in self.model.predict_batch(images_in_folder[folder_idx]):
                 # Iterate over each top_k value
                 for k_i, k in enumerate(self.top_k):
                     # Sort predictions and get top-k results
@@ -89,20 +125,55 @@ class ImageClassificationModelEvaluator:
                         predictions.results, key=lambda x: x["score"], reverse=True
                     )[:k]
                     top_categories = [
-                        pred["category_id"] for pred in sorted_predictions
+                        int(pred["category_id"]) for pred in sorted_predictions
                     ]
-                    top_classes = [self.foldermap[int(top)] for top in top_categories]
+                    top_classes = [
+                        self.foldermap[top]
+                        for top in top_categories
+                        if top in self.foldermap
+                    ]
                     # Check if ground truth is in top-k predictions
                     if category_folder in top_classes:
                         total_correct_predictions[k_i][folder_idx] += 1
 
-                total_images_in_folder[folder_idx] += 1
-                per_class_accuracies = [total_correct_predictions[k_i][folder_idx] / total_images_in_folder[folder_idx] for k_i, _ in enumerate(self.top_k)]
-                accuracy_dict = OrderedDict((f"Top{k}", per_class_accuracies[k_i] * 100) for k_i, k in enumerate(self.top_k))
-                pbar.set_postfix(accuracy_dict)
+                processed_images_in_class += 1
+                processed_images += 1
 
-        total_images = sum(total_images_in_folder)
-        accuracies = [sum(total_correct_predictions[k_i]) / total_images for k_i, _ in enumerate(self.top_k)]
-        accuracy_str = ", ".join([f"Top{k}: {accuracies[i] * 100}% " for i, k in enumerate(self.top_k)])
-        print(accuracy_str)
-        return accuracies, per_class_accuracies
+                per_class_accuracies = [
+                    total_correct_predictions[k_i][folder_idx]
+                    / processed_images_in_class
+                    for k_i, _ in enumerate(self.top_k)
+                ]
+
+                if self.show_progress:
+                    accuracy_str = f"{category_folder}: " + ", ".join(
+                        [
+                            f"top{k} = {per_class_accuracies[i] * 100:.1f}%"
+                            for i, k in enumerate(self.top_k)
+                        ]
+                    )
+                    progress.step(message=accuracy_str)
+
+                if processed_images >= max_images:
+                    break
+            else:  # for predictions... loop completes all iterations
+                all_per_class_accuracies.append(per_class_accuracies)
+                continue
+            break
+
+        accuracies = [
+            sum(total_correct_predictions[k_i]) / processed_images
+            for k_i, _ in enumerate(self.top_k)
+        ]
+
+        # show final accuracy
+        if self.show_progress:
+            accuracy_str = ", ".join(
+                [
+                    f"top{k} = {accuracies[i] * 100:.1f}%"
+                    for i, k in enumerate(self.top_k)
+                ]
+            )
+            progress.message = accuracy_str
+
+        return [accuracies, all_per_class_accuracies]
