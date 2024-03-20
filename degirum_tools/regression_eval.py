@@ -1,7 +1,7 @@
 #
 # regression_eval.py: evaluation toolkit for regression models used in PySDK samples
 #
-# Copyright DeGirum Corporation 2023
+# Copyright DeGirum Corporation 2024
 # All rights reserved
 #
 
@@ -14,7 +14,7 @@ import numpy as np
 class ImageRegressionModelEvaluator:
     def __init__(
         self,
-        dg_model,
+        model,
         input_resize_method="bilinear",
         input_pad_method="crop-first",
         image_backend="opencv",
@@ -27,7 +27,7 @@ class ImageRegressionModelEvaluator:
             This class evaluates the MAE and MSE for Image Regression models.
 
             Args:
-                dg_model (Regression model): Regression model from the DeGirum model zoo.
+                model (PySDK model object): Regression model from the DeGirum model zoo.
                 input_resize_method (str): Input Resize Method.
                 input_pad_method (str): Input Pad Method.
                 image_backend (str): Image Backend.
@@ -36,17 +36,18 @@ class ImageRegressionModelEvaluator:
                 input_numpy_colorspace (str): input colorspace: ("BGR" to match OpenCV image backend)
         """
 
-        self.dg_model = dg_model
-        self.dg_model.input_resize_method = input_resize_method
-        self.dg_model.input_pad_method = input_pad_method
-        self.dg_model.image_backend = image_backend
-        self.dg_model.input_image_format = input_img_fmt
-        self.dg_model.input_numpy_colorspace = input_numpy_colorspace
-        self.dg_model.input_letterbox_fill_color = input_letterbox_fill_color
+        self.model = model
+        self.model.input_resize_method = input_resize_method
+        self.model.input_pad_method = input_pad_method
+        self.model.image_backend = image_backend
+        self.model.input_image_format = input_img_fmt
+        self.model.input_numpy_colorspace = input_numpy_colorspace
+        self.model.input_letterbox_fill_color = input_letterbox_fill_color
 
     @classmethod
-    def init_from_yaml(cls, dg_model, config_yaml):
+    def init_from_yaml(cls, model, config_yaml):
         """
+        model (PySDK model object): Regression model from the DeGirum model zoo.
         config_yaml (str) : Path of the yaml file that contains all the arguments.
 
         """
@@ -54,7 +55,7 @@ class ImageRegressionModelEvaluator:
             args = yaml.load(f, Loader=yaml.FullLoader)
 
         return cls(
-            dg_model=dg_model,
+            model=model,
             input_resize_method=args["input_resize_method"],
             input_pad_method=args["input_pad_method"],
             image_backend=args["image_backend"],
@@ -78,7 +79,8 @@ class ImageRegressionModelEvaluator:
                 num_val_images (int): max number of images used for evaluation. 0: all images in image_folder_path is used.
                 print_frequency (int): Number of image batches to be evaluated before printing num evaluated images
 
-        Returns the MAE and MSE.
+        Returns:
+            - Tuple(float, float): the MAE and the MSE.
         """
         with open(ground_truth_annotations_path, 'r') as fi:
             anno = json.load(fi)
@@ -93,9 +95,9 @@ class ImageRegressionModelEvaluator:
 
         pred = []
 
-        with self.dg_model:
+        with self.model:
             for image_number, predictions in enumerate(
-                self.dg_model.predict_batch(img_paths)
+                self.model.predict_batch(img_paths)
             ):
                 if print_frequency > 0:
                     if image_number % print_frequency == print_frequency - 1:
