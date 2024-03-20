@@ -6,7 +6,8 @@ import numpy as np
 
 from degirum_tools.compound_models import CompoundModelBase
 from degirum_tools.tile_compound_models import TileExtractorPseudoModel, TileModel, BoxFusionTileModel, LocalGlobalTileModel, BoxFusionLocalGlobalTileModel
-from degirum_tools.ui_support import Timer # perf_counter_ns() probably better than time_ns() but keep it the same for comparisons sake.
+from degirum_tools.ui_support import Timer  # perf_counter_ns() probably better than time_ns() but keep it the same for comparisons sake.
+
 
 @dataclass
 class ModelTimeProfile:
@@ -19,13 +20,14 @@ class ModelTimeProfile:
     parameters: dict  # copy of model parameters
     time_stats: dict  # model time statistics dictionary
 
-def compound_time_profile(model, tiling=(1,1), iterations=100,) -> ModelTimeProfile:
-    #tiling (cols, rows)
+
+def compound_time_profile(model, tiling=(1, 1), iterations=100) -> ModelTimeProfile:
+    # tiling (cols, rows)
     if isinstance(model, CompoundModelBase):
         # skip non-image type models
         if model.model2.model_info.InputType[0] != "Image":
             raise NotImplementedError
-        
+
         saved_params = {
             "input_image_format": model.model2.input_image_format,
             "measure_time": model.model2.measure_time,
@@ -49,6 +51,7 @@ def compound_time_profile(model, tiling=(1,1), iterations=100,) -> ModelTimeProf
         imgsz.append(3)
 
         frame = np.zeros(imgsz, dtype=np.uint8)
+
         # define source of frames
         def source():
             for fi in range(iterations):
@@ -97,30 +100,30 @@ model_size = model.model_info.InputW + model.model_info.InputH
 image_size = model_size[0] * tiling[0], model_size[1] * tiling[1]
 
 tiles = dgtools.generate_tiles_fixed_ratio(model_size, tiling, image_size, (0.0, 0.0))
-tile_extractor = dgtools.RegionExtractionPseudoModel(tiles, model)
+current_tile_extractor = dgtools.RegionExtractionPseudoModel(tiles, model)
 nms_options = dgtools.NmsOptions(threshold=0.3, use_iou=False, box_select=dgtools.NmsBoxSelectionPolicy.LARGEST_AREA)
-compound_model = dgtools.CroppingAndDetectingCompoundModel(tile_extractor, model, nms_options=nms_options)
+compound_model = dgtools.CroppingAndDetectingCompoundModel(current_tile_extractor, model, nms_options=nms_options)
 
 time_results = compound_time_profile(compound_model, tiling)
 
 print(f"Current dg_tools tiling FPS: {time_results.observed_fps}")
 
-tile_extractor = TileExtractorPseudoModel(2, 2, 0.0, model)
-tile_model = TileModel(tile_extractor, model, nms_options=nms_options)
+new_tile_extractor = TileExtractorPseudoModel(2, 2, 0.0, model)
+tile_model = TileModel(new_tile_extractor, model, nms_options=nms_options)
 time_results = compound_time_profile(tile_model, tiling)
 print(f"SimpleTiling compound model equivalent FPS: {time_results.observed_fps}")
 
-tile_extractor = TileExtractorPseudoModel(2, 2, 0.0, model, global_tile=True)
-tile_model = LocalGlobalTileModel(tile_extractor, model, 0.01, nms_options=nms_options)
+new_tile_extractor = TileExtractorPseudoModel(2, 2, 0.0, model, global_tile=True)
+tile_model = LocalGlobalTileModel(new_tile_extractor, model, 0.01, nms_options=nms_options)
 time_results = compound_time_profile(tile_model, tiling)
 print(f"LocalGlobalTiling compound model equivalent FPS: {time_results.observed_fps}")
 
-tile_extractor = TileExtractorPseudoModel(2, 2, 0.0, model, global_tile=True)
-tile_model = BoxFusionTileModel(tile_extractor, model, 0.02, 0.8, nms_options=nms_options)
+new_tile_extractor = TileExtractorPseudoModel(2, 2, 0.0, model, global_tile=True)
+tile_model = BoxFusionTileModel(new_tile_extractor, model, 0.02, 0.8, nms_options=nms_options)
 time_results = compound_time_profile(tile_model, tiling)
 print(f"WBFSimpleTiling compound model equivalent FPS: {time_results.observed_fps}")
 
-tile_extractor = TileExtractorPseudoModel(2, 2, 0.0, model, global_tile=True)
-tile_model = BoxFusionLocalGlobalTileModel(tile_extractor, model, 0.01, 0.02, 0.8, nms_options=nms_options)
+new_tile_extractor = TileExtractorPseudoModel(2, 2, 0.0, model, global_tile=True)
+tile_model = BoxFusionLocalGlobalTileModel(new_tile_extractor, model, 0.01, 0.02, 0.8, nms_options=nms_options)
 time_results = compound_time_profile(tile_model, tiling)
 print(f"WBFLocalGlobalTiling compound model equivalent FPS: {time_results.observed_fps}")

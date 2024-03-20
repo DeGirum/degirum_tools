@@ -10,7 +10,7 @@ model_zoo_url = "https://cs.degirum.com/degirum/visdrone_scales"
 img_folder_path = "VisDrone2019-DET-val/images"
 anno_json = "annotations_VisDrone_val.json"
 
-class_map = [0,1,2,3,4,5,6,7,8,9]
+class_map = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 
 tiling_params = (3, 2, 0.1)
 
@@ -31,7 +31,6 @@ model.image_backend = "opencv"
 model.input_image_format = "JPEG"
 model.input_numpy_colorspace = "auto"
 model.input_letterbox_fill_color = (114, 114, 114)
-
 
 nms_options = NmsOptions(
     threshold=model.output_nms_threshold,
@@ -69,6 +68,5 @@ for cmodel in compound_models:
     map_results = map_evaluator.evaluate(
         img_folder_path,
         ground_truth_annotations_path=anno_json,
-        num_val_images=0,
-        print_frequency=100,
+        max_images=0,
     )

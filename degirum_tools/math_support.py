@@ -280,7 +280,7 @@ def nms(
         if not agnostic:
             keep = cv2.dnn.NMSBoxesBatched(bboxes, scores, classes, 0, iou_threshold)  # type: ignore[arg-type]
         else:
-            keep = cv2.dnn.NMSBoxes(bboxes, scores, 0, iou_threshold) # type: ignore[arg-type]
+            keep = cv2.dnn.NMSBoxes(bboxes, scores, 0, iou_threshold)  # type: ignore[arg-type]
     else:
         keep = _nms_custom(
             bboxes, scores, classes, iou_threshold, use_iou, box_select, max_wh, agnostic
@@ -292,10 +292,11 @@ def nms(
 
     detections._inference_results = [result_list[i] for i in keep]
 
-def _prefilter_boxes(boxes: Sequence[Sequence], 
-                    scores: Sequence[float], 
-                    labels: Sequence[int], 
-                    thr: float) -> Tuple[Dict[int, np.ndarray], List]:
+
+def _prefilter_boxes(boxes: Sequence[Sequence],
+                     scores: Sequence[float],
+                     labels: Sequence[int],
+                     thr: float) -> Tuple[Dict[int, np.ndarray], List]:
     # dict with boxes stored by category id
     new_boxes: Dict[int, Any] = dict()
     skipped_boxes = []
@@ -329,10 +330,11 @@ def _prefilter_boxes(boxes: Sequence[Sequence],
 
     return (new_boxes, skipped_boxes)
 
-def _find_matching_box(boxes: Sequence[np.ndarray], 
-                       new_box: np.ndarray, 
+
+def _find_matching_box(boxes: Sequence[np.ndarray],
+                       new_box: np.ndarray,
                        match_iou: float) -> Tuple[int, Union[float, int]]:
-    
+
     def _bb_1d_iou(boxes: np.ndarray, new_box: np.ndarray) -> np.ndarray:
         # Returns the larger of the x or y 1D-IoU if the boxes overlap.
         xA = np.maximum(boxes[:, 0], new_box[0])
@@ -347,31 +349,31 @@ def _find_matching_box(boxes: Sequence[np.ndarray],
         inter_y[mask] = 0
 
         w_a, h_a = boxes[:, 2] - boxes[:, 0], boxes[:, 3] - boxes[:, 1]
-        w_b, h_b = new_box[2] - new_box[0],  new_box[3] - new_box[1]
+        w_b, h_b = new_box[2] - new_box[0], new_box[3] - new_box[1]
 
         iou_x, iou_y = inter_x / (w_a + w_b - inter_x), inter_y / (h_a + h_b - inter_y)
 
         return np.maximum(iou_x, iou_y)
 
     if len(boxes) == 0:
-         return -1, match_iou
-    
+        return -1, match_iou
+
     # Create a mask for already matched boxes.
     matched_mask = np.full(len(boxes), False)
-    masked_boxes = np.empty((0,6))
+    masked_boxes = np.empty((0, 6))
 
     for i, box_set in enumerate(boxes):
         if len(box_set) >= 2:
             matched_mask[i] = True
-        
+
         masked_boxes = np.vstack((masked_boxes, box_set[0]))
 
     ious = _bb_1d_iou(masked_boxes[:, 2:], new_box[2:])
 
     ious[masked_boxes[:, 0] != new_box[0]] = -1
     ious[matched_mask] = -1
-    
-    best_idx = int(np.argmax(ious)) # for type checker.
+
+    best_idx = int(np.argmax(ious))  # for type checker.
     best_iou = ious[best_idx]
 
     if best_iou <= match_iou:
@@ -379,6 +381,7 @@ def _find_matching_box(boxes: Sequence[np.ndarray],
         best_idx = -1
 
     return best_idx, best_iou
+
 
 def _fuse_boxes(box_sets: Sequence[np.ndarray]) -> np.ndarray:
     fused_boxes = []
@@ -393,21 +396,23 @@ def _fuse_boxes(box_sets: Sequence[np.ndarray]) -> np.ndarray:
             bbox = np.concatenate((coord_min[2:4], coord_max[4:6]))
 
             fused_box = np.zeros(6, dtype=np.float32)
-            fused_box[0] = box_set[0][0] 
+            fused_box[0] = box_set[0][0]
             fused_box[1] = score
             fused_box[2:] = bbox
             fused_boxes.append(fused_box)
-    
+
     return np.vstack(fused_boxes)
-                    
+
+
 def edge_box_fusion(
         detections: Sequence[dict],
-        iou_threshold: float= 0.55,
-        skip_threshold: float= 0.0,
+        iou_threshold: float = 0.55,
+        skip_threshold: float = 0.0,
         destructive=True
 ) -> List[dict]:
     """
-    Perform box fusion on a set of edge detections. Edge detections are detections within a certain threshold of a 
+    Perform box fusion on a set of edge detections. Edge detections are detections within a certain threshold of an edge.
+
     Args:
         detections (DetectionResults.results): A list of dictionaries that contain detection results as defined in PySDK.
         iou_threshold (float): 1D-IoU threshold used for selecting boxes for fusion.
@@ -425,7 +430,7 @@ def edge_box_fusion(
 
     if len(detections) == 0:
         return []
-    
+
     for det in detections:
         boxes_list.append(det['wbf_info'])
         scores_list.append(det['score'])
@@ -443,9 +448,9 @@ def edge_box_fusion(
                     det['bbox'] = box[2:6]
                     det['category_id'] = int(box[0])
                     results.append(det)
-                
+
                 return results
-            
+
         return []
 
     overall_boxes = []
@@ -474,9 +479,9 @@ def edge_box_fusion(
                 new_boxes[index] = np.vstack((new_boxes[index], boxes[j]))
             else:
                 new_boxes.append(np.expand_dims(boxes[j].copy(), axis=0))
-    
+
         overall_boxes.append(_fuse_boxes(new_boxes))
-    
+
     fused_boxes = np.vstack(overall_boxes)
     fused_boxes = fused_boxes[fused_boxes[:, 1].argsort()[::-1]]
     boxes = fused_boxes[:, 2:]
@@ -500,6 +505,7 @@ def edge_box_fusion(
             results.append(det)
 
     return results
+
 
 class AnchorPoint(Enum):
     """Position of a point of interest within the bounding box"""
