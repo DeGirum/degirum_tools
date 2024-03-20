@@ -280,7 +280,7 @@ def nms(
         if not agnostic:
             keep = cv2.dnn.NMSBoxesBatched(bboxes, scores, classes, 0, iou_threshold)  # type: ignore[arg-type]
         else:
-            keep = cv2.dnn.NMSBoxes(bboxes, scores, 0, iou_threshold)
+            keep = cv2.dnn.NMSBoxes(bboxes, scores, 0, iou_threshold) # type: ignore[arg-type]
     else:
         keep = _nms_custom(
             bboxes, scores, classes, iou_threshold, use_iou, box_select, max_wh, agnostic

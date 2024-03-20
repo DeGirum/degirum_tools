@@ -114,7 +114,7 @@ class TileModel():
         
         nms(results, iou_threshold=self._model.output_nms_threshold)
         # Optional to remove boxes that are within each other. Not sure if it should be agnostic or not, can argue for either.
-        nms(results, 0.95, use_iou=False, box_select=NmsBoxSelectionPolicy.LARGEST_AREA, agnostic=True)
+        #nms(results, 0.95, use_iou=False, box_select=NmsBoxSelectionPolicy.LARGEST_AREA, agnostic=True)
         return results
     
     # predict_batch copied and modified from degirum.model.Model

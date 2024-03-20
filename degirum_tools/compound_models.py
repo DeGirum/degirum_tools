@@ -587,7 +587,7 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
             for r in result2._inference_results:
                 # Need for benchmarking a blank image. Not sure if this is truly necessary in a real situation.
                 # It skips this:
-                # {'Timing': {'CoreInferenceDuration_ms': 17.781279, 'CoreInputFrameSize_bytes': 4467, 'CoreLoadResultDuration_ms': 0.01975, 'CorePostprocessDuration_ms': 0.04263, 'CorePreprocessDuration_ms': 3.521615, 'DeviceFrequency_MHz': 1896, 'DeviceInferenceDuration_ms': 11.260666666666669, 'DeviceTemperature_C': 37}}
+                #{'Timing': {'CoreInferenceDuration_ms': 17.781279, 'CoreInputFrameSize_bytes': 4467, 'CoreLoadResultDuration_ms': 0.01975, 'CorePostprocessDuration_ms': 0.04263, 'CorePreprocessDuration_ms': 3.521615, 'DeviceFrequency_MHz': 1896, 'DeviceInferenceDuration_ms': 11.260666666666669, 'DeviceTemperature_C': 37}}
                 if "bbox" not in r:
                     continue
                 r["bbox"] = np.add(r["bbox"], [x, y, x, y]).tolist()
