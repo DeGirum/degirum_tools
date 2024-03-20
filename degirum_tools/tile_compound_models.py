@@ -1,15 +1,16 @@
 import copy
 from typing import List, MutableSequence, Optional, Sequence, Tuple, Union
 
+import cv2
 import numpy as np
 
 import degirum as dg
-from degirum_tools import CroppingAndDetectingCompoundModel, CropExtentOptions, ModelLike, NmsOptions
+from degirum_tools import CroppingAndDetectingCompoundModel, CropExtentOptions, ModelLike, NmsOptions, MotionDetectOptions, detect_motion
 from degirum_tools.math_support import nms, edge_box_fusion
 
 class TileExtractorPseudoModel(ModelLike):
     """
-    Pseudo model class which extracts regions from given image according to given ROI boxes.
+    Pseudo model class which extracts tiles from given image according to rows/columns.
     """
 
     def __init__(
@@ -20,7 +21,8 @@ class TileExtractorPseudoModel(ModelLike):
         model2: dg.model.Model,
         *,
         global_tile:bool = False,
-        #tile_mask: Union[list, np.ndarray],
+        tile_mask: Optional[list] = None,
+        motion_detect: Optional[MotionDetectOptions] = None,
     ):
         """
         Constructor.
@@ -29,8 +31,12 @@ class TileExtractorPseudoModel(ModelLike):
             cols: Number of columns to divide the image into.
             rows: Number of rows to divide the image into.
             model2: model, which will be used as a second step of the compound model pipeline
-            tile_mask: NOT IMPLEMENTED YET. A col x row list or nd.array of bools which indicates whether or not to process a tile.
             global_tile: Indicates whether the global (whole) image should also be sent to model2.
+            tile_mask: Optional list of indices to keep during tile generation.
+                Tile indices are counted starting from the top row to the bottom row, left to right.
+            motion_detect: motion detection options.
+                When None, motion detection is disabled.
+                When enabled, ROI boxes where motion is not detected will be skipped.
         """
 
         self._cols = cols
@@ -39,7 +45,11 @@ class TileExtractorPseudoModel(ModelLike):
         self._model2 = model2
         self._non_blocking_batch_predict = False
         self._global_tile = global_tile
-        self._aspect_aware = True # Right now have no intentions of ever disablint this. Probably should refactor out.
+        self._aspect_aware = True # Right now I don't see the point of disabling this. Should we have the option to disable this?
+
+        self._tile_mask = tile_mask
+        self._base_img: list = []  # base image for motion detection
+        self._motion_detect = motion_detect
 
     @property
     def non_blocking_batch_predict(self):
@@ -184,9 +194,36 @@ class TileExtractorPseudoModel(ModelLike):
                 for col in range(self._cols):
                     tile_list.append(self._get_slice(row, col))
 
+            all_tiles = [True] * len(tile_list)
+
+            if self._tile_mask is None:
+                self._tile_mask = [i for i in range(self._rows * self._cols)]
+
+            if self._motion_detect is not None:
+                motion_img, base_img = detect_motion(
+                    self._base_img[0] if self._base_img else None, image
+                )
+                self._base_img.append(base_img)
+                if len(self._base_img) > int(self._motion_detect.look_back):
+                    self._base_img.pop(0)
+
+                if motion_img is None:
+                    motion_detected = all_tiles
+                else:
+                    motion_detected = [
+                        cv2.countNonZero(motion_img[bbox[1] : bbox[3], bbox[0] : bbox[2]])
+                        > self._motion_detect.threshold
+                        * (bbox[2] - bbox[0])
+                        * (bbox[3] - bbox[1])
+                        for bbox in tile_list
+                    ]
+            else:
+                motion_detected = all_tiles
+
             tile_list = [
                 {"bbox": bbox, "label":f"LOCAL_{self._cols}x{self._rows}@{self._overlap_percent}_{idx}", "score": 1.0, "category_id": idx}
-                for idx, bbox in enumerate(tile_list)
+                for idx, bbox in enumerate(tile_list) 
+                if (motion_detected[idx] and idx in self._tile_mask)
             ]
 
             if self._global_tile:
@@ -211,8 +248,10 @@ class TileExtractorPseudoModel(ModelLike):
             )
             yield result
 
+
 def _reverse_enumerate(l: Sequence):
     return zip(range(len(l) - 1, -1, -1), reversed(l))
+
 
 class _EdgeMixin:
     # Make sure that in accumulate_results, you increment _slice_id
@@ -229,6 +268,7 @@ class _EdgeMixin:
     @staticmethod
     def _calculate_relevant_edges(slice_id: int, cols: int, rows: int) -> List[bool]:
         # Determine relevant edges of slice. [Top, Bot, Left, Right]
+        # This ignores the edges that are the true boundaries of the image.
         relevant_edge = [True, True, True, True]
 
         relevant_edge[2] = False if (slice_id + 1) % cols == 1 else True
@@ -280,20 +320,91 @@ class _EdgeMixin:
         
         return True
         
-TileModel = CroppingAndDetectingCompoundModel
 
-class LocalGlobalTileModel(TileModel):
+class TileModel(CroppingAndDetectingCompoundModel):
+    """
+    Compound model class which performs tiling. It takes a tile extractor pseudo model as the first
+    model and a detection type model as the second model.
+    It returns the combined results of the **second** model where bbox coordinates are translated
+    to original image coordinates.
+    """
+
+    # Subclass to maintain compatibility with the ObjectDetectionEvaluator, specific to pseudo-model case.
     def __init__(
         self,
         model1,
         model2,
-        large_object_threshold,
         *,
         crop_extent=0,
         crop_extent_option=CropExtentOptions.ASPECT_RATIO_NO_ADJUSTMENT,
         add_model1_results=False,
         nms_options: Optional[NmsOptions] = None,
     ):
+        """
+        Constructor.
+
+        Args:
+            model1: Tile extractor pseudo-model
+            model2: PySDK object detection model
+            crop_extent: extent of cropping in percent of bbox size
+            crop_extent_option: method of applying extending crop to the input image for model2
+            add_model1_results: True to add detections of model1 to the combined result
+            nms_options: non-maximum suppression (NMS) options
+        """
+
+        if model1.image_backend != model2.image_backend:
+            raise Exception(
+                f"Image backends of both models should be the same, but got {model1.image_backend} and {model2.image_backend}"
+            )
+
+        super().__init__(model1, model2, crop_extent, crop_extent_option, add_model1_results, nms_options)
+        self.output_postprocess_type = self.model2.output_postprocess_type
+
+    def __enter__(self):
+        self.model2._in_context = True
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.model2._in_context = False
+        self.model2._release_runtime()
+
+class LocalGlobalTileModel(TileModel):
+    """
+    Compound model class which performs tiling with local (fine grained) and global (course grained) images. 
+    It takes a tile extractor pseudo model as the first model and a detection type model as the second model.
+    It returns the combined results of the **second** model where bbox coordinates are translated
+    to the original image coordinates. Objects are retained depending on a large object threshold, if the
+    object's area size is greater than this threshold, it will only be taken from the global tile, if smaller
+    it will be only taken from local tiles.
+
+    The tile extractor pseudo model must be set to generate a global tile.
+    """
+
+    def __init__(
+        self,
+        model1,
+        model2,
+        large_object_threshold: float= 0.01,
+        *,
+        crop_extent=0,
+        crop_extent_option=CropExtentOptions.ASPECT_RATIO_NO_ADJUSTMENT,
+        add_model1_results=False,
+        nms_options: Optional[NmsOptions] = None,
+    ):
+        """
+        Constructor.
+
+        Args:
+            model1: Tile extractor pseudo-model
+            model2: PySDK object detection model
+            large_object_threshold: A threshold to determine if an object is considered large or not. This is
+                relative to the area of the original image.
+            crop_extent: extent of cropping in percent of bbox size
+            crop_extent_option: method of applying extending crop to the input image for model2
+            add_model1_results: True to add detections of model1 to the combined result
+            nms_options: non-maximum suppression (NMS) options
+        """
+
         super().__init__(model1, 
                          model2, 
                          crop_extent=crop_extent, 
@@ -372,18 +483,46 @@ class LocalGlobalTileModel(TileModel):
         return ret
 
 class BoxFusionTileModel(_EdgeMixin, TileModel):
+    """
+    Compound model class which performs tiling with fusion of boxes detected on the edges/overlaps. 
+    It takes a tile extractor pseudo model as the first model and a detection type model as the second model.
+    It returns the combined results of the **second** model where bbox coordinates are translated
+    to the original image coordinates. Objects detected on the edges/overlaps (determined by the edge threshold)
+    of tiles are fused based on if they overlap and if one of the 1D-IoUs exceeds the fusion threshold.
+    """
+
     def __init__(
         self,
         model1,
         model2,
-        edge_threshold,
-        fusion_threshold,
+        edge_threshold: float=0.02,
+        fusion_threshold: float=0.8,
         *,
         crop_extent=0,
         crop_extent_option=CropExtentOptions.ASPECT_RATIO_NO_ADJUSTMENT,
         add_model1_results=False,
         nms_options: Optional[NmsOptions] = None,
     ):
+        """
+        Constructor.
+
+        Args:
+            model1: Tile extractor pseudo-model
+            model2: PySDK object detection model
+            edge_threshold: A threshold to determine if an object is considered an edge detection 
+                or not. The edge_threshold determines the amount of space next to the tiles edges
+                where if a detection overlaps this space it is considered an edge detection. This 
+                edge space is relative (a percent) of the width/height of a tile.
+            fusion_threshold: A threshold to determine whether or not to fuse two edge detections.
+                This corresponds to the 1D-IoU of two boxes, of either dimension. If the boxes
+                overlap in both dimensions and one of the dimension's 1D-IoU is greater than the 
+                fusion_threshold, the boxes are fused.
+            crop_extent: extent of cropping in percent of bbox size
+            crop_extent_option: method of applying extending crop to the input image for model2
+            add_model1_results: True to add detections of model1 to the combined result
+            nms_options: non-maximum suppression (NMS) options
+        """
+
         super().__init__(model1,
                          model2,
                          crop_extent=crop_extent, 
@@ -395,6 +534,7 @@ class BoxFusionTileModel(_EdgeMixin, TileModel):
         self._fusion_thr = fusion_threshold
 
     def _categorize(self, cols, rows, slice_id, dets: MutableSequence[dict]):
+        # Separates central boxes from edge boxes.
         relevant_edges = _EdgeMixin._calculate_relevant_edges(slice_id, cols, rows)
 
         central_boxes = []
@@ -426,6 +566,7 @@ class BoxFusionTileModel(_EdgeMixin, TileModel):
 
             height, width, _ = result1.image.shape
 
+            # Perform fusion of boxes labeled as edge detections.
             edge_boxes = []
             for i, r in _reverse_enumerate(self._current_result._inference_results):
                 if "wbf_info" in r:
@@ -471,8 +612,9 @@ class BoxFusionTileModel(_EdgeMixin, TileModel):
         idx = result2.info.sub_result
 
         if idx >= 0:
-            # this is probably not the best way to do it. things i might change in the future
-            # _categorize instead returns indices. Instead of storing edge_box flag in the dict, store the inference results separately?
+            # this is probably not the best way to do it. 
+            # maybe make _categorize instead returns indices. 
+            # Instead of storing edge_box flag in the dict, store the inference results separately?
             x, y = result1.results[idx]["bbox"][:2]
 
             slice_params = result1.results[idx]['label']
@@ -483,7 +625,6 @@ class BoxFusionTileModel(_EdgeMixin, TileModel):
                 rows = int(slice_params.split('_')[1].split('@')[0].split('x')[1])
 
                 # Generate edge boundaries
-
                 h, w, _ = result2.image.shape
                 self._top_edge = (0, 0, w, int(self._edge_thr * h))
                 self._bot_edge = (0, int(h - self._edge_thr * h), w, h)
@@ -525,19 +666,54 @@ class BoxFusionTileModel(_EdgeMixin, TileModel):
 
 
 class BoxFusionLocalGlobalTileModel(BoxFusionTileModel):
+    """
+    Compound model class which performs tiling with local (fine grained) and global (course grained) images and
+    fusion of boxes detected on the edges/overlaps. It takes a tile extractor pseudo model as the first model 
+    and a detection type model as the second model. It returns the combined results of the **second** model 
+    where bbox coordinates are translated to the original image coordinates. Objects are first retained depending 
+    on a large object threshold, if the object's area size is greater than this threshold, it will only be taken 
+    from the global tile, if smaller it will be only taken from local tiles. After passing the local/global filter,
+    objects detected on the edges/overlaps (determined by the edge threshold) of tiles are fused based on if they 
+    overlap and if one of the 1D-IoUs exceeds the fusion threshold.
+
+    The tile extractor pseudo model must be set to generate a global tile.
+    """
+
     def __init__(
         self,
         model1,
         model2,
-        large_object_threshold,
-        edge_threshold,
-        fusion_threshold,
+        large_object_threshold: float=0.01,
+        edge_threshold: float=0.02,
+        fusion_threshold: float=0.8,
         *,
         crop_extent=0,
         crop_extent_option=CropExtentOptions.ASPECT_RATIO_NO_ADJUSTMENT,
         add_model1_results=False,
         nms_options: Optional[NmsOptions] = None,
     ):
+        """
+        Constructor.
+
+        Args:
+            model1: Tile extractor pseudo-model
+            model2: PySDK object detection model
+            large_object_threshold: A threshold to determine if an object is considered large or not. This is
+                relative to the area of the original image.
+            edge_threshold: A threshold to determine if an object is considered an edge detection 
+                or not. The edge_threshold determines the amount of space next to the tiles edges
+                where if a detection overlaps this space it is considered an edge detection. This 
+                edge space is relative (a percent) of the width/height of a tile.
+            fusion_threshold: A threshold to determine whether or not to fuse two edge detections.
+                This corresponds to the 1D-IoU of two boxes, of either dimension. If the boxes
+                overlap in both dimensions and one of the dimension's 1D-IoU is greater than the 
+                fusion_threshold, the boxes are fused.
+            crop_extent: extent of cropping in percent of bbox size
+            crop_extent_option: method of applying extending crop to the input image for model2
+            add_model1_results: True to add detections of model1 to the combined result
+            nms_options: non-maximum suppression (NMS) options
+        """
+
         super().__init__(model1, 
                          model2, 
                          edge_threshold, 
