@@ -220,21 +220,21 @@ class TileExtractorPseudoModel(ModelLike):
             else:
                 motion_detected = all_tiles
 
-            tile_list = [
+            tile_results = [
                 {"bbox": bbox, "label":f"LOCAL_{self._cols}x{self._rows}@{self._overlap_percent}_{idx}", "score": 1.0, "category_id": idx}
                 for idx, bbox in enumerate(tile_list) 
                 if (motion_detected[idx] and idx in self._tile_mask)
             ]
 
             if self._global_tile:
-                tile_list.append({"bbox": [0, 0, self._width, self._height], "label":f"GLOBAL", "score": 1.0, "category_id": -999})
+                tile_results.append({"bbox": [0, 0, self._width, self._height], "label":f"GLOBAL", "score": 1.0, "category_id": -999})
 
             # generate pseudo inference results
             result = dg.postprocessor.DetectionResults(
                 model_params=self._model2._model_parameters,
                 input_image=image,
                 model_image=image,
-                inference_results=tile_list,
+                inference_results=tile_results,
                 draw_color=self._model2.overlay_color,
                 line_width=self._model2.overlay_line_width,
                 show_labels=self._model2.overlay_show_labels,
@@ -357,7 +357,13 @@ class TileModel(CroppingAndDetectingCompoundModel):
                 f"Image backends of both models should be the same, but got {model1.image_backend} and {model2.image_backend}"
             )
 
-        super().__init__(model1, model2, crop_extent, crop_extent_option, add_model1_results, nms_options)
+        super().__init__(model1,
+                         model2,
+                         crop_extent=crop_extent,
+                         crop_extent_option=crop_extent_option, 
+                         add_model1_results=add_model1_results,
+                         nms_options=nms_options)
+        
         self.output_postprocess_type = self.model2.output_postprocess_type
 
     def __enter__(self):

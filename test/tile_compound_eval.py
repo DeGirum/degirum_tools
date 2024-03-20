@@ -1,4 +1,4 @@
-import numpy as np, degirum as dg
+import degirum as dg
 from degirum_tools import NmsOptions, NmsBoxSelectionPolicy
 from degirum_tools.tile_compound_models import TileExtractorPseudoModel, BoxFusionLocalGlobalTileModel, BoxFusionTileModel, LocalGlobalTileModel, TileModel
 from degirum_tools.detection_eval import ObjectDetectionModelEvaluator
@@ -47,14 +47,14 @@ tile_model = TileModel(tile_extractor, model, nms_options=nms_options)
 compound_models.append(tile_model)
 
 # # LocalGlobalTiling equivalent
-# tile_extractor = TileExtractorPseudoModel(*tiling_params, model, global_tile=True)
-# tile_model = LocalGlobalTileModel(tile_extractor, model, 0.01, nms_options=nms_options)
-# compound_models.append(tile_model)
+tile_extractor = TileExtractorPseudoModel(*tiling_params, model, global_tile=True)
+tile_model = LocalGlobalTileModel(tile_extractor, model, 0.01, nms_options=nms_options)
+compound_models.append(tile_model)
 
 # # WBFSimpleTiling equivalent
-# tile_extractor = TileExtractorPseudoModel(*tiling_params, model, global_tile=False)
-# tile_model = BoxFusionTileModel(tile_extractor, model, 0.02, 0.8, nms_options=nms_options)
-# compound_models.append(tile_model)
+tile_extractor = TileExtractorPseudoModel(*tiling_params, model, global_tile=False)
+tile_model = BoxFusionTileModel(tile_extractor, model, 0.02, 0.8, nms_options=nms_options)
+compound_models.append(tile_model)
 
 # WBFLocalGlobalTiling equivalent
 tile_extractor = TileExtractorPseudoModel(*tiling_params, model, global_tile=True)
