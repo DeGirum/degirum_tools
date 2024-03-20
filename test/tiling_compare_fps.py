@@ -8,7 +8,6 @@ from degirum_tools.compound_models import CompoundModelBase
 from degirum_tools.tile_compound_models import TileExtractorPseudoModel, TileModel, BoxFusionTileModel, LocalGlobalTileModel, BoxFusionLocalGlobalTileModel
 from degirum_tools.ui_support import Timer # perf_counter_ns() probably better than time_ns() but keep it the same for comparisons sake.
 
-
 @dataclass
 class ModelTimeProfile:
     """Class to hold model time profiling results"""
@@ -75,8 +74,6 @@ def compound_time_profile(model, tiling=(1,1), iterations=100,) -> ModelTimeProf
                 setattr(model, k, v)
                 stats = model.time_stats()
 
-
-
     return ModelTimeProfile(
         elapsed=elapsed,
         iterations=iterations,
@@ -85,7 +82,6 @@ def compound_time_profile(model, tiling=(1,1), iterations=100,) -> ModelTimeProf
         parameters=model.model2.model_info if isinstance(model, CompoundModelBase) else model.model_info,
         time_stats=stats,
     )
-
 
 
 token = "dg_DuH5LpfrcPmqkeq6uX84QQyC15hLZGUo7sZc7"
@@ -108,8 +104,6 @@ compound_model = dgtools.CroppingAndDetectingCompoundModel(tile_extractor, model
 time_results = compound_time_profile(compound_model, tiling)
 
 print(f"Current dg_tools tiling FPS: {time_results.observed_fps}")
-
-###########################################
 
 tile_extractor = TileExtractorPseudoModel(2, 2, 0.0, model)
 tile_model = TileModel(tile_extractor, model, nms_options=nms_options)

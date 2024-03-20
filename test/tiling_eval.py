@@ -2,7 +2,7 @@ import degirum as dg
 from degirum_tools.detection_eval import ObjectDetectionModelEvaluator
 
 from degirum_tools.tiling import TileModel
-from degirum_tools.tile_strategy import SimpleTiling, WBFLocalGlobalTiling, LocalGlobalTiling, WBFSimpleTiling
+from degirum_tools.tile_strategy import WBFLocalGlobalTiling #SimpleTiling, LocalGlobalTiling, WBFSimpleTiling,
 
 access_token = 'YOUR_TOKEN'
 
