@@ -1,4 +1,4 @@
-from degirum_tools.tile_strategy import SimpleTiling
+from degirum_tools.tile_compound_models import TileExtractorPseudoModel
 from degirum_tools.math_support import edge_box_fusion
 import numpy as np
 
@@ -66,52 +66,68 @@ def test_generate_tiles():
     class DummyModelParams:
         InputW = [640]
         InputH = [640]
-    
-    m_params = DummyModelParams()
+        InputC = [3]
+        InputImgFmt = ['RAW']
+        InputRawDataType = ['DG_UINT8']
+        InputColorSpace = ['RGB']
+
+    class DummyModel:
+        image_backend = 'auto'
+        input_image_format = 'RAW'
+        _model_parameters = DummyModelParams() #model_info
+        model_info = _model_parameters
+        overlay_color = (0, 0, 0)
+        overlay_line_width = 1.0
+        overlay_show_labels = True
+        overlay_show_probabilities = True
+        overlay_alpha = False
+        overlay_font_scale = 1.0
+        input_letterbox_fill_color = (0, 0, 0)
+        label_dictionary = {0: 0}
+
+    dummy_model = DummyModel()
 
     # 1 x 1 no overlap square, matching aspect ratio
-    tile_strat = SimpleTiling(1, 1, 0)
-    tile_strat._set_model_parameters(m_params)
-    tiles = list(tile_strat._generate_tiles(np.zeros((100, 100, 3))))
-
+    tile_extractor = TileExtractorPseudoModel(1, 1, 0.0, dummy_model)
+    results = list(tile_extractor.predict_batch([np.zeros((100, 100, 3), dtype=np.uint8)]))[0]
+    tiles = [x['bbox'] for x in results.results]
     assert len(tiles) == 1
-    assert tiles[0][1][1] == [0, 0, 100, 100]
+    assert tiles[0] == [0, 0, 100, 100]
 
     # 2 x 2 no overlap square, matching aspect ratio
-    tile_strat = SimpleTiling(2, 2, 0)
-    tile_strat._set_model_parameters(m_params)
-    tiles = list(tile_strat._generate_tiles(np.zeros((100, 100, 3))))
-
+    tile_extractor = TileExtractorPseudoModel(2, 2, 0.0, dummy_model)
+    results = list(tile_extractor.predict_batch([np.zeros((100, 100, 3), dtype=np.uint8)]))[0]
+    tiles = [x['bbox'] for x in results.results]
     assert len(tiles) == 4
-    assert tiles[0][1][1] == [0, 0, 50, 50]
+    assert tiles[0] == [0, 0, 50, 50]
 
     # 2 x 2 10% overlap, matching aspect ratio
-    tile_strat = SimpleTiling(2, 2, 0.1)
-    tile_strat._set_model_parameters(m_params)
-    tiles = list(tile_strat._generate_tiles(np.zeros((640, 640, 3))))
+    tile_extractor = TileExtractorPseudoModel(2, 2, 0.1, dummy_model)
+    results = list(tile_extractor.predict_batch([np.zeros((640, 640, 3), dtype=np.uint8)]))[0]
+    tiles = [x['bbox'] for x in results.results]
 
-    width = tiles[0][1][1][2]
-    height = tiles[0][1][1][3]
+    width = tiles[0][2]
+    height = tiles[0][3]
 
-    tile2_x = tiles[1][1][1][0]
-    tile3_y = tiles[2][1][1][1]
+    tile2_x = tiles[1][0]
+    tile3_y = tiles[2][1]
 
     assert abs(((width - tile2_x) / width ) - 0.1) <= tolerance, 'Overlap width not close to 10%'
     assert abs(((height - tile3_y) / height) - 0.1 ) <= tolerance, 'Overlap height not close to 10%'
 
     # 2 x 2 rectangle, 10% overlap, matching aspect ratio
-    m_params.InputH = [384]
-    tile_strat = SimpleTiling(2, 2, 0.1)
-    tile_strat._set_model_parameters(m_params)
-    tiles = list(tile_strat._generate_tiles(np.zeros((384, 640, 3))))
+    dummy_model._model_parameters.InputH = [384]
+    tile_extractor = TileExtractorPseudoModel(2, 2, 0.1, dummy_model)
+    results = list(tile_extractor.predict_batch([np.zeros((384, 640, 3), dtype=np.uint8)]))[0]
+    tiles = [x['bbox'] for x in results.results]
     
     assert len(tiles) == 4
 
-    width = tiles[0][1][1][2]
-    height = tiles[0][1][1][3]
+    width = tiles[0][2]
+    height = tiles[0][3]
 
-    tile2_x = tiles[1][1][1][0]
-    tile3_y = tiles[2][1][1][1] 
+    tile2_x = tiles[1][0]
+    tile3_y = tiles[2][1] 
 
     assert abs(((width - tile2_x) / width ) - 0.1) <= tolerance, 'Overlap width not close to 10%'
     assert abs(((height - tile3_y) / height) - 0.1 ) <= tolerance, 'Overlap height not close to 10%'
@@ -119,47 +135,48 @@ def test_generate_tiles():
     # 2 x 2 rectangle, model aspect ratio > image aspect ratio, w >= h
     # model aspect ratio = 1, image aspect ratio = 1.666666
     # expect forced overlap in the y dimension
-    m_params.InputH = [640]
-    tile_strat = SimpleTiling(2, 2, 0)
-    tile_strat._set_model_parameters(m_params)
-    tiles = list(tile_strat._generate_tiles(np.zeros((384, 640, 3))))
+    dummy_model._model_parameters.InputH = [640]
+    tile_extractor = TileExtractorPseudoModel(2, 2, 0.0, dummy_model)
+    results = list(tile_extractor.predict_batch([np.zeros((384, 640, 3), dtype=np.uint8)]))[0]
+    tiles = [x['bbox'] for x in results.results]
 
-    width = tiles[0][1][1][2]
-    height = tiles[0][1][1][3]
+    width = tiles[0][2]
+    height = tiles[0][3]
 
-    tile2_x = tiles[1][1][1][0]
-    tile3_y = tiles[2][1][1][1] 
+    tile2_x = tiles[1][0]
+    tile3_y = tiles[2][1] 
 
     assert width - tile2_x == 0
     assert (height - tile3_y) / height > tolerance
 
     for tile in tiles:
-        assert tile[1][1][0] >= 0 and tile[1][1][0] <= 640
-        assert tile[1][1][1] >= 0 and tile[1][1][1] <= 384
-        assert tile[1][1][2] >= 0 and tile[1][1][2] <= 640
-        assert tile[1][1][3] >= 0 and tile[1][1][3] <= 384
+        assert tile[0] >= 0 and tile[0] <= 640
+        assert tile[1] >= 0 and tile[1] <= 384
+        assert tile[2] >= 0 and tile[2] <= 640
+        assert tile[3] >= 0 and tile[3] <= 384
 
     # 2 x 2 rectangle, model aspect ratio < image aspect ratio, w >= h
     # model aspect ratio = 1.6666, image aspect ratio = 1
     # expect forced overlap in the x dimension
-    m_params.InputH = [384]
-    tile_strat = SimpleTiling(2, 2, 0)
-    tile_strat._set_model_parameters(m_params)
-    tiles = list(tile_strat._generate_tiles(np.zeros((640, 640, 3))))
+    dummy_model._model_parameters.InputH = [384]
+    tile_extractor = TileExtractorPseudoModel(2, 2, 0.0, dummy_model)
+    results = list(tile_extractor.predict_batch([np.zeros((640, 640, 3), dtype=np.uint8)]))[0]
+    tiles = [x['bbox'] for x in results.results]
 
-    width = tiles[0][1][1][2]
-    height = tiles[0][1][1][3]
+    width = tiles[0][2]
+    height = tiles[0][3]
 
-    tile2_x = tiles[1][1][1][0]
-    tile3_y = tiles[2][1][1][1] 
+    tile2_x = tiles[1][0]
+    tile3_y = tiles[2][1] 
 
     assert (width - tile2_x) / width > tolerance
     assert height - tile3_y == 0
 
     for tile in tiles:
-        assert tile[1][1][0] >= 0 and tile[1][1][0] <= 640
-        assert tile[1][1][1] >= 0 and tile[1][1][1] <= 640
-        assert tile[1][1][2] >= 0 and tile[1][1][2] <= 640
-        assert tile[1][1][3] >= 0 and tile[1][1][3] <= 640
+        assert tile[0] >= 0 and tile[0] <= 640
+        assert tile[1] >= 0 and tile[1] <= 640
+        assert tile[2] >= 0 and tile[2] <= 640
+        assert tile[3] >= 0 and tile[3] <= 640
 
+test_generate_tiles()
 test_wbf()
