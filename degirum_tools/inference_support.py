@@ -11,7 +11,7 @@ import cv2, numpy as np
 import degirum as dg  # import DeGirum PySDK
 from contextlib import ExitStack
 from pathlib import Path
-from typing import Union, List
+from typing import Union, List, Optional
 from dataclasses import dataclass
 from .video_support import (
     open_video_stream,
@@ -68,6 +68,113 @@ def connect_model_zoo(
     return zoo
 
 
+def _create_analyzing_postprocessor_class(
+    analyzers: Union[ResultAnalyzerBase, List[ResultAnalyzerBase], None],
+    model: Optional[dg.model.Model] = None,
+):
+    """Helper function to create postprocessor class entity which
+    wraps original postprocessor and applies analyzers to its results.
+
+    Args:
+        analyzers: list of analyzers to apply to postprocessor results
+        model: model object (to be used to deduce postprocessor type), optional
+
+    Returns:
+        AnalyzingPostprocessor class
+    """
+
+    class AnalyzingPostprocessor:
+        def __init__(self, *args, **kwargs):
+            if AnalyzingPostprocessor._postprocessor_type is not None:
+                # create postprocessor of proper type
+                self._result = AnalyzingPostprocessor._postprocessor_type(
+                    *args, **kwargs
+                )
+            else:
+                self._result = kwargs.get("result")
+
+            # apply all analyzers to analyze result
+            for analyzer in AnalyzingPostprocessor._analyzers:
+                analyzer.analyze(self._result)
+
+        @property
+        def image_overlay(self):
+            img = self._result.image_overlay
+            if not isinstance(img, np.ndarray):
+                raise Exception(
+                    "Only OpenCV image backend is supported. Please set model.image_backend = 'opencv'"
+                )
+            # apply all analyzers to annotate overlay image
+            for analyzer in AnalyzingPostprocessor._analyzers:
+                img = analyzer.annotate(self._result, img)
+            return img
+
+        # delegate all other attributes to wrapped postprocessor
+        def __getattr__(self, attr):
+            return getattr(self._result, attr)
+
+        # store analyzers
+        _analyzers = (
+            analyzers
+            if isinstance(analyzers, list)
+            else ([analyzers] if analyzers is not None else [])
+        )
+
+        # deduce postprocessor type from model
+        if model is not None:
+            if model._custom_postprocessor is not None:
+                _postprocessor_type = model._custom_postprocessor
+                _was_custom = True
+            else:
+                _postprocessor_type = dg.postprocessor._inference_result_type(
+                    model._model_parameters
+                )()
+                _was_custom = False
+        else:
+            _postprocessor_type = None
+            _was_custom = False
+
+    return AnalyzingPostprocessor
+
+
+def attach_analyzers(
+    model: dg.model.Model,
+    analyzers: Union[ResultAnalyzerBase, List[ResultAnalyzerBase], None],
+):
+    """
+    Attach analyzers to given model object.
+
+    Args:
+        model: Model object to attach analyzers to
+        analyzers: List of analyzer objects to attach to model,
+            or `None` to detach all analyzers if any were attached before
+
+    Returns:
+        Model object with attached analyzers
+    """
+
+    analyzing_postprocessor = _create_analyzing_postprocessor_class(analyzers, model)
+
+    if analyzers:
+        # attach custom postprocessor to model
+        model._custom_postprocessor = analyzing_postprocessor
+    else:
+        # remove analyzing custom postprocessor from model if any
+        if (
+            model._custom_postprocessor is not None
+            and isinstance(model._custom_postprocessor, type)
+            and model._custom_postprocessor.__name__ == analyzing_postprocessor.__name__
+        ):
+            if model._custom_postprocessor._was_custom:
+                model._custom_postprocessor = (
+                    model._custom_postprocessor._postprocessor_type
+                )
+            else:
+                model._custom_postprocessor = None
+
+    return model
+
+
 def predict_stream(
     model: dg.model.Model,
     video_source_id: Union[int, str, Path, None],
@@ -91,36 +198,12 @@ def predict_stream(
         Also prediction result object has overridden `image_overlay` method which additionally displays analyzers' annotations.
     """
 
-    # select OpenCV backend and matching colorspace
-    model.image_backend = "opencv"
-    model.input_numpy_colorspace = "BGR"
-
-    class AnalyzerResult:
-        def __init__(self, res, analyzers):
-            self._result = res
-            self._analyzers = (
-                analyzers
-                if isinstance(analyzers, list)
-                else ([analyzers] if analyzers is not None else [])
-            )
-            # apply all analyzers to the result
-            for analyzer in self._analyzers:
-                analyzer.analyze(res)
-
-        def __getattr__(self, item):
-            return getattr(self._result, item)
-
-        @property
-        def image_overlay(self):
-            img = self._result.image_overlay
-            for analyzer in self._analyzers:
-                img = analyzer.annotate(self._result, img)
-            return img
+    analyzing_postprocessor = _create_analyzing_postprocessor_class(analyzers)
 
     with open_video_stream(video_source_id) as stream:
         for res in model.predict_batch(video_source(stream)):
             if analyzers is not None:
-                yield AnalyzerResult(res, analyzers)
+                yield analyzing_postprocessor(result=res)
             else:
                 yield res
 
@@ -148,9 +231,6 @@ def annotate_video(
         visual_display - when True, show interactive video display with annotated video stream
         analyzers - optional analyzer or list of analyzers to be applied to model inference results
     """
-
-    model.image_backend = "opencv"
-    model.input_numpy_colorspace = "BGR"
 
     win_name = f"Annotating {video_source_id}"
 

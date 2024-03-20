@@ -656,7 +656,7 @@ def generate_tiles_fixed_ratio(
     tile_aspect_ratio: Union[float, np.ndarray, Sequence],
     grid_size: Union[np.ndarray, Sequence],
     image_size: Union[np.ndarray, Sequence],
-    min_overlap_percent: Union[np.ndarray, Sequence],
+    min_overlap_percent: Union[np.ndarray, Sequence, float],
 ):
     """
     Generate a set of rectangular boxes (tiles) of given fixed size
@@ -710,3 +710,56 @@ def generate_tiles_fixed_ratio(
         raise ValueError("At least one of grid_size values must be non-zero")
 
     return _generate_tiles_core(tile_size, grid_size, image_size)
+
+
+class FIRFilterLP:
+    """
+    FIR low-pass filter class
+    """
+
+    def __init__(self, normalized_cutoff: float, taps_cnt: int, dimension: int = 1):
+        """
+        Constructor
+
+        Args:
+            normalized_cutoff: normalized cutoff frequency
+            taps_cnt: number of taps
+            dimension: dimension of the input signal
+        """
+        import scipy.signal
+
+        self._fir_coeffs = scipy.signal.firwin(
+            taps_cnt, normalized_cutoff, window="blackmanharris"
+        )
+        self._buffer = np.array([])
+        self._taps_cnt = taps_cnt
+        self._initialized = False
+        self._result = np.zeros(dimension)
+
+    def update(self, sample: Union[float, np.ndarray]) -> np.ndarray:
+        """
+        Apply filter to the input signal
+
+        Args:
+            sample: input signal sample if `dimension` is 1
+                or array of samples if `dimension` is greater than 1
+
+        Returns:
+            filtered signal
+        """
+        if not self._initialized:
+            self._buffer = np.column_stack((sample,) * self._taps_cnt)
+            self._initialized = True
+        self._buffer = np.column_stack((self._buffer[:, 1:], sample))
+        self._result = np.dot(self._buffer, self._fir_coeffs)
+        return self._result
+
+    def get(self):
+        """
+        Get last filtered result
+        """
+        return self._result
+
+    def __call__(self, sample: Union[float, np.ndarray]) -> np.ndarray:
+        """Synonym for update() method"""
+        return self.update(sample)

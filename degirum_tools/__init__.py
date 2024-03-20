@@ -10,11 +10,15 @@
 from ._version import __version__, __version_info__
 from .audio_support import *
 from .compound_models import *
+from .classification_eval import *
+from .detection_eval import *
 from .environment import *
 from .inference_support import *
 from .line_count import *
 from .math_support import *
+from .object_selector import *
 from .object_tracker import *
+from .regression_eval import *
 from .ui_support import *
 from .video_support import *
 from .zone_count import *

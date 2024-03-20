@@ -11,3 +11,6 @@ degirum_tools can be installed directly from this repository:
 python3 -m pip install git+https://github.com/DeGirum/degirum_tools.git
 ```
 
+## Release
+
+Release procedure [is described here](https://degirum.atlassian.net/wiki/spaces/SD/pages/1916076041/degirum+tools+Package+Release+Procedure)

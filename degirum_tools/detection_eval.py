@@ -1,210 +1,75 @@
 #
-# detection_eval.py: evaluation toolkit for detection models used in PySDK samples
+# detection_eval.py: object detection models evaluator
 #
-# Copyright DeGirum Corporation 2023
+# Copyright DeGirum Corporation 2024
 # All rights reserved
 #
 
-import yaml
-import json
-import os
-from typing import List
-import numpy as np
+import json, os, degirum as dg, numpy as np
+from typing import List, Optional
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 from .math_support import xyxy2xywh
+from .eval_support import ModelEvaluatorBase
+from .ui_support import Progress, stdoutRedirector
 
 
-def process_keypoints(keypoints_res: List[dict]) -> List[float]:
+class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
     """
-    Convert PySDK keypoint results format to pycocotools keypoint format
-
-    Args:
-        keypoints_res: The keypoint results dictionary output from PySDK.
-
-    Returns:
-        keypoints: The list of keypoint results in pycocotools format.
+    This class evaluates the mAP for Object Detection models.
     """
-    keypoints: List[float] = []
-    for ldmks in keypoints_res:
-        kypts = ldmks["landmark"]
-        kypts_score = ldmks["score"]
-        keypoints.extend(float(x) for x in kypts)
-        keypoints.append(kypts_score)
-    return keypoints
 
-
-def save_results_coco_json(results, jdict, image_id, class_map=None):
-    """Serialize YOLO predictions to COCO json format."""
-    max_category_id = 0
-    for result in results:
-        box = xyxy2xywh(np.asarray(result["bbox"]).reshape(1, 4) * 1.0)  # xywh
-        box[:, :2] -= box[:, 2:] / 2  # xy center to top-left corner
-        box = box.reshape(-1).tolist()
-        category_id = (
-            class_map[result["category_id"]] if class_map else result["category_id"]
-        )
-        # detection base result
-        detected_elem = {
-            "image_id": image_id,
-            "category_id": category_id,
-            "bbox": [np.round(x, 3) for x in box],
-            "score": np.round(result["score"], 5),
-        }
-        # pose model addition
-        if "landmarks" in result:
-            detected_elem["keypoints"] = process_keypoints(result["landmarks"])
-        #
-        jdict.append(detected_elem)
-        max_category_id = max(max_category_id, category_id)
-    return max_category_id
-
-
-def evaluate_coco(
-    anno: COCO, pred: COCO, mAP_type: str = "bbox", img_id_list: List[str] = []
-):
-    """Evaluation process based on the annotation COCO object and the predic
-
-        Args:
-            anno (COCO): COCO ground truth annotation object
-            pred (COCO): COCO prediction object
-            img_id_list (List): List of the image ids to evaluate on.
-
-    Returns the mAP statistics.
-    """
-    eval_obj = COCOeval(anno, pred, mAP_type)
-    if img_id_list:
-        eval_obj.params.imgIds = [id for id in img_id_list]  # image IDs to evaluate
-    eval_obj.evaluate()
-    eval_obj.accumulate()
-    eval_obj.summarize()
-
-    return eval_obj.stats
-
-
-def is_pose_model(element: dict):
-    """Check if the it is a PySDK pose model
-        Args:
-            element (dict): detection result dict
-
-    Returns True if it is a pose model.
-    """
-    return True if "keypoints" in element else False
-
-
-class ObjectDetectionModelEvaluator:
-    def __init__(
-        self,
-        dg_model,
-        classmap=None,
-        pred_path="predictions.json",
-        output_confidence_threshold=0.001,
-        output_nms_threshold=0.7,
-        output_max_detections=300,
-        output_max_detections_per_class=100,
-        output_max_classes_per_detection=1,
-        output_use_regular_nms=True,
-        input_resize_method="bilinear",
-        input_pad_method="letterbox",
-        image_backend="opencv",
-        input_img_fmt="JPEG",
-        input_letterbox_fill_color=(114, 114, 114),
-        input_numpy_colorspace="auto",
-    ):
+    def __init__(self, model: dg.model.Model, **kwargs):
         """
         Constructor.
-            This class evaluates the mAP for Object Detection models.
 
-            Args:
-                dg_model (Detection model): Detection model from the Degirum model zoo.
-                class_map (json): A json file that contains classes with its class ids, each category would have a list of class ids.
-                pred_path (str): Path to save the predictions as a json file.
-                output_conf_threshold (float): Output Confidence threshold.
-                output_nms_threshold (float): Output Non-Max Suppression threshold.
-                max_detections (int): Maximum Detections.
-                max_detections_per_class (int): Maximum Detections Per Class.
-                max_classes_per_detection (int): Maximum Classes Per Detection.
-                use_regular_nms (boolean): Whether to use Regular Non-Max Suppression.
-                input_resize_method (str): Input Resize Method.
-                input_pad_method (str): Input Pad Method.
-                image_backend (str): Image Backend.
-                input_img_fmt (str): InputImgFmt.
-                input_letterbox_fill_color (tuple): the RGB color for padding used in letterbox
-                input_numpy_colorspace (str): input colorspace: ("BGR" to match OpenCV image backend)
+        Args:
+            model (Detection model): PySDK detection model object
+            kwargs (dict): arbitrary set of PySDK model parameters and the following evaluation parameters:
+                show_progress (bool): show progress bar
+                classmap (dict): dictionary which maps model category IDs to dataset category IDs
+                pred_path (str): path to save the predictions as a JSON file of None if not required
         """
 
-        self.dg_model = dg_model
-        self.classmap = classmap
-        self.pred_path = pred_path
+        #
+        # detection evaluator parameters:
+        #
 
-        if (
-            self.dg_model.output_postprocess_type in ["Detection", "DetectionYolo", "DetectionYoloV8"]
-        ):
-            self.dg_model.output_confidence_threshold = output_confidence_threshold
-            self.dg_model.output_nms_threshold = output_nms_threshold
-            self.dg_model.output_max_detections = output_max_detections
-            self.dg_model.output_max_detections_per_class = (
-                output_max_detections_per_class
-            )
-            self.dg_model.output_max_classes_per_detection = (
-                output_max_classes_per_detection
-            )
-            self.dg_model.output_use_regular_nms = output_use_regular_nms
-            self.dg_model.input_resize_method = input_resize_method
-            self.dg_model.input_pad_method = input_pad_method
-            self.dg_model.image_backend = image_backend
-            self.dg_model.input_image_format = input_img_fmt
-            self.dg_model.input_numpy_colorspace = input_numpy_colorspace
-            self.dg_model.input_letterbox_fill_color = input_letterbox_fill_color
-        else:
+        # dictionary which maps model category IDs to dataset category IDs
+        self.classmap: Optional[dict] = None
+        # path to save the predictions as a JSON file
+        self.pred_path: Optional[str] = None
+
+        if model.output_postprocess_type not in [
+            "Detection",
+            "DetectionYolo",
+            "DetectionYoloV8",
+        ]:
             raise Exception("Model loaded for evaluation is not a Detection Model")
 
-    @classmethod
-    def init_from_yaml(cls, dg_model, config_yaml):
-        """
-        config_yaml (str) : Path of the yaml file that contains all the arguments.
-
-        """
-        with open(config_yaml) as f:
-            args = yaml.load(f, Loader=yaml.FullLoader)
-
-        return cls(
-            dg_model=dg_model,
-            classmap=args["classmap"],
-            pred_path=args["pred_path"],
-            output_confidence_threshold=args["output_confidence_threshold"],
-            output_nms_threshold=args["output_nms_threshold"],
-            output_max_detections=args["output_max_detections"],
-            output_max_detections_per_class=args["output_max_detections_per_class"],
-            output_max_classes_per_detection=args["output_max_classes_per_detection"],
-            output_use_regular_nms=args["output_use_regular_nms"],
-            input_resize_method=args["input_resize_method"],
-            input_pad_method=args["input_pad_method"],
-            image_backend=args["image_backend"],
-            input_img_fmt=args["input_img_fmt"],
-            input_letterbox_fill_color=tuple(args["input_letterbox_fill_color"]),
-            input_numpy_colorspace=args["input_numpy_colorspace"],
-        )
+        # base constructor assigns kwargs to model or to self
+        super().__init__(model, **kwargs)
 
     def evaluate(
         self,
         image_folder_path: str,
         ground_truth_annotations_path: str,
-        num_val_images: int = 0,
-        print_frequency: int = 0,
-    ):
-        """Evaluation for the Detection model.
-
-            Args:
-                image_folder_path (str): Path to the image dataset.
-                ground_truth_annotations_path (str): Path to the groundtruth json annotations.
-                num_val_images (int): max number of images used for evaluation. 0: all images in image_folder_path is used.
-                print_frequency (int): Number of image batches to be evaluated before printing num evaluated images
-
-        Returns the mAP statistics.
+        max_images: int = 0,
+    ) -> list:
         """
+        Evaluation for the detection model.
+
+        Args:
+            image_folder_path (str): Path to images
+            ground_truth_annotations_path (str): Path to the ground truth JSON annotations file (COCO format)
+            max_images (int): max number of images used for evaluation. 0: all images in `image_folder_path` are used.
+
+        Returns the mAP statistics: [bbox_stats, kp_stats] for pose detection models and [bbox_stats] for non-pose models.
+        """
+
         jdict: List[dict] = []
-        anno = COCO(ground_truth_annotations_path)
+        with stdoutRedirector():
+            anno = COCO(ground_truth_annotations_path)
         num_images = len(anno.dataset["images"])
         files_dict = anno.dataset["images"][0:num_images]
         path_list: List[str] = []
@@ -223,35 +88,121 @@ class ObjectDetectionModelEvaluator:
         sorted_img_id_list = [img_id_list[i] for i in sorted_indices]
         sorted_path_list = [path_list[i] for i in sorted_indices]
 
-        if num_val_images > 0:
-            sorted_path_list = sorted_path_list[0:num_val_images]
+        if max_images > 0:
+            sorted_path_list = sorted_path_list[0:max_images]
 
-        with self.dg_model:
+        with self.model:
+            if self.show_progress:
+                progress = Progress(len(sorted_path_list))
             for image_number, predictions in enumerate(
-                self.dg_model.predict_batch(sorted_path_list)
+                self.model.predict_batch(sorted_path_list)
             ):
-                if print_frequency > 0:
-                    if image_number % print_frequency == print_frequency - 1:
-                        print(image_number + 1)
+                if self.show_progress:
+                    progress.step()
                 image_id = sorted_img_id_list[image_number]
-                save_results_coco_json(
+                ObjectDetectionModelEvaluator._save_results_coco_json(
                     predictions.results, jdict, image_id, self.classmap
                 )
-        with open(self.pred_path, "w") as f:
-            json.dump(jdict, f, indent=4)
 
-        pred = anno.loadRes(self.pred_path)
+        # save the predictions to a json file
+        if self.pred_path:
+            with open(self.pred_path, "w") as f:
+                json.dump(jdict, f, indent=4)
 
-        stats = []
-        # bounding box map calculation
-        bbox_stats = evaluate_coco(
-            anno, pred, mAP_type="bbox", img_id_list=sorted_img_id_list
-        )
-        stats.append(bbox_stats)
-        # pose keypoint map calculation
-        if is_pose_model(jdict[0]):
-            kp_stats = evaluate_coco(
-                anno, pred, mAP_type="keypoints", img_id_list=sorted_img_id_list
+        with stdoutRedirector():
+            pred = anno.loadRes(jdict)
+
+            stats = []
+            # bounding box map calculation
+            bbox_stats = ObjectDetectionModelEvaluator._evaluate_coco(
+                anno, pred, mAP_type="bbox", img_id_list=sorted_img_id_list
             )
-            stats.append(kp_stats)
-        return stats
+            stats.append(bbox_stats)
+            # pose keypoint map calculation
+            if ObjectDetectionModelEvaluator._is_pose_model(jdict[0]):
+                kp_stats = ObjectDetectionModelEvaluator._evaluate_coco(
+                    anno, pred, mAP_type="keypoints", img_id_list=sorted_img_id_list
+                )
+                stats.append(kp_stats)
+            return stats
+
+    @staticmethod
+    def _process_keypoints(keypoints_res: List[dict]) -> List[float]:
+        """
+        Convert PySDK keypoint results format to pycocotools keypoint format
+
+        Args:
+            keypoints_res: The keypoint results dictionary output from PySDK.
+
+        Returns:
+            keypoints: The list of keypoint results in pycocotools format.
+        """
+        keypoints: List[float] = []
+        for ldmks in keypoints_res:
+            kypts = ldmks["landmark"]
+            kypts_score = ldmks["score"]
+            keypoints.extend(float(x) for x in kypts)
+            keypoints.append(kypts_score)
+        return keypoints
+
+    @staticmethod
+    def _save_results_coco_json(results, jdict, image_id, class_map=None):
+        """Serialize YOLO predictions to COCO json format."""
+        max_category_id = 0
+        for result in results:
+            box = xyxy2xywh(np.asarray(result["bbox"]).reshape(1, 4) * 1.0)  # xywh
+            box[:, :2] -= box[:, 2:] / 2  # xy center to top-left corner
+            box = box.reshape(-1).tolist()
+            category_id = (
+                class_map[result["category_id"]] if class_map else result["category_id"]
+            )
+            # detection base result
+            detected_elem = {
+                "image_id": image_id,
+                "category_id": category_id,
+                "bbox": [np.round(x, 3) for x in box],
+                "score": np.round(result["score"], 5),
+            }
+            # pose model addition
+            if "landmarks" in result:
+                detected_elem["keypoints"] = (
+                    ObjectDetectionModelEvaluator._process_keypoints(
+                        result["landmarks"]
+                    )
+                )
+            #
+            jdict.append(detected_elem)
+            max_category_id = max(max_category_id, category_id)
+        return max_category_id
+
+    @staticmethod
+    def _evaluate_coco(
+        anno: COCO, pred: COCO, mAP_type: str = "bbox", img_id_list: List[str] = []
+    ):
+        """Evaluation process based on the ground truth COCO object and the prediction object
+
+            Args:
+                anno (COCO): COCO ground truth annotation object
+                pred (COCO): COCO prediction object
+                img_id_list (List): List of the image ids to evaluate on.
+
+        Returns the mAP statistics.
+        """
+        eval_obj = COCOeval(anno, pred, mAP_type)
+        if img_id_list:
+            eval_obj.params.imgIds = [id for id in img_id_list]  # image IDs to evaluate
+        eval_obj.evaluate()
+        eval_obj.accumulate()
+        eval_obj.summarize()
+
+        return eval_obj.stats
+
+    @staticmethod
+    def _is_pose_model(element: dict):
+        """Check if the it is a PySDK pose model
+            Args:
+                element (dict): detection result dict
+
+        Returns True if it is a pose model.
+        """
+        return True if "keypoints" in element else False
