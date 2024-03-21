@@ -5,72 +5,31 @@
 # All rights reserved
 #
 
-import yaml
-import json
-import os
-import numpy as np
+import json, os, numpy as np, degirum as dg
+
+from .eval_support import ModelEvaluatorBase
+from .ui_support import Progress
 
 
-class ImageRegressionModelEvaluator:
-    def __init__(
-        self,
-        model,
-        input_resize_method="bilinear",
-        input_pad_method="crop-first",
-        image_backend="opencv",
-        input_img_fmt="JPEG",
-        input_letterbox_fill_color=(114, 114, 114),
-        input_numpy_colorspace="auto",
-    ):
+class ImageRegressionModelEvaluator(ModelEvaluatorBase):
+    def __init__(self, model: dg.model.Model, **kwargs):
         """
         Constructor.
-            This class evaluates the MAE and MSE for Image Regression models.
 
-            Args:
-                model (PySDK model object): Regression model from the DeGirum model zoo.
-                input_resize_method (str): Input Resize Method.
-                input_pad_method (str): Input Pad Method.
-                image_backend (str): Image Backend.
-                input_img_fmt (str): InputImgFmt.
-                input_letterbox_fill_color (tuple): the RGB color for padding used in letterbox
-                input_numpy_colorspace (str): input colorspace: ("BGR" to match OpenCV image backend)
+        Args:
+            model (Detection model): PySDK detection model object
+            kwargs (dict): arbitrary set of PySDK model parameters and the following evaluation parameters:
+                show_progress (bool): show progress bar
         """
 
-        self.model = model
-        self.model.input_resize_method = input_resize_method
-        self.model.input_pad_method = input_pad_method
-        self.model.image_backend = image_backend
-        self.model.input_image_format = input_img_fmt
-        self.model.input_numpy_colorspace = input_numpy_colorspace
-        self.model.input_letterbox_fill_color = input_letterbox_fill_color
-
-    @classmethod
-    def init_from_yaml(cls, model, config_yaml):
-        """
-        model (PySDK model object): Regression model from the DeGirum model zoo.
-        config_yaml (str) : Path of the yaml file that contains all the arguments.
-
-        """
-        with open(config_yaml) as f:
-            args = yaml.load(f, Loader=yaml.FullLoader)
-
-        return cls(
-            model=model,
-            input_resize_method=args["input_resize_method"],
-            input_pad_method=args["input_pad_method"],
-            image_backend=args["image_backend"],
-            input_img_fmt=args["input_img_fmt"],
-            input_letterbox_fill_color=tuple(args["input_letterbox_fill_color"]),
-            input_numpy_colorspace=args["input_numpy_colorspace"],
-        )
+        super().__init__(model, **kwargs)
 
     def evaluate(
         self,
         image_folder_path: str,
         ground_truth_annotations_path: str,
-        num_val_images: int = 0,
-        print_frequency: int = 0,
-    ):
+        max_images: int = 0,
+    ) -> list:
         """Evaluation for the Regression model.
 
             Args:
@@ -89,19 +48,20 @@ class ImageRegressionModelEvaluator:
         img_path = os.path.split(ground_truth_annotations_path)[0]
         img_paths = [img_path + "/" + imn for imn in img_names]
 
-        if num_val_images > 0:
-            img_paths = img_paths[0:num_val_images]
-            gt = gt[0:num_val_images]
+        if max_images > 0:
+            img_paths = img_paths[0:max_images]
+            gt = gt[0:max_images]
 
         pred = []
 
         with self.model:
-            for image_number, predictions in enumerate(
+            if self.show_progress:
+                progress = Progress(len(img_paths))
+            for _, predictions in enumerate(
                 self.model.predict_batch(img_paths)
             ):
-                if print_frequency > 0:
-                    if image_number % print_frequency == print_frequency - 1:
-                        print(image_number + 1)
+                if self.show_progress:
+                    progress.step()
                 pred.append(predictions.results[0]["score"])
 
         diff = np.subtract(np.array(gt), np.array(pred))
