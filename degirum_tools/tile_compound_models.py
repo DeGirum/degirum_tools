@@ -9,6 +9,18 @@ from degirum_tools import CroppingAndDetectingCompoundModel, CropExtentOptions, 
 from degirum_tools.math_support import nms, edge_box_fusion
 
 
+class _TileInfo:
+    """
+    Class to hold tile information.
+    """
+
+    def __init__(self, cols: int, rows: int, overlap: float, id: int):
+        self.cols = cols
+        self.rows = rows
+        self.overlap = overlap
+        self.id = id
+
+
 class TileExtractorPseudoModel(ModelLike):
     """
     Pseudo model class which extracts tiles from given image according to rows/columns.
@@ -46,7 +58,6 @@ class TileExtractorPseudoModel(ModelLike):
         self._model2 = model2
         self._non_blocking_batch_predict = False
         self._global_tile = global_tile
-        self._aspect_aware = True  # Right now I don't see the point of disabling this. Should we have the option to disable this?
 
         self._tile_mask = tile_mask
         self._base_img: list = []  # base image for motion detection
@@ -81,25 +92,16 @@ class TileExtractorPseudoModel(ModelLike):
 
         expand_offsets = [0.0, 0.0]
 
-        if self._aspect_aware:
-            tile_aspect_ratio = tile_width / tile_height
+        tile_aspect_ratio = tile_width / tile_height
 
-            if tile_aspect_ratio < model_aspect_ratio:
-                # Expand the width
-                if model_aspect_ratio >= 1:
-                    dim = tile_height * model_aspect_ratio
-                else:
-                    dim = tile_height / model_aspect_ratio
-
-                expand_offsets[0] = dim - tile_width
-            elif tile_aspect_ratio > model_aspect_ratio:
-                # Expand the height
-                if model_aspect_ratio >= 1:
-                    dim = tile_width / model_aspect_ratio
-                else:
-                    dim = tile_width * model_aspect_ratio
-
-                expand_offsets[1] = dim - tile_height
+        if tile_aspect_ratio < model_aspect_ratio:
+            # Expand the width
+            dim = tile_height * model_aspect_ratio
+            expand_offsets[0] = dim - tile_width
+        elif tile_aspect_ratio > model_aspect_ratio:
+            # Expand the height
+            dim = tile_width / model_aspect_ratio
+            expand_offsets[1] = dim - tile_height
 
         if expand_offsets[0] > tile_width * 2:
             raise Exception('Horizontal overlap is greater than 100%. Lower the amount of columns.')
@@ -231,7 +233,7 @@ class TileExtractorPseudoModel(ModelLike):
                 motion_detected = all_tiles
 
             tile_results = [
-                {"bbox": bbox, "label": f"LOCAL_{self._cols}x{self._rows}@{self._overlap_percent}_{idx}", "score": 1.0, "category_id": idx}
+                {"bbox": bbox, "label": "LOCAL", "score": 1.0, "category_id": idx, "tile_info": _TileInfo(self._cols, self._rows, self._overlap_percent, idx)}
                 for idx, bbox in enumerate(tile_list)
                 if (motion_detected[idx] and idx in self._tile_mask)
             ]
@@ -464,12 +466,12 @@ class LocalGlobalTileModel(TileModel):
 
         if idx >= 0:
             # adjust bbox coordinates to original image coordinates
-            global_result = True if result1.results[idx]['label'].split('_')[0] == 'GLOBAL' else False
-            overlap_percent = float(result1.results[0]['label'].split('_')[1].split('@')[1])
+            is_global = True if result1.results[idx]['label'] == 'GLOBAL' else False
+            overlap_percent = result1.results[0]['tile_info'].overlap
 
             x, y = result1.results[idx]["bbox"][:2]
 
-            if global_result:
+            if is_global:
                 for i, r in _reverse_enumerate(result2._inference_results):
                     if "bbox" not in r:
                         continue
@@ -563,28 +565,28 @@ class BoxFusionTileModel(_EdgeMixin, TileModel):
         central_boxes = []
         edge_boxes = []
 
-        for det in dets:
+        for i, det in enumerate(dets):
             if 'bbox' not in det:
                 continue
 
             overlap_top, overlap_bot, overlap_left, overlap_right = self._calculate_overlapped_edges(det['bbox'], relevant_edges)
 
             if overlap_top:
-                edge_boxes.append(det)
+                edge_boxes.append(i)  # edge_boxes.append(det)
             elif overlap_bot:
-                edge_boxes.append(det)
+                edge_boxes.append(i)
             elif overlap_left:
-                edge_boxes.append(det)
+                edge_boxes.append(i)
             elif overlap_right:
-                edge_boxes.append(det)
+                edge_boxes.append(i)
             else:
-                central_boxes.append(det)
+                central_boxes.append(i)  # central_boxes.append(i)
 
         return central_boxes, edge_boxes
 
     def _finalize_current_result(self, result1):
         if self._current_result is not None:
-            # patch combined result image to be original image # IS THIS GOING TO BE AN ISSUE
+            # patch combined result image to be original image
             self._current_result._input_image = result1.image
 
             height, width, _ = result1.image.shape
@@ -637,15 +639,13 @@ class BoxFusionTileModel(_EdgeMixin, TileModel):
         if idx >= 0:
             # this is probably not the best way to do it.
             # maybe make _categorize instead returns indices.
-            # Instead of storing edge_box flag in the dict, store the inference results separately?
             x, y = result1.results[idx]["bbox"][:2]
 
-            slice_params = result1.results[idx]['label']
-
-            if slice_params != "GLOBAL":
-                slice_id = int(slice_params.split('_')[2])
-                cols = int(slice_params.split('_')[1].split('@')[0].split('x')[0])
-                rows = int(slice_params.split('_')[1].split('@')[0].split('x')[1])
+            if result1.results[idx]['label'] != "GLOBAL":
+                tile_info = result1.results[idx]['tile_info']
+                slice_id = tile_info.id
+                cols = tile_info.cols
+                rows = tile_info.rows
 
                 # Generate edge boundaries
                 h, w, _ = result2.image.shape
@@ -656,11 +656,14 @@ class BoxFusionTileModel(_EdgeMixin, TileModel):
 
                 central_boxes, edge_boxes = self._categorize(cols, rows, slice_id, result2._inference_results)
 
-                for r in edge_boxes:
-                    r['wbf_info'] = np.add(r["bbox"], [x, y, x, y]).tolist()  # probably not the best way to do this also
+                # for r in edge_boxes:
+                #     r['wbf_info'] = np.add(r["bbox"], [x, y, x, y]).tolist()
 
-                central_boxes.extend(edge_boxes)
-                result2._inference_results = central_boxes
+                # central_boxes.extend(edge_boxes)
+                # result2._inference_results = central_boxes
+
+                for i in edge_boxes:
+                    result2._inference_results[i]['wbf_info'] = np.add(result2._inference_results[i]["bbox"], [x, y, x, y]).tolist()
 
             # adjust bbox coordinates to original image coordinates
             for r in result2._inference_results:
@@ -776,12 +779,12 @@ class BoxFusionLocalGlobalTileModel(BoxFusionTileModel):
 
         if idx >= 0:
             # adjust bbox coordinates to original image coordinates
-            global_result = True if result1.results[idx]['label'].split('_')[0] == 'GLOBAL' else False
-            overlap_percent = float(result1.results[0]['label'].split('_')[1].split('@')[1])
+            is_global = True if result1.results[idx]['label'] == 'GLOBAL' else False
+            overlap_percent = result1.results[0]['tile_info'].overlap
 
             x, y = result1.results[idx]["bbox"][:2]
 
-            if global_result:
+            if is_global:
                 for i, r in _reverse_enumerate(result2._inference_results):
                     if "bbox" not in r:
                         continue
@@ -802,7 +805,6 @@ class BoxFusionLocalGlobalTileModel(BoxFusionTileModel):
                 result2._inference_results.insert(0, result1.results[idx])
 
         ret = None
-        # Equivalent to accumulate_results?
         if result1 is self._current_result1:
             # frame continues: append second model results to the combined result
             if self._current_result is not None and idx >= 0:
