@@ -60,7 +60,7 @@ def test_bf():
 
 def test_generate_tiles():
     """
-    Tests for generating tiles. 
+    Tests for generating tiles.
     Includes variations of aspect ratios for the model and tiles, rows/cols, and overlap percentages.
     """
     # Tolerances account for rounding errors due to discrete nature of pixels.
