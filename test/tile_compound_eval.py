@@ -1,5 +1,5 @@
 import degirum as dg
-from degirum_tools import NmsOptions, NmsBoxSelectionPolicy
+from degirum_tools import NmsOptions, NmsBoxSelectionPolicy, get_token
 from degirum_tools.tile_compound_models import TileExtractorPseudoModel, BoxFusionLocalGlobalTileModel, BoxFusionTileModel, LocalGlobalTileModel, TileModel
 from degirum_tools.detection_eval import ObjectDetectionModelEvaluator
 
@@ -15,7 +15,7 @@ class_map = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 tiling_params = (3, 2, 0.1)
 
 # connect to AI inference engine
-zoo = dg.connect(hw_location, model_zoo_url, 'dg_UMD61uvuaZQGK9J4g271V7cy2z4BKdT3kXmD3')
+zoo = dg.connect(hw_location, model_zoo_url, get_token())
 # load object detection model
 model = zoo.load_model(model_name)
 

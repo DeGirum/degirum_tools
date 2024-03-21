@@ -87,13 +87,12 @@ def compound_time_profile(model, tiling=(1, 1), iterations=100) -> ModelTimeProf
     )
 
 
-token = "dg_DuH5LpfrcPmqkeq6uX84QQyC15hLZGUo7sZc7"
 zoo_name = "visdrone_detection"
 model_name = 'yolov8s_relu6_visdrone--640x384_quant_n2x_orca1_1'
 # (col, row)
 tiling = (2, 2)
 
-zoo = dg.connect(dg.CLOUD, "https://cs.degirum.com/degirum/" + zoo_name, token)
+zoo = dg.connect(dg.CLOUD, "https://cs.degirum.com/degirum/" + zoo_name, dgtools.get_token())
 model = zoo.load_model(model_name)
 
 model_size = model.model_info.InputW + model.model_info.InputH

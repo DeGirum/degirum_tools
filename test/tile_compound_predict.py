@@ -5,11 +5,10 @@ import matplotlib.pyplot as plt
 # from degirum_tools.tiling import TileModel as OldTileModel
 
 from degirum_tools.tile_compound_models import TileExtractorPseudoModel, TileModel, LocalGlobalTileModel, BoxFusionTileModel, BoxFusionLocalGlobalTileModel
-from degirum_tools import NmsBoxSelectionPolicy, NmsOptions
+from degirum_tools import NmsBoxSelectionPolicy, NmsOptions, get_token
 
 zoo_name = "visdrone"
 model_name = 'yolov8s_relu6_visdrone--640x640_quant_n2x_orca1_1'
-token = "dg_UMD61uvuaZQGK9J4g271V7cy2z4BKdT3kXmD3"
 file = '0000009_01723_d_0000006.jpg'
 
 color_rolodex = [(255, 000, 000),
@@ -23,7 +22,7 @@ color_rolodex = [(255, 000, 000),
                  (130, 000, 255),
                  (255, 000, 255)]
 
-zoo = dg.connect(dg.CLOUD, "https://cs.degirum.com/degirum/" + zoo_name, token)
+zoo = dg.connect(dg.CLOUD, "https://cs.degirum.com/degirum/" + zoo_name, get_token())
 model = zoo.load_model(model_name)
 
 model.overlay_color = color_rolodex
