@@ -46,7 +46,7 @@ class ImageRegressionModelEvaluator(ModelEvaluatorBase):
         img_names = [anno["images"][i]["file_name"] for i in range(len(anno["images"]))]
         gt = [anno["images"][i]["value"] for i in range(len(anno["images"]))]
         img_path = os.path.split(ground_truth_annotations_path)[0]
-        img_paths = [img_path + "/" + imn for imn in img_names]
+        img_paths = [img_path + "/" + im_n for im_n in img_names]
 
         if max_images > 0:
             img_paths = img_paths[0:max_images]
