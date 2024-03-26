@@ -23,7 +23,7 @@ class ImageRegressionModelEvaluator(ModelEvaluatorBase):
         """
 
         super().__init__(model, **kwargs)
-    
+
     @staticmethod
     def compute_metrics(gt: list, pred: list) -> list:
         """
@@ -40,7 +40,7 @@ class ImageRegressionModelEvaluator(ModelEvaluatorBase):
         mae = np.mean(np.abs(diff))
         mse = np.mean(np.multiply(diff, diff))
 
-        return mae, mse 
+        return mae, mse
 
     def evaluate(
         self,
