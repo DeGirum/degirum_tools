@@ -57,7 +57,7 @@ class ImageRegressionModelEvaluator(ModelEvaluatorBase):
                 print_frequency (int): Number of image batches to be evaluated before printing num evaluated images
 
         Returns:
-            - Tuple(float, float): the MAE and the MSE.
+            - List(float, float): the MAE and the MSE.
         """
         with open(ground_truth_annotations_path, 'r') as fi:
             anno = json.load(fi)
