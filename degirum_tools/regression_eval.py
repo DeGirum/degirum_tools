@@ -23,6 +23,24 @@ class ImageRegressionModelEvaluator(ModelEvaluatorBase):
         """
 
         super().__init__(model, **kwargs)
+    
+    @staticmethod
+    def compute_metrics(gt: list, pred: list) -> list:
+        """
+        Compute the Mean Absolute Error (MAE) and the Mean Squared Error (MSE) between the ground truth and the predictions.
+
+        Args:
+            gt (list): List of ground truth values.
+            pred (list): List of predicted values.
+
+        Returns:
+            - Tuple(float, float): the MAE and the MSE.
+        """
+        diff = np.subtract(np.array(gt), np.array(pred))
+        mae = np.mean(np.abs(diff))
+        mse = np.mean(np.multiply(diff, diff))
+
+        return mae, mse 
 
     def evaluate(
         self,
@@ -45,29 +63,26 @@ class ImageRegressionModelEvaluator(ModelEvaluatorBase):
             anno = json.load(fi)
         img_names = [anno["images"][i]["file_name"] for i in range(len(anno["images"]))]
         gt = [anno["images"][i]["value"] for i in range(len(anno["images"]))]
-        img_path = os.path.split(ground_truth_annotations_path)[0]
-        img_paths = [img_path + "/" + im_n for im_n in img_names]
-
+        img_paths = [os.path.join(image_folder_path, im_n) for im_n in img_names]
         if max_images > 0:
             img_paths = img_paths[0:max_images]
             gt = gt[0:max_images]
 
         pred = []
+        gt_list = []
 
         with self.model:
             if self.show_progress:
                 progress = Progress(len(img_paths))
-            for _, predictions in enumerate(
-                self.model.predict_batch(img_paths)
-            ):
-                if self.show_progress:
-                    progress.step()
+            for predictions, img_gt in zip(self.model.predict_batch(img_paths), gt):
                 pred.append(predictions.results[0]["score"])
+                gt_list.append(img_gt)
+                # progress bar update
+                if self.show_progress:
+                    mae, mse = self.compute_metrics(gt_list, pred)
+                    accuracy_str = f"MAE: {mae:.3f}, MSE: {mse:.3f}"
+                    progress.step(message=accuracy_str)
 
-        diff = np.subtract(np.array(gt), np.array(pred))
-        mae = np.mean(np.abs(diff))
-        mse = np.mean(np.multiply(diff, diff))
+        mae, mse = self.compute_metrics(gt, pred)
 
-        metrics = [mae, mse]
-
-        return [metrics]
+        return [mae, mse]
