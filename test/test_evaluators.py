@@ -230,7 +230,7 @@ def test_ImageRegressionModelEvaluator():
     evaluator = degirum_tools.ImageRegressionModelEvaluator(
         model
     )
-    res = evaluator.evaluate(dataset_root + "/0", dataset_root + "/annotations.json", predictions_cnt)
+    res = evaluator.evaluate(dataset_root, dataset_root + "/annotations.json", predictions_cnt)
 
     # validate results
     assert isinstance(res, list) and len(res) == 1
