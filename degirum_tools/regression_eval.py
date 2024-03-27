@@ -20,10 +20,10 @@ class ImageRegressionModelEvaluator(ModelEvaluatorBase):
             kwargs (dict): arbitrary set of PySDK model parameters and the following evaluation parameters:
                 show_progress (bool): show progress bar
         """
-        
+
         if not model.output_postprocess_type == "Classification":
             raise Exception("Model loaded for evaluation is not a Regression Model")
-        
+
         # base constructor assigns kwargs to model or to self
         super().__init__(model, **kwargs)
 
