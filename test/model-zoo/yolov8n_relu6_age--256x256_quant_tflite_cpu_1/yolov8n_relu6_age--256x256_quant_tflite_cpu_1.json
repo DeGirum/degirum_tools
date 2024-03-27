@@ -1,10 +1,10 @@
 {
     "ConfigVersion": 6,
-    "Checksum": "2b7e81251044fca0407544264bd33a912b2a6aeeea8d2ad88bb4f7d973c9a229",
+    "Checksum": "",
     "DEVICE": [
         {
             "DeviceType": "CPU",
-            "RuntimeAgent": "OPENVINO"
+            "RuntimeAgent": "TFLITE"
         }
     ],
     "PRE_PROCESS": [
@@ -17,10 +17,10 @@
             "InputH": 256,
             "InputW": 256,
             "InputC": 3,
-            "InputQuantEn": false,
+            "InputQuantEn": true,
             "InputQuantOffset": 0,
             "InputQuantScale": 0.003921568859368563,
-            "InputTensorLayout": "NCHW",
+            "InputTensorLayout": "NHWC",
             "InputScaleEn": true,
             "InputScaleCoeff": 0.00392156862745098,
             "InputColorSpace": "RGB"
@@ -28,7 +28,7 @@
     ],
     "MODEL_PARAMETERS": [
         {
-            "ModelPath": "yolov8n_relu6_age--256x256_quant_openvino_cpu_1.xml"
+            "ModelPath": "yolov8n_relu6_age--256x256_quant_tflite_cpu_1.tflite"
         }
     ],
     "POST_PROCESS": [
