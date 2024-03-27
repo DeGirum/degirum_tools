@@ -25,7 +25,7 @@ class ImageRegressionModelEvaluator(ModelEvaluatorBase):
         super().__init__(model, **kwargs)
 
     @staticmethod
-    def compute_metrics(gt: list, pred: list) -> list:
+    def compute_metrics(gt: list, pred: list) -> tuple:
         """
         Compute the Mean Absolute Error (MAE) and the Mean Squared Error (MSE) between the ground truth and the predictions.
 
