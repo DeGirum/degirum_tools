@@ -1,0 +1,43 @@
+{
+    "ConfigVersion": 6,
+    "Checksum": "2b7e81251044fca0407544264bd33a912b2a6aeeea8d2ad88bb4f7d973c9a229",
+    "DEVICE": [
+        {
+            "DeviceType": "CPU",
+            "RuntimeAgent": "OPENVINO"
+        }
+    ],
+    "PRE_PROCESS": [
+        {
+            "InputType": "Image",
+            "InputN": 1,
+            "InputResizeMethod": "bilinear",
+            "InputPadMethod": "crop-last",
+            "ImageBackend": "auto",
+            "InputH": 256,
+            "InputW": 256,
+            "InputC": 3,
+            "InputQuantEn": false,
+            "InputQuantOffset": 0,
+            "InputQuantScale": 0.003921568859368563,
+            "InputTensorLayout": "NCHW",
+            "InputScaleEn": true,
+            "InputScaleCoeff": 0.00392156862745098,
+            "InputColorSpace": "RGB"
+        }
+    ],
+    "MODEL_PARAMETERS": [
+        {
+            "ModelPath": "yolov8n_relu6_age--256x256_quant_openvino_cpu_1.xml"
+        }
+    ],
+    "POST_PROCESS": [
+        {
+            "OutputPostprocessType": "Classification",
+            "PythonFile": "regression.py",
+            "LabelsPath": "label.json",
+            "RegScale": 15.666666667,
+            "RegOffset": 1
+        }
+    ]
+}

@@ -183,7 +183,7 @@ def test_ImageRegressionModelEvaluator():
     cur_dir = os.path.dirname(os.path.abspath(__file__))
 
     # load regression model
-    model_name = "yolov8n_relu6_age--256x256_quant_n2x_orca1_1"
+    model_name = "yolov8n_relu6_age--256x256_quant_openvino_cpu_1"
     model_path = f"{cur_dir}/model-zoo/{model_name}/{model_name}.json"
     zoo = dg.connect(dg.LOCAL, model_path)
     model = zoo.load_model(model_name)
