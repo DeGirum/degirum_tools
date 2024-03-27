@@ -195,7 +195,7 @@ def test_ImageRegressionModelEvaluator():
     # default parameters
     evaluator_default = degirum_tools.ImageRegressionModelEvaluator(model)
     assert not evaluator_default.show_progress
-    assert model.input_pad_method == "letterbox"
+    assert model.input_pad_method == "crop-last"
     assert model.image_backend == "opencv"
 
     # handling invalid parameters
@@ -210,13 +210,13 @@ def test_ImageRegressionModelEvaluator():
         io.StringIO(
             """
                 show_progress: true
-                input_pad_method: "crop-last"
+                input_pad_method: "letterbox"
                 image_backend: "pil"
             """
         ),
     )
     assert evaluator1.show_progress
-    assert model.input_pad_method == "crop-last"
+    assert model.input_pad_method == "letterbox"
     assert model.image_backend == "pil"
 
     #

@@ -10,7 +10,7 @@ class PostProcessor:
         self._reg_offset = self._json_config["POST_PROCESS"][0].get("RegOffset", 0.0)
         with open(self._label_json_config, 'r') as json_file:
             self._labels = json.load(json_file)
-    
+
     def forward(self, tensor_list, details_list):
         qp = details_list[0]["quantization_parameters"]
         scale = qp["scales"][0]
