@@ -85,4 +85,4 @@ class ImageRegressionModelEvaluator(ModelEvaluatorBase):
 
         mae, mse = self.compute_metrics(gt, pred)
 
-        return [mae, mse]
+        return [[mae, mse]]
