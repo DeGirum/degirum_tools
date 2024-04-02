@@ -172,3 +172,66 @@ def test_ImageClassificationModelEvaluator():
     )
     for v in res[1]:
         assert isinstance(v, list) and len(v) == len(evaluator.top_k)
+
+
+def test_ImageRegressionModelEvaluator():
+    """Test for ImageRegressionModelEvaluator class"""
+
+    import degirum_tools, degirum as dg
+    import os, io
+
+    cur_dir = os.path.dirname(os.path.abspath(__file__))
+
+    # load regression model
+    model_name = "yolov8n_relu6_age--256x256_quant_tflite_cpu_1"
+    model_path = f"{cur_dir}/model-zoo/{model_name}/{model_name}.json"
+    zoo = dg.connect(dg.LOCAL, model_path)
+    model = zoo.load_model(model_name)
+
+    #
+    # test evaluator creation
+    #
+
+    # default parameters
+    evaluator_default = degirum_tools.ImageRegressionModelEvaluator(model)
+    assert not evaluator_default.show_progress
+    assert model.input_pad_method == "crop-last"
+    assert model.image_backend == "opencv"
+
+    # handling invalid parameters
+    with pytest.raises(Exception):
+        degirum_tools.ImageRegressionModelEvaluator.init_from_yaml(
+            model, io.StringIO("non_existent_parameter: 0")
+        )
+
+    # test parameters
+    evaluator1 = degirum_tools.ImageRegressionModelEvaluator.init_from_yaml(
+        model,
+        io.StringIO(
+            """
+                show_progress: true
+                input_pad_method: "letterbox"
+                image_backend: "pil"
+            """
+        ),
+    )
+    assert evaluator1.show_progress
+    assert model.input_pad_method == "letterbox"
+    assert model.image_backend == "pil"
+
+    #
+    # test model evaluation
+    #
+
+    dataset_root = "test/sample_regression_dataset"
+
+    # run evaluation
+    predictions_cnt = 50
+    evaluator = degirum_tools.ImageRegressionModelEvaluator(
+        model
+    )
+    res = evaluator.evaluate(dataset_root, dataset_root + "/annotations.json", predictions_cnt)
+
+    # validate results
+    assert isinstance(res, list) and len(res) == 1
+    assert isinstance(res[0], list) and len(res[0]) == 2

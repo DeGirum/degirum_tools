@@ -1,0 +1,43 @@
+{
+    "ConfigVersion": 6,
+    "Checksum": "",
+    "DEVICE": [
+        {
+            "DeviceType": "CPU",
+            "RuntimeAgent": "TFLITE"
+        }
+    ],
+    "PRE_PROCESS": [
+        {
+            "InputType": "Image",
+            "InputN": 1,
+            "InputResizeMethod": "bilinear",
+            "InputPadMethod": "crop-last",
+            "ImageBackend": "auto",
+            "InputH": 256,
+            "InputW": 256,
+            "InputC": 3,
+            "InputQuantEn": true,
+            "InputQuantOffset": 0,
+            "InputQuantScale": 0.003921568859368563,
+            "InputTensorLayout": "NHWC",
+            "InputScaleEn": true,
+            "InputScaleCoeff": 0.00392156862745098,
+            "InputColorSpace": "RGB"
+        }
+    ],
+    "MODEL_PARAMETERS": [
+        {
+            "ModelPath": "yolov8n_relu6_age--256x256_quant_tflite_cpu_1.tflite"
+        }
+    ],
+    "POST_PROCESS": [
+        {
+            "OutputPostprocessType": "Classification",
+            "PythonFile": "regression.py",
+            "LabelsPath": "label.json",
+            "RegScale": 15.666666667,
+            "RegOffset": 1
+        }
+    ]
+}
