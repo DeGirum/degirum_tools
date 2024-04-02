@@ -29,7 +29,7 @@
 
 import numpy as np
 from enum import Enum
-from typing import Union, Sequence
+from typing import Any, Dict, List, Union, Sequence, Tuple
 
 
 def area(box: np.ndarray) -> np.ndarray:
@@ -144,6 +144,7 @@ def _nms_custom(
     use_iou: bool,
     box_select: NmsBoxSelectionPolicy,
     max_wh: int,
+    agnostic: bool,
 ):
     """
     Perform non-maximum suppression on a set of detections.
@@ -164,8 +165,9 @@ def _nms_custom(
     """
 
     # adjust bboxes by class offset so bboxes of different classes would never overlap
-    class_offsets = classes * float(max_wh)
-    bboxes[:, 0:4] += class_offsets[:, None]
+    if not agnostic:
+        class_offsets = classes * float(max_wh)
+        bboxes[:, 0:4] += class_offsets[:, None]
 
     x1 = bboxes[:, 0]
     y1 = bboxes[:, 1]
@@ -198,18 +200,27 @@ def _nms_custom(
             pass
         elif box_select == NmsBoxSelectionPolicy.LARGEST_AREA:
             sel = order[overlap > iou_threshold]
-            bboxes[i] = bboxes[sel[np.argmax(areas[sel])]] - class_offsets[i]
+            if not agnostic:
+                bboxes[i] = bboxes[sel[np.argmax(areas[sel])]] - class_offsets[i]
+            else:
+                bboxes[i] = bboxes[sel[np.argmax(areas[sel])]]
         elif box_select == NmsBoxSelectionPolicy.AVERAGE:
             sel = order[overlap > iou_threshold]
-            bboxes[i] = (
-                np.average(bboxes[sel], axis=0, weights=scores[sel]) - class_offsets[i]
-            )
+            if not agnostic:
+                bboxes[i] = (
+                    np.average(bboxes[sel], axis=0, weights=scores[sel]) - class_offsets[i]
+                )
+            else:
+                bboxes[i] = np.average(bboxes[sel], axis=0, weights=scores[sel])
         elif box_select == NmsBoxSelectionPolicy.MERGE:
             sel = order[overlap > iou_threshold]
             enclosing_rect = np.array(
                 [np.min(x1[sel]), np.min(y1[sel]), np.max(x2[sel]), np.max(y2[sel])]
             )
-            bboxes[i] = enclosing_rect - class_offsets[i]
+            if not agnostic:
+                bboxes[i] = enclosing_rect - class_offsets[i]
+            else:
+                bboxes[i] = enclosing_rect
 
         order = order[overlap <= iou_threshold]
 
@@ -222,6 +233,7 @@ def nms(
     use_iou: bool = True,
     box_select: NmsBoxSelectionPolicy = NmsBoxSelectionPolicy.MOST_PROBABLE,
     max_wh: int = 10000,
+    agnostic: bool = False,
 ):
     """
     Perform non-maximum suppression on a set of detections.
@@ -247,6 +259,11 @@ def nms(
 
     try:
         for i, r in enumerate(result_list):
+            # Need this to benchmark blank image. Not sure if its necessary for a real image.
+            if 'bbox' not in r:
+                continue
+            if 'score' not in r:
+                continue
             bboxes[i] = r["bbox"]
             scores[i] = r["score"]
             classes[i] = unique_ids.setdefault(r["label"], len(unique_ids))
@@ -260,10 +277,13 @@ def nms(
 
         # use fast OpenCV implementation when possible
         bboxes[:, 2:4] = bboxes[:, 2:4] - bboxes[:, 0:2]  # TLBR to TLWH
-        keep = cv2.dnn.NMSBoxesBatched(bboxes, scores, classes, 0, iou_threshold)  # type: ignore[arg-type]
+        if not agnostic:
+            keep = cv2.dnn.NMSBoxesBatched(bboxes, scores, classes, 0, iou_threshold)  # type: ignore[arg-type]
+        else:
+            keep = cv2.dnn.NMSBoxes(bboxes, scores, 0, iou_threshold)  # type: ignore[arg-type]
     else:
         keep = _nms_custom(
-            bboxes, scores, classes, iou_threshold, use_iou, box_select, max_wh
+            bboxes, scores, classes, iou_threshold, use_iou, box_select, max_wh, agnostic
         )
 
         if box_select != NmsBoxSelectionPolicy.MOST_PROBABLE:
@@ -271,6 +291,220 @@ def nms(
                 result_list[i]["bbox"] = bboxes[i].tolist()
 
     detections._inference_results = [result_list[i] for i in keep]
+
+
+def _prefilter_boxes(boxes: Sequence[Sequence],
+                     scores: Sequence[float],
+                     labels: Sequence[int],
+                     thr: float) -> Tuple[Dict[int, np.ndarray], List]:
+    # dict with boxes stored by category id
+    new_boxes: Dict[int, Any] = dict()
+    skipped_boxes = []
+
+    for j in range(len(boxes)):
+        score = scores[j]
+
+        label = int(labels[j])
+        box_part = boxes[j]
+        x1 = float(box_part[0])
+        y1 = float(box_part[1])
+        x2 = float(box_part[2])
+        y2 = float(box_part[3])
+
+        # [label, score, x1, y1, x2, y2]
+        b = [label, float(score), x1, y1, x2, y2]
+
+        if score < thr:
+            skipped_boxes.append(b)
+            continue
+
+        if label not in new_boxes:
+            new_boxes[label] = []
+
+        new_boxes[label].append(b)
+
+    # Sort each list in dict by score and transform it to numpy array
+    for k in new_boxes:
+        current_boxes = np.array(new_boxes[k])
+        new_boxes[k] = current_boxes[current_boxes[:, 1].argsort()[::-1]]
+
+    return (new_boxes, skipped_boxes)
+
+
+def _find_matching_box(boxes: Sequence[np.ndarray],
+                       new_box: np.ndarray,
+                       match_iou: float) -> Tuple[int, Union[float, int]]:
+
+    def _bb_1d_iou(boxes: np.ndarray, new_box: np.ndarray) -> np.ndarray:
+        # Returns the larger of the x or y 1D-IoU if the boxes overlap.
+        xA = np.maximum(boxes[:, 0], new_box[0])
+        yA = np.maximum(boxes[:, 1], new_box[1])
+        xB = np.minimum(boxes[:, 2], new_box[2])
+        yB = np.minimum(boxes[:, 3], new_box[3])
+
+        # Mask out boxes with no overlap in one of the dimensions.
+        inter_x, inter_y = np.maximum(xB - xA, 0), np.maximum(yB - yA, 0)
+        mask = np.minimum(inter_x, inter_y) == 0
+        inter_x[mask] = 0
+        inter_y[mask] = 0
+
+        w_a, h_a = boxes[:, 2] - boxes[:, 0], boxes[:, 3] - boxes[:, 1]
+        w_b, h_b = new_box[2] - new_box[0], new_box[3] - new_box[1]
+
+        iou_x, iou_y = inter_x / (w_a + w_b - inter_x), inter_y / (h_a + h_b - inter_y)
+
+        return np.maximum(iou_x, iou_y)
+
+    if len(boxes) == 0:
+        return -1, match_iou
+
+    # Create a mask for already matched boxes.
+    matched_mask = np.full(len(boxes), False)
+    masked_boxes = np.empty((0, 6))
+
+    for i, box_set in enumerate(boxes):
+        if len(box_set) >= 2:
+            matched_mask[i] = True
+
+        masked_boxes = np.vstack((masked_boxes, box_set[0]))
+
+    ious = _bb_1d_iou(masked_boxes[:, 2:], new_box[2:])
+
+    ious[masked_boxes[:, 0] != new_box[0]] = -1
+    ious[matched_mask] = -1
+
+    best_idx = int(np.argmax(ious))  # for type checker.
+    best_iou = ious[best_idx]
+
+    if best_iou <= match_iou:
+        best_iou = match_iou
+        best_idx = -1
+
+    return best_idx, best_iou
+
+
+def _fuse_boxes(box_sets: Sequence[np.ndarray]) -> np.ndarray:
+    fused_boxes = []
+
+    for box_set in box_sets:
+        if len(box_set) == 1:
+            fused_boxes.append(box_set[0])
+        else:
+            score = (box_set[0][1] + box_set[1][1]) / 2
+            coord_max = np.amax(box_set, axis=0)
+            coord_min = np.amin(box_set, axis=0)
+            bbox = np.concatenate((coord_min[2:4], coord_max[4:6]))
+
+            fused_box = np.zeros(6, dtype=np.float32)
+            fused_box[0] = box_set[0][0]
+            fused_box[1] = score
+            fused_box[2:] = bbox
+            fused_boxes.append(fused_box)
+
+    return np.vstack(fused_boxes)
+
+
+def edge_box_fusion(
+        detections: Sequence[dict],
+        iou_threshold: float = 0.55,
+        skip_threshold: float = 0.0,
+        destructive=True
+) -> List[dict]:
+    """
+    Perform box fusion on a set of edge detections. Edge detections are detections within a certain threshold of an edge.
+
+    Args:
+        detections (DetectionResults.results): A list of dictionaries that contain detection results as defined in PySDK.
+        iou_threshold (float): 1D-IoU threshold used for selecting boxes for fusion.
+        skip_threshold (float): Score threshold for which boxes to fuse.
+        destructive (bool): Keep skipped boxes (underneath the `score_threshold`) in the results.
+
+    Returns:
+        DetectionResult.results: A list of dictionaries that contain detection results as defined in PySDK.
+        Boxes that are not fused are kept if destructive is False, otherwise they are discarded.
+    """
+
+    boxes_list = []
+    scores_list = []
+    labels_list = []
+
+    if len(detections) == 0:
+        return []
+
+    for det in detections:
+        boxes_list.append(det['wbf_info'])
+        scores_list.append(det['score'])
+        labels_list.append(det['category_id'])
+
+    filtered_boxes, skipped_boxes = _prefilter_boxes(boxes_list, scores_list, labels_list, skip_threshold)
+
+    if len(filtered_boxes) == 0:
+        if not destructive:
+            if len(skipped_boxes) > 0:
+                results = []
+                for box in skipped_boxes:
+                    det = dict()
+                    det['score'] = float(box[1])
+                    det['bbox'] = box[2:6]
+                    det['category_id'] = int(box[0])
+                    results.append(det)
+
+                return results
+
+        return []
+
+    overall_boxes = []
+
+    # Only fuse same category id.
+    for label in filtered_boxes:
+        boxes = filtered_boxes[label]
+        new_boxes: List[np.ndarray] = []
+
+        # Initial fusion, max two boxes in one fused box.
+        for j in range(len(boxes)):
+            index, _ = _find_matching_box(new_boxes, boxes[j], iou_threshold)
+
+            if index != -1:
+                new_boxes[index] = np.vstack((new_boxes[index], boxes[j]))
+            else:
+                new_boxes.append(np.expand_dims(boxes[j].copy(), axis=0))
+
+        # Second fusion, max two boxes, fuses corner detections if all four were detected.
+        boxes = _fuse_boxes(new_boxes)
+        new_boxes = []
+        for j in range(len(boxes)):
+            index, _ = _find_matching_box(new_boxes, boxes[j], iou_threshold)
+
+            if index != -1:
+                new_boxes[index] = np.vstack((new_boxes[index], boxes[j]))
+            else:
+                new_boxes.append(np.expand_dims(boxes[j].copy(), axis=0))
+
+        overall_boxes.append(_fuse_boxes(new_boxes))
+
+    fused_boxes = np.vstack(overall_boxes)
+    fused_boxes = fused_boxes[fused_boxes[:, 1].argsort()[::-1]]
+    boxes = fused_boxes[:, 2:]
+    scores = fused_boxes[:, 1]
+    labels = fused_boxes[:, 0]
+
+    results = []
+    for i in range(boxes.shape[0]):
+        det = dict()
+        det['score'] = float(scores[i])
+        det['bbox'] = boxes[i].tolist()
+        det['category_id'] = int(labels[i])
+        results.append(det)
+
+    if not destructive:
+        for box in skipped_boxes:
+            det = dict()
+            det['score'] = float(box[1])
+            det['bbox'] = box[2:6]
+            det['category_id'] = int(box[0])
+            results.append(det)
+
+    return results
 
 
 class AnchorPoint(Enum):
