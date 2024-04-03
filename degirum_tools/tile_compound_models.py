@@ -64,6 +64,10 @@ class TileExtractorPseudoModel(ModelLike):
         self._motion_detect = motion_detect
         self._custom_postprocessor: Optional[type] = None
 
+        if global_tile:
+            assert tile_mask is None, "Tile masking not supported with global tile inference."
+            assert motion_detect is None, "Motion detection not supported with global tile inference."
+
     @property
     def non_blocking_batch_predict(self):
         return self._non_blocking_batch_predict
@@ -196,8 +200,13 @@ class TileExtractorPseudoModel(ModelLike):
             preprocessed_data = preprocessor.forward(frame)
             image = preprocessed_data["image_input"]
 
-            self._height = image.shape[0]
-            self._width = image.shape[1]
+            try:
+                self._height = image.shape[0]
+                self._width = image.shape[1]
+            except AttributeError:
+                self._height = image.size[1]
+                self._width = image.size[0]
+
             self._tile_params = self._calculate_tile_parameters()
 
             tile_list = []
@@ -589,7 +598,10 @@ class BoxFusionTileModel(_EdgeMixin, TileModel):
             # patch combined result image to be original image
             self._current_result._input_image = result1.image
 
-            height, width, _ = result1.image.shape
+            try:
+                height, width, _ = result1.image.shape
+            except AttributeError:
+                width, height = result1.image.size
 
             # Perform fusion of boxes labeled as edge detections.
             edge_boxes = []
@@ -648,7 +660,10 @@ class BoxFusionTileModel(_EdgeMixin, TileModel):
                 rows = tile_info.rows
 
                 # Generate edge boundaries
-                h, w, _ = result2.image.shape
+                try:
+                    h, w, _ = result2.image.shape
+                except AttributeError:
+                    w, h = result2.image.size
                 self._top_edge = (0, 0, w, int(self._edge_thr * h))
                 self._bot_edge = (0, int(h - self._edge_thr * h), w, h)
                 self._left_edge = (0, 0, int(w * self._edge_thr), h)
