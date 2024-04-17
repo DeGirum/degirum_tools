@@ -10,6 +10,7 @@
 
 import cv2, urllib, numpy as np
 from contextlib import contextmanager
+from functools import cmp_to_key
 from pathlib import Path
 from . import environment as env
 from .ui_support import Progress
@@ -18,7 +19,8 @@ from typing import Union, Generator, Optional, Callable
 
 @contextmanager
 def open_video_stream(
-    video_source: Union[int, str, Path, None] = None
+    video_source: Union[int, str, Path, None] = None,
+    max_yt_quality: int = 0
 ) -> Generator[cv2.VideoCapture, None, None]:
     """Open OpenCV video stream from camera with given identifier.
 
@@ -27,6 +29,9 @@ def open_video_stream(
        or local video file path,
        or URL to mp4 video file,
        or YouTube video URL
+    max_yt_quality - The maximum video quality for YouTube videos. The units are
+       in pixels for the height of the video. Will open a video with the highest
+       resolution less than or equal to max_yt_quality. If 0, open the best quality.
 
     Returns context manager yielding video stream object and closing it on exit
     """
@@ -48,7 +53,17 @@ def open_video_stream(
     ):  # if source is YouTube video
         import pafy
 
-        video_source = pafy.new(video_source).getbest(preftype="mp4").url
+        if max_yt_quality == 0:
+            video_source = pafy.new(video_source).getbest(preftype="mp4").url
+        else:
+            video_qualities = pafy.new(video_source).videostreams
+            # Sort descending based on vertical pixel count.
+            video_qualities = sorted(video_qualities, key=cmp_to_key(lambda a, b: b.dimensions[1] - a.dimensions[1]))  # type: ignore[attr-defined]
+
+            for video in video_qualities:
+                if video.dimensions[1] <= max_yt_quality:
+                    video_source = video.url
+                    break
 
     stream = cv2.VideoCapture(video_source)  # type: ignore[arg-type]
     if not stream.isOpened():
