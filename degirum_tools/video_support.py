@@ -141,7 +141,7 @@ class VideoWriter:
 
             # use ffmpeg-wrapped VideoWriter on other platforms;
             # reason: OpenCV VideoWriter does not support H264 on Linux
-            self._writer = ffmpegcv.VideoWriter(fname, None, fps, (w, h))
+            self._writer = ffmpegcv.VideoWriter(fname, codec=None, fps=fps)
         else:
             # use OpenCV VideoWriter on Windows
             self._writer = cv2.VideoWriter(
