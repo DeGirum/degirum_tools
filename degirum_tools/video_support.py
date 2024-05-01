@@ -7,7 +7,7 @@
 # Implements classes and functions to handle video streams for capturing and saving
 #
 
-
+import time
 import cv2, urllib, numpy as np
 from contextlib import contextmanager
 from functools import cmp_to_key
@@ -104,7 +104,9 @@ def get_video_stream_properties(
             return get_props(stream)
 
 
-def video_source(stream: cv2.VideoCapture) -> Generator[np.ndarray, None, None]:
+def video_source(
+    stream: cv2.VideoCapture, fps: Optional[float] = None
+) -> Generator[np.ndarray, None, None]:
     """Generator function, which returns video frames captured from given video stream.
     Useful to pass to model batch_predict().
 
@@ -121,6 +123,10 @@ def video_source(stream: cv2.VideoCapture) -> Generator[np.ndarray, None, None]:
         else True
     )
 
+    if fps:
+        minimum_elapsed_time = 1 / fps
+        prev_time = time.time()
+
     while True:
         ret, frame = stream.read()
         if not ret:
@@ -130,7 +136,17 @@ def video_source(stream: cv2.VideoCapture) -> Generator[np.ndarray, None, None]:
                 )
             else:
                 break
-        yield frame
+        if fps:
+            curr_time = time.time()
+
+            if curr_time - prev_time < minimum_elapsed_time:
+                continue
+
+            prev_time = curr_time
+
+            yield frame
+        else:
+            yield frame
 
 
 class VideoWriter:
