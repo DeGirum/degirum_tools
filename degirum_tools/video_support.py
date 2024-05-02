@@ -112,7 +112,7 @@ def get_video_stream_properties(
 
 
 def video_source(
-    stream: cv2.VideoCapture, fps: Optional[float] = None
+    stream: cv2.VideoCapture, fps: Optional[float] = None, frame_decimate: Optional[bool] = False
 ) -> Generator[np.ndarray, None, None]:
     """Generator function, which returns video frames captured from given video stream.
     Useful to pass to model batch_predict().
@@ -120,7 +120,8 @@ def video_source(
     stream - video stream context manager object returned by open_video_stream()
     fps - optional fps cap. If greater than the actual FPS, it will do nothing.
        If less than the current fps, it will decimate frames accordingly.
-
+    frame_decimate - If fps is set, and frame decimation is True, frames are decimated
+       by frame count. If false, decimation occurs by time.
     Yields video frame captured from given video stream
     """
 
@@ -133,8 +134,18 @@ def video_source(
     )
 
     if fps:
-        minimum_elapsed_time = 1 / fps
-        prev_time = time.time()
+        minimum_elapsed_time = 1.0 / fps
+        if frame_decimate:
+            _, _, video_fps = get_video_stream_properties(stream)
+            # Do not decimate if target fps > video fps
+            if video_fps <= fps:
+                fps = None
+            else:
+                drop_frames_count = int(video_fps - fps)
+                drop_indices = np.linspace(0, video_fps - 1, drop_frames_count, dtype=int)
+                frame_id = -1
+        else:
+            prev_time = time.time()
 
     while True:
         ret, frame = stream.read()
@@ -146,15 +157,23 @@ def video_source(
             else:
                 break
         if fps:
-            curr_time = time.time()
-            elapsed_time = curr_time - prev_time
+            if frame_decimate:
+                frame_id += 1
 
-            if elapsed_time < minimum_elapsed_time:
-                continue
+                if frame_id % video_fps in drop_indices:
+                    continue
 
-            prev_time = curr_time - (elapsed_time - minimum_elapsed_time)
+                yield frame
+            else:
+                curr_time = time.time()
+                elapsed_time = curr_time - prev_time
 
-            yield frame
+                if elapsed_time < minimum_elapsed_time:
+                    continue
+
+                prev_time = curr_time - (elapsed_time - minimum_elapsed_time)
+
+                yield frame
         else:
             yield frame
 
