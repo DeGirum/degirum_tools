@@ -147,11 +147,12 @@ def video_source(
                 break
         if fps:
             curr_time = time.time()
+            elapsed_time = curr_time - prev_time
 
-            if curr_time - prev_time < minimum_elapsed_time:
+            if elapsed_time < minimum_elapsed_time:
                 continue
 
-            prev_time = curr_time
+            prev_time = curr_time - (elapsed_time - minimum_elapsed_time)
 
             yield frame
         else:
