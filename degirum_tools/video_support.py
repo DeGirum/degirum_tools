@@ -56,14 +56,21 @@ def open_video_stream(
         if max_yt_quality == 0:
             video_source = pafy.new(video_source).getbest(preftype="mp4").url
         else:
+            # Ignore DASH/HLS YouTube videos because we cannot download them trivially w/ OpenCV or ffmpeg.
+            # Format ids are from pafy backend https://github.com/ytdl-org/youtube-dl/blob/master/youtube_dl/extractor/youtube.py
+            dash_hls_formats = [91, 92, 93, 94, 95, 96, 132, 151, 133, 134, 135, 136, 137, 138, 160, 212, 264, 298, 299, 266,]
+
             video_qualities = pafy.new(video_source).videostreams
             # Sort descending based on vertical pixel count.
             video_qualities = sorted(video_qualities, key=cmp_to_key(lambda a, b: b.dimensions[1] - a.dimensions[1]))  # type: ignore[attr-defined]
 
             for video in video_qualities:
-                if video.dimensions[1] <= max_yt_quality:
-                    video_source = video.url
-                    break
+                if video.dimensions[1] <= max_yt_quality and video.extension == 'mp4':
+                    if video.itag not in dash_hls_formats:
+                        video_source = video.url
+                        break
+            else:
+                video_source = pafy.new(video_source).getbest(preftype="mp4").url
 
     stream = cv2.VideoCapture(video_source)  # type: ignore[arg-type]
     if not stream.isOpened():
@@ -111,6 +118,8 @@ def video_source(
     Useful to pass to model batch_predict().
 
     stream - video stream context manager object returned by open_video_stream()
+    fps - optional fps cap. If greater than the actual FPS, it will do nothing.
+       If less than the current fps, it will decimate frames accordingly.
 
     Yields video frame captured from given video stream
     """

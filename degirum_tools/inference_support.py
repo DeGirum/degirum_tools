@@ -191,6 +191,8 @@ def predict_stream(
             - IP camera URL in the format "rtsp://<user>:<password>@<ip or hostname>",
             - local path or URL to mp4 video file,
             - YouTube video URL
+        fps - optional fps cap. If greater than the actual FPS, it will do nothing.
+           If less than the current fps, it will decimate frames accordingly.
         analyzers - optional analyzer or list of analyzers to be applied to model inference results
 
     Returns:
@@ -231,6 +233,8 @@ def annotate_video(
         - YouTube video URL
         show_progress - when True, show text progress indicator
         visual_display - when True, show interactive video display with annotated video stream
+        fps - optional fps cap. If greater than the actual FPS, it will do nothing.
+           If less than the current fps, it will decimate frames accordingly.
         analyzers - optional analyzer or list of analyzers to be applied to model inference results
     """
 
