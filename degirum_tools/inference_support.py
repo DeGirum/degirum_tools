@@ -203,10 +203,8 @@ def predict_stream(
 
     analyzing_postprocessor = _create_analyzing_postprocessor_class(analyzers)
 
-    decimate_frames = False if isinstance(video_source_id, int) else True
-
     with open_video_stream(video_source_id) as stream:
-        for res in model.predict_batch(video_source(stream, fps=fps, frame_decimate=decimate_frames)):
+        for res in model.predict_batch(video_source(stream, fps=fps)):
             if analyzers is not None:
                 yield analyzing_postprocessor(result=res)
             else:
@@ -274,9 +272,7 @@ def annotate_video(
         if show_progress:
             progress = Progress(int(stream.get(cv2.CAP_PROP_FRAME_COUNT)))
 
-        decimate_frames = False if isinstance(video_source_id, int) else True
-
-        for res in model.predict_batch(video_source(stream, fps=video_fps, frame_decimate=decimate_frames)):
+        for res in model.predict_batch(video_source(stream, fps=video_fps)):
             img = res.image_overlay
 
             for analyzer in analyzer_list:

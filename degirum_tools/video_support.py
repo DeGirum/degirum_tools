@@ -112,7 +112,7 @@ def get_video_stream_properties(
 
 
 def video_source(
-    stream: cv2.VideoCapture, fps: Optional[float] = None, frame_decimate: Optional[bool] = False
+    stream: cv2.VideoCapture, fps: Optional[float] = None
 ) -> Generator[np.ndarray, None, None]:
     """Generator function, which returns video frames captured from given video stream.
     Useful to pass to model batch_predict().
@@ -125,17 +125,18 @@ def video_source(
     Yields video frame captured from given video stream
     """
 
+    is_file = stream.get(cv2.CAP_PROP_FRAME_COUNT) > 0
     # do not report errors for files and in test mode;
     # report errors only for camera streams
     report_error = (
         False
-        if env.get_test_mode() or stream.get(cv2.CAP_PROP_FRAME_COUNT) > 0
+        if env.get_test_mode() or is_file
         else True
     )
 
     if fps:
-        minimum_elapsed_time = 1.0 / fps
-        if frame_decimate:
+        # Decimate if file
+        if is_file:
             _, _, video_fps = get_video_stream_properties(stream)
             # Do not decimate if target fps > video fps
             if video_fps <= fps:
@@ -144,7 +145,9 @@ def video_source(
                 drop_frames_count = int(video_fps - fps)
                 drop_indices = np.linspace(0, video_fps - 1, drop_frames_count, dtype=int)
                 frame_id = -1
+        # Throttle if camera feed
         else:
+            minimum_elapsed_time = 1.0 / fps
             prev_time = time.time()
 
     while True:
@@ -157,7 +160,7 @@ def video_source(
             else:
                 break
         if fps:
-            if frame_decimate:
+            if is_file:
                 frame_id += 1
 
                 if frame_id % video_fps in drop_indices:
