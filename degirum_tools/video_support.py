@@ -120,8 +120,6 @@ def video_source(
     stream - video stream context manager object returned by open_video_stream()
     fps - optional fps cap. If greater than the actual FPS, it will do nothing.
        If less than the current fps, it will decimate frames accordingly.
-    frame_decimate - If fps is set, and frame decimation is True, frames are decimated
-       by frame count. If false, decimation occurs by time.
     Yields video frame captured from given video stream
     """
 
