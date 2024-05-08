@@ -7,7 +7,7 @@
 # Implements classes and functions to handle video streams for capturing and saving
 #
 
-
+import time
 import cv2, urllib, numpy as np
 from contextlib import contextmanager
 from functools import cmp_to_key
@@ -56,14 +56,21 @@ def open_video_stream(
         if max_yt_quality == 0:
             video_source = pafy.new(video_source).getbest(preftype="mp4").url
         else:
+            # Ignore DASH/HLS YouTube videos because we cannot download them trivially w/ OpenCV or ffmpeg.
+            # Format ids are from pafy backend https://github.com/ytdl-org/youtube-dl/blob/master/youtube_dl/extractor/youtube.py
+            dash_hls_formats = [91, 92, 93, 94, 95, 96, 132, 151, 133, 134, 135, 136, 137, 138, 160, 212, 264, 298, 299, 266,]
+
             video_qualities = pafy.new(video_source).videostreams
             # Sort descending based on vertical pixel count.
             video_qualities = sorted(video_qualities, key=cmp_to_key(lambda a, b: b.dimensions[1] - a.dimensions[1]))  # type: ignore[attr-defined]
 
             for video in video_qualities:
-                if video.dimensions[1] <= max_yt_quality:
-                    video_source = video.url
-                    break
+                if video.dimensions[1] <= max_yt_quality and video.extension == 'mp4':
+                    if video.itag not in dash_hls_formats:
+                        video_source = video.url
+                        break
+            else:
+                video_source = pafy.new(video_source).getbest(preftype="mp4").url
 
     stream = cv2.VideoCapture(video_source)  # type: ignore[arg-type]
     if not stream.isOpened():
@@ -104,22 +111,42 @@ def get_video_stream_properties(
             return get_props(stream)
 
 
-def video_source(stream: cv2.VideoCapture) -> Generator[np.ndarray, None, None]:
+def video_source(
+    stream: cv2.VideoCapture, fps: Optional[float] = None
+) -> Generator[np.ndarray, None, None]:
     """Generator function, which returns video frames captured from given video stream.
     Useful to pass to model batch_predict().
 
     stream - video stream context manager object returned by open_video_stream()
-
+    fps - optional fps cap. If greater than the actual FPS, it will do nothing.
+       If less than the current fps, it will decimate frames accordingly.
     Yields video frame captured from given video stream
     """
 
+    is_file = stream.get(cv2.CAP_PROP_FRAME_COUNT) > 0
     # do not report errors for files and in test mode;
     # report errors only for camera streams
     report_error = (
         False
-        if env.get_test_mode() or stream.get(cv2.CAP_PROP_FRAME_COUNT) > 0
+        if env.get_test_mode() or is_file
         else True
     )
+
+    if fps:
+        # Decimate if file
+        if is_file:
+            _, _, video_fps = get_video_stream_properties(stream)
+            # Do not decimate if target fps > video fps
+            if video_fps <= fps:
+                fps = None
+            else:
+                drop_frames_count = int(video_fps - fps)
+                drop_indices = np.linspace(0, video_fps - 1, drop_frames_count, dtype=int)
+                frame_id = -1
+        # Throttle if camera feed
+        else:
+            minimum_elapsed_time = 1.0 / fps
+            prev_time = time.time()
 
     while True:
         ret, frame = stream.read()
@@ -130,7 +157,26 @@ def video_source(stream: cv2.VideoCapture) -> Generator[np.ndarray, None, None]:
                 )
             else:
                 break
-        yield frame
+        if fps:
+            if is_file:
+                frame_id += 1
+
+                if frame_id % video_fps in drop_indices:
+                    continue
+
+                yield frame
+            else:
+                curr_time = time.time()
+                elapsed_time = curr_time - prev_time
+
+                if elapsed_time < minimum_elapsed_time:
+                    continue
+
+                prev_time = curr_time - (elapsed_time - minimum_elapsed_time)
+
+                yield frame
+        else:
+            yield frame
 
 
 class VideoWriter:
@@ -156,7 +202,7 @@ class VideoWriter:
 
             # use ffmpeg-wrapped VideoWriter on other platforms;
             # reason: OpenCV VideoWriter does not support H264 on Linux
-            self._writer = ffmpegcv.VideoWriter(fname, None, fps, (w, h))
+            self._writer = ffmpegcv.VideoWriter(fname, codec=None, fps=fps, resize=(w, h))
         else:
             # use OpenCV VideoWriter on Windows
             self._writer = cv2.VideoWriter(

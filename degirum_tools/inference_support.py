@@ -179,6 +179,7 @@ def predict_stream(
     model: dg.model.Model,
     video_source_id: Union[int, str, Path, None],
     *,
+    fps: Optional[float] = None,
     analyzers: Union[ResultAnalyzerBase, List[ResultAnalyzerBase], None] = None,
 ):
     """Run a model on a video stream
@@ -190,6 +191,8 @@ def predict_stream(
             - IP camera URL in the format "rtsp://<user>:<password>@<ip or hostname>",
             - local path or URL to mp4 video file,
             - YouTube video URL
+        fps - optional fps cap. If greater than the actual FPS, it will do nothing.
+           If less than the current fps, it will decimate frames accordingly.
         analyzers - optional analyzer or list of analyzers to be applied to model inference results
 
     Returns:
@@ -201,7 +204,7 @@ def predict_stream(
     analyzing_postprocessor = _create_analyzing_postprocessor_class(analyzers)
 
     with open_video_stream(video_source_id) as stream:
-        for res in model.predict_batch(video_source(stream)):
+        for res in model.predict_batch(video_source(stream, fps=fps)):
             if analyzers is not None:
                 yield analyzing_postprocessor(result=res)
             else:
@@ -215,6 +218,7 @@ def annotate_video(
     *,
     show_progress: bool = True,
     visual_display: bool = True,
+    fps: Optional[float] = None,
     analyzers: Union[ResultAnalyzerBase, List[ResultAnalyzerBase], None] = None,
 ):
     """Annotate video stream by running a model and saving results to video file
@@ -229,6 +233,8 @@ def annotate_video(
         - YouTube video URL
         show_progress - when True, show text progress indicator
         visual_display - when True, show interactive video display with annotated video stream
+        fps - optional fps cap. If greater than the actual FPS, it will do nothing.
+           If less than the current fps, it will decimate frames accordingly.
         analyzers - optional analyzer or list of analyzers to be applied to model inference results
     """
 
@@ -253,16 +259,20 @@ def annotate_video(
         else:
             stream = stack.enter_context(open_video_stream(video_source_id))
 
-        w, h, fps = get_video_stream_properties(stream)
+        w, h, video_fps = get_video_stream_properties(stream)
+
+        # Overwrite the video stream's FPS if the fps argument is set.
+        if fps:
+            video_fps = fps
 
         writer = stack.enter_context(
-            open_video_writer(str(output_video_path), w, h, fps)
+            open_video_writer(str(output_video_path), w, h, video_fps)
         )
 
         if show_progress:
             progress = Progress(int(stream.get(cv2.CAP_PROP_FRAME_COUNT)))
 
-        for res in model.predict_batch(video_source(stream)):
+        for res in model.predict_batch(video_source(stream, fps=video_fps)):
             img = res.image_overlay
 
             for analyzer in analyzer_list:
