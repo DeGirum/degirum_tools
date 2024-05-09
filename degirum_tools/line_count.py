@@ -169,7 +169,6 @@ class LineCounter(ResultAnalyzerBase):
                 # compute coordinate where to put text
                 if mostly_horizontal:
                     cx = min(line_start[0], line_end[0]) + margin
-                    sep = " "
                     if max(line_start[1], line_end[1]) < img_center[1]:
                         cy = max(line_start[1], line_end[1]) + margin
                         corner = CornerPosition.TOP_LEFT
@@ -181,7 +180,6 @@ class LineCounter(ResultAnalyzerBase):
                         corner = CornerPosition.TOP_LEFT
                 else:
                     cy = min(line_start[1], line_end[1]) + margin
-                    sep = "\n"
                     if max(line_start[0], line_end[0]) < img_center[0]:
                         cx = max(line_start[0], line_end[0]) + margin
                         corner = CornerPosition.TOP_LEFT
