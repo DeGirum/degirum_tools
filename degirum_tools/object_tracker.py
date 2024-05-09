@@ -795,6 +795,7 @@ class _Tracer:
         """
         self._timeout_count_dict: Dict[int, int] = {}
         self.active_trails: Dict[int, list] = {}
+        self.trail_classes: Dict[int, str] = {}
         self._timeout_count_initial = timeout_frames
         self._trace_depth = trail_depth
         self._anchor_point = anchor_point
@@ -811,8 +812,8 @@ class _Tracer:
         # array of tracked object indexes and bboxes
         tracked_objects = np.array(
             [
-                [obj["track_id"]] + obj["bbox"]
-                for obj in result.results
+                [idx, obj["track_id"]] + obj["bbox"]
+                for idx, obj in enumerate(result.results)
                 if "track_id" in obj
             ],
             dtype=np.int32,
@@ -820,18 +821,19 @@ class _Tracer:
 
         if len(tracked_objects) > 0:
             # compute anchor coordinates
-            tracked_objects[:, 1:3] = get_anchor_coordinates(
-                tracked_objects[:, 1:], self._anchor_point
+            tracked_objects[:, 2:4] = get_anchor_coordinates(
+                tracked_objects[:, 2:], self._anchor_point
             ).astype(np.int32)
 
-            # here tracked_objects[:, 0] are track IDs, tracked_objects[:, 1:3] are anchor coordinates
+            # here tracked_objects[:, 1] are track IDs, tracked_objects[:, 2:4] are anchor coordinates
 
             # update active trails
-            for tid, x, y in tracked_objects[:, 0:3]:
+            for idx, tid, x, y in tracked_objects[:, 0:4]:
                 trail = self.active_trails.get(tid, None)
                 if trail is None:
                     trail = []
                     self.active_trails[tid] = trail
+                    self.trail_classes[tid] = result.results[idx]["label"]
                 trail.append(np.array([x, y]))
                 if len(trail) > self._trace_depth:
                     trail.pop(0)
@@ -839,7 +841,7 @@ class _Tracer:
                 self._timeout_count_dict[tid] = self._timeout_count_initial
 
             inactive_set = set(self._timeout_count_dict.keys()) - set(
-                tracked_objects[:, 0]
+                tracked_objects[:, 1]
             )
         else:
             inactive_set = set(self._timeout_count_dict.keys())
@@ -848,7 +850,11 @@ class _Tracer:
         for tid in inactive_set:
             self._timeout_count_dict[tid] -= 1
             if self._timeout_count_dict[tid] == 0:
-                del self._timeout_count_dict[tid], self.active_trails[tid]
+                del (
+                    self._timeout_count_dict[tid],
+                    self.active_trails[tid],
+                    self.trail_classes[tid],
+                )
 
 
 class ObjectTracker(ResultAnalyzerBase):
@@ -899,9 +905,11 @@ class ObjectTracker(ResultAnalyzerBase):
     def analyze(self, result):
         """
         Track object bounding boxes.
-        Updates each element of `result.results[]` by adding the track_id key - unique track ID of the detected object
+        Updates each element of `result.results[]` by adding the `track_id` key - unique track ID of the detected object
         If trail_depth is not zero, also adds `trails` dictionary to result object. This dictionary is keyed by track IDs
         and contains lists of trail (x,y) coordinates for every active trail.
+        Also adds `trail_classes` dictionary to result object. This dictionary is keyed by track IDs and contains
+        object class labels for every active trail.
 
         Args:
             result: PySDK model result object
@@ -912,6 +920,7 @@ class ObjectTracker(ResultAnalyzerBase):
         else:
             self._tracer.update(result)
             result.trails = deepcopy(self._tracer.active_trails)
+            result.trail_classes = deepcopy(self._tracer.trail_classes)
 
     def annotate(self, result, image: np.ndarray) -> np.ndarray:
         """
@@ -958,7 +967,7 @@ class ObjectTracker(ResultAnalyzerBase):
                     if len(trail) > 1:
                         put_text(
                             image,
-                            str(tid),
+                            f"{result.trail_classes[tid]}: {tid}",
                             trail[-1],
                             font_color=text_color,
                             bg_color=line_color,

@@ -86,7 +86,7 @@ def put_text(
     font_scale: float = 1,
     font_thickness: int = 1,
     line_spacing: float = 1,
-):
+) -> np.ndarray:
     """Draw given text on given OpenCV image at given point with given color
 
     Args:
@@ -100,10 +100,16 @@ def put_text(
         font_scale - font scale factor to use
         font_thickness - font thickness to use
         line_spacing - line spacing factor
+
+    Returns:
+        image with text drawn
     """
 
+    if not label:
+        return image
+
     im_h, im_w = image.shape[:2]
-    margin = 4
+    margin = 6
 
     @dataclass
     class LineInfo:
