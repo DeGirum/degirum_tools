@@ -191,7 +191,9 @@ class LineCounter(ResultAnalyzerBase):
                         corner = CornerPosition.TOP_LEFT
 
                 def line_count_str(lc: SingleLineCounts, prefix: str = "") -> str:
-                    return f"{prefix}^({line_count.top}) v({line_count.bottom}) <({line_count.left}) >({line_count.right})"
+                    return (
+                        f"{prefix}^({lc.top}) v({lc.bottom}) <({lc.left}) >({lc.right})"
+                    )
 
                 if self._per_class_display:
                     capt = "\n".join(
