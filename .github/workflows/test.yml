@@ -1,4 +1,6 @@
 name: Tests
+run-name: Tests ${{ github.ref_name }}
+
 on:
   push:
   pull_request:
