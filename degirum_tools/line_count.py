@@ -8,22 +8,29 @@
 #
 
 import numpy as np, cv2
-from dataclasses import dataclass
-from typing import List
+from typing import List, Dict
 from copy import deepcopy
 from .ui_support import put_text, color_complement, deduce_text_color, CornerPosition
 from .result_analyzer_base import ResultAnalyzerBase
 from .math_support import intersect
 
 
-@dataclass
-class LineCounts:
-    """Dataclass to hold line crossing counts"""
+class SingleLineCounts:
+    """Class to hold line crossing counts"""
 
-    left: int = 0
-    right: int = 0
-    top: int = 0
-    bottom: int = 0
+    def __init__(self):
+        self.left: int = 0
+        self.right: int = 0
+        self.top: int = 0
+        self.bottom: int = 0
+
+
+class LineCounts(SingleLineCounts):
+    """Class to hold total line crossing counts and counts for multiple classes"""
+
+    def __init__(self):
+        super().__init__()
+        self.for_class: Dict[str, SingleLineCounts] = {}
 
 
 class LineCounter(ResultAnalyzerBase):
@@ -45,15 +52,24 @@ class LineCounter(ResultAnalyzerBase):
 
     """
 
-    def __init__(self, lines: List[tuple]):
+    def __init__(
+        self,
+        lines: List[tuple],
+        *,
+        per_class_display: bool = False,
+    ):
         """Constructor
 
         Args:
             lines (list[tuple]): list of line coordinates;
-            each list element is 4-element tuple of (x1,y1,x2,y2) line coordinates
+                each list element is 4-element tuple of (x1,y1,x2,y2) line coordinates
+            per_class_display (bool, optional): when True, display counts per class,
+                otherwise display total counts
+
         """
 
         self._lines = lines
+        self._per_class_display = per_class_display
         self.reset()
 
     def reset(self):
@@ -88,23 +104,31 @@ class LineCounter(ResultAnalyzerBase):
         # obtain a set of new trails, which were not counted yet
         new_trails = active_trails - self._counted_trails
 
+        def count_increment(counts, trail_start, trail_end):
+            if trail_start[0] > trail_end[0]:
+                counts.left += 1
+            else:
+                counts.right += 1
+            if trail_start[1] > trail_end[1]:
+                counts.top += 1
+            else:
+                counts.bottom += 1
+
         for tid in new_trails:
             trail = result.trails[tid]
             if len(trail) > 1:
                 trail_start = trail[0]
                 trail_end = trail[-1]
 
-                for line_count, line in zip(self._line_counts, self._lines):
+                for total_count, line in zip(self._line_counts, self._lines):
                     if intersect(line[:2], line[2:], trail_start, trail_end):
-                        if trail_start[0] > trail_end[0]:
-                            line_count.left += 1
-                        if trail_start[0] < trail_end[0]:
-                            line_count.right += 1
-                        if trail_start[1] < trail_end[1]:
-                            line_count.top += 1
-                        if trail_start[1] > trail_end[1]:
-                            line_count.bottom += 1
                         self._counted_trails.add(tid)
+                        count_increment(total_count, trail_start, trail_end)
+                        if self._per_class_display:
+                            class_count = total_count.for_class.setdefault(
+                                result.trail_classes[tid], SingleLineCounts()
+                            )
+                            count_increment(class_count, trail_start, trail_end)
 
         result.line_counts = deepcopy(self._line_counts)
 
@@ -168,9 +192,23 @@ class LineCounter(ResultAnalyzerBase):
                         cx = (line_start[0] + line_end[0]) // 2
                         corner = CornerPosition.TOP_LEFT
 
+                def line_count_str(lc: SingleLineCounts, prefix: str = "") -> str:
+                    return f"{prefix}^({line_count.top}) v({line_count.bottom}) <({line_count.left}) >({line_count.right})"
+
+                if self._per_class_display:
+                    capt = "\n".join(
+                        [
+                            line_count_str(class_count, f"{class_name}: ")
+                            for class_name, class_count in line_count.for_class.items()
+                        ]
+                        + [line_count_str(line_count, "Total: ")]
+                    )
+                else:
+                    capt = line_count_str(line_count)
+
                 put_text(
                     image,
-                    f"Top={line_count.top}{sep}Bottom={line_count.bottom}{sep}Left={line_count.left}{sep}Right={line_count.right}",
+                    capt,
                     (cx, cy),
                     corner_position=corner,
                     font_color=text_color,
