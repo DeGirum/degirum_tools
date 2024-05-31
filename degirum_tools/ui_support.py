@@ -150,8 +150,13 @@ def put_text(
         )
         x_adjustment = max_width if corner_position != CornerPosition.BOTTOM_LEFT else 0
         for li in lines:
-            li.x = max(0, li.x - x_adjustment)
-            li.y = max(0, li.y - y_adjustment)
+            li.x -= x_adjustment
+            li.y -= y_adjustment
+
+            if li.x < 0:
+                li.x += im_w
+            if li.y < 0:
+                li.y += im_h
 
     for li in lines:
         if bg_color is not None:
