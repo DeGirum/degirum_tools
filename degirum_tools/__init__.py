@@ -22,6 +22,7 @@ from .regression_eval import *
 from .ui_support import *
 from .video_support import *
 from .zone_count import *
+from .custom_postprocessors import *
 
 # aliases for backward compatibility
 from .environment import (
