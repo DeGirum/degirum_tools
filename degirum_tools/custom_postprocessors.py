@@ -79,7 +79,7 @@ class DepthEstimationResults(dg.postprocessor.InferenceResults):
     # Convert the depth map to an image
     def _convert_depth_to_image(self, depth_map):
         # Get the color map
-        c_map = colormaps[DepthResults.color_map]
+        c_map = colormaps[DepthEstimationResults.color_map]
         # Squeeze the depth map to remove single-dimensional entries from the shape of an array.
         depth_map = depth_map.squeeze(0)
         # Normalize the depth map
