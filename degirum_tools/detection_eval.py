@@ -45,7 +45,6 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
             "Detection",
             "DetectionYolo",
             "DetectionYoloV8",
-            "SegmentationYoloV8",
         ]:
             raise Exception("Model loaded for evaluation is not a Detection Model")
 
@@ -100,8 +99,6 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
             for image_number, predictions in enumerate(
                 self.model.predict_batch(sorted_path_list)
             ):
-            # for i in range(len(sorted_path_list)):
-            #     predictions = self.model(sorted_path_list[i])
                 if self.show_progress:
                     progress.step()
                 image_id = sorted_img_id_list[image_number]
@@ -202,10 +199,10 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
                     )
                 )
             # segmentation model addition
-            if "masks" in result:
+            if "mask" in result:
                 detected_elem["segmentation"] = (
                     ObjectDetectionModelEvaluator._process_segmentation(
-                        result["masks"]
+                        result["mask"]
                     )
                 )
             
