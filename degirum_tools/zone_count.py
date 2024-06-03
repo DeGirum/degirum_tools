@@ -39,6 +39,7 @@ from .math_support import AnchorPoint, get_anchor_coordinates
 
 Mat = type[np.ndarray[Any, np.dtype[Any]]]
 
+
 class _PolygonZone:
     """
     A class for defining a polygon-shaped zone within a frame for detecting objects.
