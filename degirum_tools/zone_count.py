@@ -37,6 +37,7 @@ from .ui_support import put_text, color_complement, deduce_text_color
 from .result_analyzer_base import ResultAnalyzerBase
 from .math_support import AnchorPoint, get_anchor_coordinates
 
+Mat = type[np.ndarray[Any, np.dtype[Any]]]
 
 class _PolygonZone:
     """
