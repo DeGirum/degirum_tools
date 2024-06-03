@@ -206,7 +206,7 @@ def stack_images(
     labels: Optional[list] = None,
     font_color: tuple = (255, 255, 255),
 ) -> Union[np.ndarray, PIL.Image.Image]:
-    """ Stacks two images, either vertically or horizontally with the option two downscale
+    """ Stacks two images, either vertically or horizontally with the option to downscale
         the images and have labels in the bottom left corner. The two images must be the same
         size.
 
@@ -231,9 +231,6 @@ def stack_images(
         img1 = image1
         img2 = image2  # type: ignore[assignment]
 
-    if img1.shape != img2.shape:
-        raise Exception("Image shapes must be the same for stacking.")
-
     if downscale is not None:
         if downscale < 1.0:
             img1 = cv2.resize(img1,
@@ -244,14 +241,21 @@ def stack_images(
                               interpolation=cv2.INTER_AREA)
 
     h, w, c = img1.shape
-    img_dtype = img2.dtype
+    h2, w2, c = img2.shape
+    img_dtype = img1.dtype
 
     if dimension == 'horizontal':
-        stacked_img = np.zeros((h, w * 2, c), dtype=img_dtype)
+        if img1.shape[0] != img2.shape[0]:
+            raise Exception("Image heights must match for horizontal stacking.")
+
+        stacked_img = np.zeros((h, w + w2, c), dtype=img_dtype)
         stacked_img[:h, :w, :] = img1
         stacked_img[:h, w:, :] = img2
     elif dimension == 'vertical':
-        stacked_img = np.zeros((h * 2, w, c), dtype=img_dtype)
+        if img1.shape[1] != img2.shape[1]:
+            raise Exception("Image widths must match for vertical stacking.")
+
+        stacked_img = np.zeros((h + h2, w, c), dtype=img_dtype)
         stacked_img[:h, :w, :] = img1
         stacked_img[h:, :w, :] = img2
     else:
