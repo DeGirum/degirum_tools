@@ -215,7 +215,7 @@ class ZoneCounter(ResultAnalyzerBase):
         # draw annotations
         for zi in range(len(self._polygons)):
             cv2.polylines(
-                image, self._polygons[zi].tolist(), True, line_color, result.overlay_line_width
+                image, [self._polygons[zi].tolist()], True, line_color, result.overlay_line_width
             )
 
             if self._per_class_display and self._class_list is not None:
