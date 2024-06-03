@@ -37,8 +37,6 @@ from .ui_support import put_text, color_complement, deduce_text_color
 from .result_analyzer_base import ResultAnalyzerBase
 from .math_support import AnchorPoint, get_anchor_coordinates
 
-Mat = type[np.ndarray[Any, np.dtype[Any]]]
-
 
 class _PolygonZone:
     """
@@ -64,7 +62,7 @@ class _PolygonZone:
 
         self.width, self.height = frame_resolution_wh
         self.mask = np.zeros((self.height + 1, self.width + 1))
-        cv2.fillPoly(self.mask, [polygon.astype(int)], color=[1])
+        cv2.fillPoly(self.mask, polygon.astype(int).tolist(), color=[1])
 
     def trigger(self, bboxes: np.ndarray) -> np.ndarray:
         """
