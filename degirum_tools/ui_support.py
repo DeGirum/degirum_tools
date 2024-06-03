@@ -11,7 +11,7 @@ import cv2, sys, os, time, PIL.Image, numpy as np, random, string
 from .environment import get_test_mode, in_colab, in_notebook, to_valid_filename
 from .image_tools import crop, luminance
 from dataclasses import dataclass
-from typing import Optional, Any, List
+from typing import Optional, Union, Any, List, Callable
 from enum import Enum
 from pathlib import Path
 
@@ -150,8 +150,13 @@ def put_text(
         )
         x_adjustment = max_width if corner_position != CornerPosition.BOTTOM_LEFT else 0
         for li in lines:
-            li.x = max(0, li.x - x_adjustment)
-            li.y = max(0, li.y - y_adjustment)
+            li.x -= x_adjustment
+            li.y -= y_adjustment
+
+            if li.x < 0:
+                li.x += im_w
+            if li.y < 0:
+                li.y += im_h
 
     for li in lines:
         if bg_color is not None:
@@ -191,6 +196,107 @@ def put_text(
         )
 
     return image
+
+
+def stack_images(
+    image1: Union[np.ndarray, PIL.Image.Image],
+    image2: Union[np.ndarray, PIL.Image.Image],
+    dimension: str = 'horizontal',
+    downscale: Optional[float] = None,
+    labels: Optional[list] = None,
+    font_color: tuple = (255, 255, 255),
+) -> Union[np.ndarray, PIL.Image.Image]:
+    """ Stacks two images, either vertically or horizontally with the option to downscale
+        the images and have labels in the bottom left corner. The two images must be the same
+        size on the stacking dimension.
+
+    Args:
+        image1 - numpy array or PIL image
+        image2 - numpy array or PIL image
+        dimension: str - "horizontal" or "vertical", specifies dimension to stack
+        downscale: Optional[float] - scaling factor from 0.0-1/0 for the images
+        labels: Optional[list] - string labels for image1 and image2
+        font_color: tuple - font color in the form of a RGB tuple
+
+    Returns:
+        stacked image with optional resizing and labels
+    """
+    ret_type: Callable = np.array
+
+    if isinstance(image1, PIL.Image.Image):
+        img1 = np.array(image1)
+        img2 = np.array(image2)
+        ret_type = PIL.Image.fromarray
+    else:
+        img1 = image1
+        img2 = image2  # type: ignore[assignment]
+
+    if downscale is not None:
+        if downscale < 1.0:
+            img1 = cv2.resize(img1,
+                              dsize=None, fx=downscale, fy=downscale,
+                              interpolation=cv2.INTER_AREA)
+            img2 = cv2.resize(img2,
+                              dsize=None, fx=downscale, fy=downscale,
+                              interpolation=cv2.INTER_AREA)
+
+    h, w, c = img1.shape
+    h2, w2, c = img2.shape
+    img_dtype = img1.dtype
+
+    if dimension == 'horizontal':
+        if img1.shape[0] != img2.shape[0]:
+            raise Exception("Image heights must match for horizontal stacking.")
+
+        stacked_img = np.zeros((h, w + w2, c), dtype=img_dtype)
+        stacked_img[:h, :w, :] = img1
+        stacked_img[:h, w:, :] = img2
+    elif dimension == 'vertical':
+        if img1.shape[1] != img2.shape[1]:
+            raise Exception("Image widths must match for vertical stacking.")
+
+        stacked_img = np.zeros((h + h2, w, c), dtype=img_dtype)
+        stacked_img[:h, :w, :] = img1
+        stacked_img[h:, :w, :] = img2
+    else:
+        raise Exception("Unsupported image stacking dimension.")
+
+    if isinstance(labels, list) and isinstance(labels[0], str):
+        if len(labels) != 2:
+            raise Exception('Must have two labels for stacked images.')
+
+        if dimension == 'horizontal':
+            stacked_img = put_text(
+                stacked_img,
+                labels[0],
+                (0, 0),
+                font_color=font_color,
+                corner_position=CornerPosition.BOTTOM_LEFT
+            )
+            stacked_img = put_text(
+                stacked_img,
+                labels[1],
+                (w, 0),
+                font_color=font_color,
+                corner_position=CornerPosition.BOTTOM_LEFT
+            )
+        else:
+            stacked_img = put_text(
+                stacked_img,
+                labels[0],
+                (0, h),
+                font_color=font_color,
+                corner_position=CornerPosition.BOTTOM_LEFT
+            )
+            stacked_img = put_text(
+                stacked_img,
+                labels[1],
+                (0, 0),
+                font_color=font_color,
+                corner_position=CornerPosition.BOTTOM_LEFT
+            )
+
+    return ret_type(stacked_img)
 
 
 class FPSMeter:
