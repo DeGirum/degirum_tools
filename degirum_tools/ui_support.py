@@ -208,7 +208,7 @@ def stack_images(
 ) -> Union[np.ndarray, PIL.Image.Image]:
     """ Stacks two images, either vertically or horizontally with the option to downscale
         the images and have labels in the bottom left corner. The two images must be the same
-        size.
+        size on the stacking dimension.
 
     Args:
         image1 - numpy array or PIL image
