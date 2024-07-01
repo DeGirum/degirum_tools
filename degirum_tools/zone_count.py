@@ -35,7 +35,13 @@ import numpy as np, cv2
 from typing import Tuple, Optional, Any
 from .ui_support import put_text, color_complement, deduce_text_color
 from .result_analyzer_base import ResultAnalyzerBase
-from .math_support import AnchorPoint, get_anchor_coordinates
+from .math_support import (
+    AnchorPoint,
+    get_anchor_coordinates,
+    xyxy2xywh,
+    xywh2xyxy,
+    xyxy2xyxyxyxy,
+)
 
 
 class _PolygonZone:
@@ -46,7 +52,9 @@ class _PolygonZone:
         polygon (np.ndarray): A polygon represented by a numpy array of shape
             `(N, 2)`, containing the `x`, `y` coordinates of the points.
         frame_resolution_wh (Tuple[int, int]): The frame resolution (width, height)
-        triggering_position: The position within the bounding box that triggers the zone
+        triggering_positions: The position(s) within the bounding box that trigger(s) the zone
+        bounding_box_scale: scale factor used to resize bounding boxes
+        iopa_threshold: intersection over polygon area (IoPA) threshold
         current_count (int): The current count of detected objects within the zone
         mask (np.ndarray): The 2D bool mask for the polygon zone
     """
@@ -55,14 +63,20 @@ class _PolygonZone:
         self,
         polygon: np.ndarray,
         frame_resolution_wh: Tuple[int, int],
-        triggering_position: AnchorPoint,
+        triggering_positions: list[AnchorPoint],
+        bounding_box_scale: float,
+        iopa_threshold: float,
     ):
         self.frame_resolution_wh = frame_resolution_wh
-        self.triggering_position = triggering_position
+        self.triggering_positions = triggering_positions
+        self.bounding_box_scale = bounding_box_scale
+        self.iopa_threshold = iopa_threshold
 
         self.width, self.height = frame_resolution_wh
         self.mask = np.zeros((self.height + 1, self.width + 1))
-        cv2.fillPoly(self.mask, polygon.astype(int).tolist(), color=[1])
+        cv2.fillPoly(self.mask, [polygon.astype(int)], color=[1])
+        self.polygon = polygon.astype(np.float32)
+        self.polygon_area = cv2.contourArea(polygon.reshape(1, -1, 2))
 
     def trigger(self, bboxes: np.ndarray) -> np.ndarray:
         """
@@ -80,12 +94,37 @@ class _PolygonZone:
         bboxes[:, [0, 2]] = bboxes[:, [0, 2]].clip(0, self.width)
         bboxes[:, [1, 3]] = bboxes[:, [1, 3]].clip(0, self.height)
 
-        clipped_anchors = np.ceil(
-            get_anchor_coordinates(xyxy=bboxes, anchor=self.triggering_position)
-        ).astype(int)
+        # scale down bounding box by scale factor
+        if self.bounding_box_scale < 1.0:
+            bboxes_xywh = xyxy2xywh(bboxes)
+            bboxes_xywh[:, [2, 3]] *= self.bounding_box_scale
+            bboxes = xywh2xyxy(bboxes_xywh)
 
-        is_in_zone = self.mask[clipped_anchors[:, 1], clipped_anchors[:, 0]]
-        return is_in_zone.astype(bool)
+        if self.triggering_positions is None:
+            # trigger zones based on IoPA
+            iopa = np.zeros((bboxes.shape[0]), dtype=float)
+            bboxes_corners = xyxy2xyxyxyxy(bboxes).astype(np.float32)
+            for i in range(len(bboxes_corners)):
+                iopa[i] = cv2.intersectConvexConvex(
+                    bboxes_corners[i].reshape(-1, 2), self.polygon
+                )[0]
+            iopa /= self.polygon_area
+            is_in_zone = iopa > self.iopa_threshold
+        else:
+            # trigger zones based on trigger points
+            clipped_anchors = np.array(
+                [
+                    np.ceil(get_anchor_coordinates(xyxy=bboxes, anchor=anchor)).astype(
+                        int
+                    )
+                    for anchor in self.triggering_positions
+                ]
+            )
+            is_in_zone = np.logical_or.reduce(
+                self.mask[clipped_anchors[:, :, 1], clipped_anchors[:, :, 0]]
+            )
+
+        return is_in_zone
 
 
 class ZoneCounter(ResultAnalyzerBase):
@@ -113,7 +152,9 @@ class ZoneCounter(ResultAnalyzerBase):
         *,
         class_list: Optional[list] = None,
         per_class_display: bool = False,
-        triggering_position: AnchorPoint = AnchorPoint.BOTTOM_CENTER,
+        triggering_positions: list[AnchorPoint] = [AnchorPoint.BOTTOM_CENTER],
+        bounding_box_scale: float = 1.0,
+        iopa_threshold: float = 0.0,
         window_name: Optional[str] = None,
     ):
         """Constructor
@@ -122,7 +163,9 @@ class ZoneCounter(ResultAnalyzerBase):
             count_polygons (nd.array): list of polygons to count objects in; each polygon is a list of points (x,y)
             class_list (list, optional): list of classes to count; if None, all classes are counted
             per_class_display (bool, optional): when True, display zone counts per class, otherwise display total zone counts
-            triggering_position (AnchorPoint, optional): the position within the bounding box that triggers the zone
+            triggering_positions (AnchorPoint, optional): the position(s) within the bounding box that trigger(s) the zone
+            bounding_box_scale: scale factor used to resize bounding boxes
+            iopa_threshold: intersection over polygon area (IoPA) threshold
             window_name (str, optional): optional OpenCV window name to configure for interactive zone adjustment
         """
 
@@ -137,7 +180,9 @@ class ZoneCounter(ResultAnalyzerBase):
                 "class_list must be specified when per_class_display is True"
             )
 
-        self._triggering_position = triggering_position
+        self._triggering_positions = triggering_positions
+        self._bounding_box_scale = bounding_box_scale
+        self._iopa_threshold = iopa_threshold
         self._polygons = [
             np.array(polygon, dtype=np.int32) for polygon in count_polygons
         ]
@@ -215,7 +260,7 @@ class ZoneCounter(ResultAnalyzerBase):
         # draw annotations
         for zi in range(len(self._polygons)):
             cv2.polylines(
-                image, [self._polygons[zi].tolist()], True, line_color, result.overlay_line_width
+                image, [self._polygons[zi]], True, line_color, result.overlay_line_width
             )
 
             if self._per_class_display and self._class_list is not None:
@@ -259,7 +304,13 @@ class ZoneCounter(ResultAnalyzerBase):
         if self._zones is None:
             self._wh = (result.image.shape[1], result.image.shape[0])
             self._zones = [
-                _PolygonZone(polygon, self._wh, self._triggering_position)
+                _PolygonZone(
+                    polygon,
+                    self._wh,
+                    self._triggering_positions,
+                    self._bounding_box_scale,
+                    self._iopa_threshold,
+                )
                 for polygon in self._polygons
             ]
         if not self._mouse_callback_installed and self._win_name is not None:
@@ -275,7 +326,11 @@ class ZoneCounter(ResultAnalyzerBase):
             idx = self._gui_state["update"]
             if idx >= 0 and self._wh is not None:
                 self._zones[idx] = _PolygonZone(
-                    self._polygons[idx], self._wh, self._triggering_position
+                    self._polygons[idx],
+                    self._wh,
+                    self._triggering_positions,
+                    self._bounding_box_scale,
+                    self._iopa_threshold,
                 )
 
         if event == cv2.EVENT_LBUTTONDOWN:
