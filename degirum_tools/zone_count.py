@@ -96,7 +96,7 @@ class _PolygonZone:
 
         # scale down bounding box by scale factor
         if self.bounding_box_scale < 1.0:
-            bboxes_xywh = xyxy2xywh(bboxes)
+            bboxes_xywh = xyxy2xywh(bboxes).astype(float)
             bboxes_xywh[:, [2, 3]] *= self.bounding_box_scale
             bboxes = xywh2xyxy(bboxes_xywh)
 
@@ -155,6 +155,7 @@ class ZoneCounter(ResultAnalyzerBase):
         triggering_positions: list[AnchorPoint] = [AnchorPoint.BOTTOM_CENTER],
         bounding_box_scale: float = 1.0,
         iopa_threshold: float = 0.0,
+        use_tracking: bool = False,
         window_name: Optional[str] = None,
     ):
         """Constructor
@@ -166,6 +167,8 @@ class ZoneCounter(ResultAnalyzerBase):
             triggering_positions (AnchorPoint, optional): the position(s) within the bounding box that trigger(s) the zone
             bounding_box_scale: scale factor used to resize bounding boxes
             iopa_threshold: intersection over polygon area (IoPA) threshold
+            use_tracking: If True, use tracking information to select objects
+                (object tracker must precede this analyzer in the pipeline)
             window_name (str, optional): optional OpenCV window name to configure for interactive zone adjustment
         """
 
@@ -183,6 +186,7 @@ class ZoneCounter(ResultAnalyzerBase):
         self._triggering_positions = triggering_positions
         self._bounding_box_scale = bounding_box_scale
         self._iopa_threshold = iopa_threshold
+        self._use_tracking = use_tracking
         self._polygons = [
             np.array(polygon, dtype=np.int32) for polygon in count_polygons
         ]
@@ -213,16 +217,25 @@ class ZoneCounter(ResultAnalyzerBase):
         if self._zones is None:
             return
 
-        def in_class_list(obj):
+        def in_class_list(label):
             return (
                 True
                 if self._class_list is None
-                else obj["label"] in self._class_list if "label" in obj else False
+                else False if label is None else label in self._class_list
             )
 
-        filtered_results = [
-            obj for obj in result.results if "bbox" in obj and in_class_list(obj)
-        ]
+        if self._use_tracking:
+            filtered_results = [
+                {"bbox": result.trails[tid][-1], "label": result.trail_classes[tid]}
+                for tid in set(result.trails.keys())
+                if in_class_list(result.trail_classes[tid])
+            ]
+        else:
+            filtered_results = [
+                obj
+                for obj in result.results
+                if "bbox" in obj and in_class_list(obj.get("label", None))
+            ]
 
         if len(filtered_results) == 0:
             return
