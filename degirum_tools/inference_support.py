@@ -218,6 +218,7 @@ def annotate_video(
     *,
     show_progress: bool = True,
     visual_display: bool = True,
+    show_ai_overlay: bool = True,
     fps: Optional[float] = None,
     analyzers: Union[ResultAnalyzerBase, List[ResultAnalyzerBase], None] = None,
 ):
@@ -233,6 +234,7 @@ def annotate_video(
         - YouTube video URL
         show_progress - when True, show text progress indicator
         visual_display - when True, show interactive video display with annotated video stream
+        show_ai_overlay - when True, apply image overlay to frame; when False, use original frame
         fps - optional fps cap. If greater than the actual FPS, it will do nothing.
            If less than the current fps, it will decimate frames accordingly.
         analyzers - optional analyzer or list of analyzers to be applied to model inference results
@@ -273,7 +275,7 @@ def annotate_video(
             progress = Progress(int(stream.get(cv2.CAP_PROP_FRAME_COUNT)))
 
         for res in model.predict_batch(video_source(stream, fps=video_fps)):
-            img = res.image_overlay
+            img = res.image_overlay if show_ai_overlay else res.image
 
             for analyzer in analyzer_list:
                 img = analyzer.analyze_and_annotate(res, img)

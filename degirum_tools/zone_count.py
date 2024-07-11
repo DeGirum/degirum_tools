@@ -62,7 +62,7 @@ class _PolygonZone:
 
         self.width, self.height = frame_resolution_wh
         self.mask = np.zeros((self.height + 1, self.width + 1))
-        cv2.fillPoly(self.mask, [polygon.astype(int)], color=[1])
+        cv2.fillPoly(self.mask, polygon.astype(int).tolist(), color=[1])
 
     def trigger(self, bboxes: np.ndarray) -> np.ndarray:
         """
@@ -215,7 +215,7 @@ class ZoneCounter(ResultAnalyzerBase):
         # draw annotations
         for zi in range(len(self._polygons)):
             cv2.polylines(
-                image, [self._polygons[zi]], True, line_color, result.overlay_line_width
+                image, [self._polygons[zi].tolist()], True, line_color, result.overlay_line_width
             )
 
             if self._per_class_display and self._class_list is not None:

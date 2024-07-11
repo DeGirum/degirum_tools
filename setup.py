@@ -36,20 +36,7 @@ setup(
         "License :: OSI Approved :: MIT License",
     ],
     install_requires=[
-        "numpy",
-        "scipy",
-        "pillow",
-        "python-dotenv",
-        "requests",
-        "psutil",
-        "opencv-python",
-        "degirum>=0.9.2",
-        "ipython",
-        "pafy",
-        "youtube-dl==2020.12.2",
-        "pycocotools",
-        "pyyaml",
-        "ffmpegcv;platform_system!='Windows'",
+        line for line in open("requirements.txt") if line and not line.startswith("#")
     ],
     python_requires=">=3.8",
     extras_require={
