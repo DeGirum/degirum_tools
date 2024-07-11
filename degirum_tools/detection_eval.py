@@ -152,14 +152,14 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
             keypoints.extend(float(x) for x in kypts)
             keypoints.append(kypts_score)
         return keypoints
-    
+
     @staticmethod
     def _run_length_encode(x):
         """Encode predicted masks as RLE for COCO evaluation."""
         rle = encode(np.asarray(x[:, :, None], order="F", dtype="uint8"))[0]
         rle["counts"] = rle["counts"].decode("utf-8")
         return rle
-    
+
     @staticmethod
     def _process_segmentation(segmentation_res: List[dict]) -> List[float]:
         """
@@ -201,11 +201,9 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
             # segmentation model addition
             if "mask" in result:
                 detected_elem["segmentation"] = (
-                    ObjectDetectionModelEvaluator._process_segmentation(
-                        result["mask"]
-                    )
+                    ObjectDetectionModelEvaluator._process_segmentation(result["mask"])
                 )
-            
+
             jdict.append(detected_elem)
             max_category_id = max(max_category_id, category_id)
         return max_category_id
@@ -241,7 +239,7 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
         Returns True if it is a pose model.
         """
         return True if "keypoints" in element else False
-    
+
     @staticmethod
     def _is_segmentation_model(element: dict):
         """Check if the it is a PySDK segmentation model
@@ -250,4 +248,8 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
 
         Returns True if it is a segmentation model.
         """
-        return True if ("segmentation" in element and "keypoints" not in element) else False
+        return (
+            True
+            if ("segmentation" in element and "keypoints" not in element)
+            else False
+        )
