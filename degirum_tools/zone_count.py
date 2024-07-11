@@ -79,7 +79,7 @@ class _PolygonZone:
 
         self.width, self.height = frame_resolution_wh
         self.mask = np.zeros((self.height + 1, self.width + 1))
-        cv2.fillPoly(self.mask, [polygon.astype(int)], color=[1])
+        cv2.fillPoly(self.mask, [cv2.Mat(polygon.astype(int))], color=[1])
         self.polygon = polygon.astype(np.float32)
         self.polygon_area = cv2.contourArea(polygon.reshape(1, -1, 2))
 
@@ -316,7 +316,11 @@ class ZoneCounter(ResultAnalyzerBase):
         # draw annotations
         for zi in range(len(self._polygons)):
             cv2.polylines(
-                image, [self._polygons[zi]], True, line_color, result.overlay_line_width
+                image,
+                [cv2.Mat(self._polygons[zi])],
+                True,
+                line_color,
+                result.overlay_line_width,
             )
 
             if self._per_class_display and self._class_list is not None:
