@@ -32,7 +32,7 @@
 
 
 import numpy as np, cv2
-from typing import Tuple, Optional, Any
+from typing import Tuple, Optional, Dict, Any
 from .ui_support import put_text, color_complement, deduce_text_color
 from .result_analyzer_base import ResultAnalyzerBase
 from .math_support import (
@@ -55,6 +55,7 @@ class _PolygonZone:
         triggering_positions: The position(s) within the bounding box that trigger(s) the zone
         bounding_box_scale: scale factor used to resize bounding boxes
         iopa_threshold: intersection over polygon area (IoPA) threshold
+        timeout_frames: number of frames to buffer when an object disappears from zone
         current_count (int): The current count of detected objects within the zone
         mask (np.ndarray): The 2D bool mask for the polygon zone
     """
@@ -66,11 +67,15 @@ class _PolygonZone:
         triggering_positions: list[AnchorPoint],
         bounding_box_scale: float,
         iopa_threshold: float,
+        timeout_frames: int,
     ):
         self.frame_resolution_wh = frame_resolution_wh
         self.triggering_positions = triggering_positions
         self.bounding_box_scale = bounding_box_scale
         self.iopa_threshold = iopa_threshold
+        self._timeout_count_dict: Dict[int, int] = {}
+        self._timeout_count_initial = timeout_frames
+        self._object_label_dict: Dict[int, str] = {}
 
         self.width, self.height = frame_resolution_wh
         self.mask = np.zeros((self.height + 1, self.width + 1))
@@ -156,6 +161,7 @@ class ZoneCounter(ResultAnalyzerBase):
         bounding_box_scale: float = 1.0,
         iopa_threshold: float = 0.0,
         use_tracking: bool = False,
+        timeout_frames: int = 1,
         window_name: Optional[str] = None,
     ):
         """Constructor
@@ -169,6 +175,7 @@ class ZoneCounter(ResultAnalyzerBase):
             iopa_threshold: intersection over polygon area (IoPA) threshold
             use_tracking: If True, use tracking information to select objects
                 (object tracker must precede this analyzer in the pipeline)
+            timeout_frames: number of frames to buffer when an object disappears from zone
             window_name (str, optional): optional OpenCV window name to configure for interactive zone adjustment
         """
 
@@ -187,6 +194,7 @@ class ZoneCounter(ResultAnalyzerBase):
         self._bounding_box_scale = bounding_box_scale
         self._iopa_threshold = iopa_threshold
         self._use_tracking = use_tracking
+        self._timeout_frames = timeout_frames
         self._polygons = [
             np.array(polygon, dtype=np.int32) for polygon in count_polygons
         ]
@@ -224,18 +232,25 @@ class ZoneCounter(ResultAnalyzerBase):
                 else False if label is None else label in self._class_list
             )
 
+        filtered_results = [
+            obj
+            for obj in result.results
+            if "bbox" in obj and in_class_list(obj.get("label", None))
+        ]
+
         if self._use_tracking:
-            filtered_results = [
-                {"bbox": result.trails[tid][-1], "label": result.trail_classes[tid]}
+            filtered_results = [obj for obj in filtered_results if "track_id" in obj]
+            active_tids = [obj["track_id"] for obj in filtered_results]
+            lost_results = [
+                {
+                    "bbox": result.trails[tid][-1],
+                    "label": result.trail_classes[tid],
+                    "track_id": tid,
+                }
                 for tid in set(result.trails.keys())
-                if in_class_list(result.trail_classes[tid])
+                if tid not in active_tids and in_class_list(result.trail_classes[tid])
             ]
-        else:
-            filtered_results = [
-                obj
-                for obj in result.results
-                if "bbox" in obj and in_class_list(obj.get("label", None))
-            ]
+            filtered_results.extend(lost_results)
 
         if len(filtered_results) == 0:
             return
@@ -245,6 +260,9 @@ class ZoneCounter(ResultAnalyzerBase):
         for zi, zone in enumerate(self._zones):
             triggers = zone.trigger(bboxes)
             zone_counts = result.zone_counts[zi]
+            if self._use_tracking:
+                all_tids_in_zone = []
+
             for obj, flag in zip(filtered_results, triggers):
                 if flag:
                     obj["in_zone"] = zi
@@ -254,6 +272,31 @@ class ZoneCounter(ResultAnalyzerBase):
                         else "total"
                     )
                     zone_counts[label] = zone_counts.get(label, 0) + 1
+                    if self._use_tracking:
+                        tid = obj["track_id"]
+                        zone._timeout_count_dict[tid] = zone._timeout_count_initial
+                        zone._object_label_dict[tid] = obj["label"]
+                        all_tids_in_zone.append(tid)
+
+            if self._use_tracking:
+                inactive_set = set(zone._timeout_count_dict.keys())
+                if len(all_tids_in_zone) > 0:
+                    inactive_set -= set(all_tids_in_zone)
+
+                for tid in inactive_set:
+                    zone._timeout_count_dict[tid] -= 1
+                    if zone._timeout_count_dict[tid] == 0:
+                        del (
+                            zone._timeout_count_dict[tid],
+                            zone._object_label_dict[tid],
+                        )
+                    else:
+                        label = (
+                            zone._object_label_dict[tid]
+                            if self._per_class_display
+                            else "total"
+                        )
+                        zone_counts[label] = zone_counts.get(label, 0) + 1
 
     def annotate(self, result, image: np.ndarray) -> np.ndarray:
         """
@@ -323,6 +366,7 @@ class ZoneCounter(ResultAnalyzerBase):
                     self._triggering_positions,
                     self._bounding_box_scale,
                     self._iopa_threshold,
+                    self._timeout_frames,
                 )
                 for polygon in self._polygons
             ]
@@ -344,6 +388,7 @@ class ZoneCounter(ResultAnalyzerBase):
                     self._triggering_positions,
                     self._bounding_box_scale,
                     self._iopa_threshold,
+                    self._timeout_frames,
                 )
 
         if event == cv2.EVENT_LBUTTONDOWN:
