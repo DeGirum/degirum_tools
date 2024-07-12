@@ -782,23 +782,19 @@ class _Tracer:
     Class to keep traces of tracked objects in video stream
     """
 
-    def __init__(
-        self, timeout_frames: int, trail_depth: int, anchor_point: AnchorPoint
-    ) -> None:
+    def __init__(self, timeout_frames: int, trail_depth: int) -> None:
         """
         Constructor
 
         Args:
             timeout_frames (int): number of frames to keep inactive track
             trail_depth (int): number of frames in a trace to keep
-            anchor_point (AnchorPoint): bbox anchor point to be used for tracing
         """
         self._timeout_count_dict: Dict[int, int] = {}
         self.active_trails: Dict[int, list] = {}
         self.trail_classes: Dict[int, str] = {}
         self._timeout_count_initial = timeout_frames
         self._trace_depth = trail_depth
-        self._anchor_point = anchor_point
 
     def update(self, result):
         """
@@ -864,8 +860,8 @@ class ObjectTracker(ResultAnalyzerBase):
     track ID.
 
     If the `trail_depth` constructor parameter is not zero, also adds `trails` dictionary to the
-    `result` object. This dictionary is keyed by track IDs and contains lists of trail (x,y)
-    coordinates of object anchor points for every active trail.
+    `result` object. This dictionary is keyed by track IDs and contains lists of (x1, y1, x2, y2)
+    coordinates of object bounding boxes for every active trail.
 
     """
 
@@ -887,7 +883,7 @@ class ObjectTracker(ResultAnalyzerBase):
             track_thresh (float, optional): Detection confidence threshold for track activation.
             track_buffer (int, optional): Number of frames to buffer when a track is lost.
             match_thresh (float, optional): IOU threshold for matching tracks with detections.
-            anchor_point (AnchorPoint, optional): bbox anchor point to be used for tracing object trails
+            anchor_point (AnchorPoint, optional): bbox anchor point to be used for showing object trails
             trail_depth (int, optional): number of frames in object trail to keep; 0 to disable tracing
             show_overlay (bool, optional): if True, annotate image; if False, send through original image
         """
@@ -895,9 +891,7 @@ class ObjectTracker(ResultAnalyzerBase):
         self._anchor_point = anchor_point
         self._show_overlay = show_overlay
         self._tracer: Optional[_Tracer] = (
-            _Tracer(track_buffer, trail_depth, anchor_point)
-            if trail_depth > 0
-            else None
+            _Tracer(track_buffer, trail_depth) if trail_depth > 0 else None
         )
 
     def analyze(self, result):
@@ -905,7 +899,7 @@ class ObjectTracker(ResultAnalyzerBase):
         Track object bounding boxes.
         Updates each element of `result.results[]` by adding the `track_id` key - unique track ID of the detected object
         If trail_depth is not zero, also adds `trails` dictionary to result object. This dictionary is keyed by track IDs
-        and contains lists of trail (x,y) coordinates for every active trail.
+        and contains lists of (x1, y1, x2, y2) coordinates of object bounding boxes for every active trail.
         Also adds `trail_classes` dictionary to result object. This dictionary is keyed by track IDs and contains
         object class labels for every active trail.
 
@@ -922,7 +916,8 @@ class ObjectTracker(ResultAnalyzerBase):
 
     def annotate(self, result, image: np.ndarray) -> np.ndarray:
         """
-        Display polygon zones and zone counts on a given image
+        Display track IDs inside bounding boxes on a given image if tracing is disabled, trails computed using
+        the specified bbox anchor point otherwise
 
         Args:
             result: PySDK result object to display (should be the same as used in analyze() method)

@@ -32,7 +32,7 @@
 
 
 import numpy as np, cv2
-from typing import Tuple, Optional, Dict, Any
+from typing import Tuple, Optional, Dict, List, Any
 from .ui_support import put_text, color_complement, deduce_text_color
 from .result_analyzer_base import ResultAnalyzerBase
 from .math_support import (
@@ -40,7 +40,7 @@ from .math_support import (
     get_anchor_coordinates,
     xyxy2xywh,
     xywh2xyxy,
-    xyxy2xyxyxyxy,
+    tlbr2allcorners,
 )
 
 
@@ -52,10 +52,14 @@ class _PolygonZone:
         polygon (np.ndarray): A polygon represented by a numpy array of shape
             `(N, 2)`, containing the `x`, `y` coordinates of the points.
         frame_resolution_wh (Tuple[int, int]): The frame resolution (width, height)
-        triggering_positions: The position(s) within the bounding box that trigger(s) the zone
-        bounding_box_scale: scale factor used to resize bounding boxes
-        iopa_threshold: intersection over polygon area (IoPA) threshold
-        timeout_frames: number of frames to buffer when an object disappears from zone
+        triggering_positions (List[AnchorPoint], optional): the position(s) within the bounding box that trigger(s) the zone;
+            if None, iopa_threshold is used and must be specified
+        bounding_box_scale (float): scale factor used to downsize detection result bounding boxes before zone
+            triggering is performed, no matter whether triggering positions or IoPA is used; useful when only a portion
+            of a detected object (a "critical mass") inside a bounding box should trigger the zone
+        iopa_threshold (float, optional): intersection over polygon area (IoPA) threshold; if triggering_positions is None,
+            IoPA of bounding boxes greater than this threshold triggers the zone, otherwise this method is not used
+        timeout_frames (int, optional): number of frames to buffer when an object disappears from zone
         current_count (int): The current count of detected objects within the zone
         mask (np.ndarray): The 2D bool mask for the polygon zone
     """
@@ -64,10 +68,10 @@ class _PolygonZone:
         self,
         polygon: np.ndarray,
         frame_resolution_wh: Tuple[int, int],
-        triggering_positions: list[AnchorPoint],
-        bounding_box_scale: float,
-        iopa_threshold: float,
-        timeout_frames: int,
+        triggering_positions: Optional[List[AnchorPoint]],
+        bounding_box_scale: float = 1.0,
+        iopa_threshold: Optional[float] = 0.0,
+        timeout_frames: Optional[int] = 1,
     ):
         self.frame_resolution_wh = frame_resolution_wh
         self.triggering_positions = triggering_positions
@@ -108,7 +112,7 @@ class _PolygonZone:
         if self.triggering_positions is None:
             # trigger zones based on IoPA
             iopa = np.zeros((bboxes.shape[0]), dtype=float)
-            bboxes_corners = xyxy2xyxyxyxy(bboxes).astype(np.float32)
+            bboxes_corners = tlbr2allcorners(bboxes).astype(np.float32)
             for i in range(len(bboxes_corners)):
                 iopa[i] = cv2.intersectConvexConvex(
                     bboxes_corners[i].reshape(-1, 2), self.polygon
@@ -155,32 +159,36 @@ class ZoneCounter(ResultAnalyzerBase):
         self,
         count_polygons: np.ndarray,
         *,
-        class_list: Optional[list] = None,
-        per_class_display: bool = False,
-        triggering_positions: list[AnchorPoint] = [AnchorPoint.BOTTOM_CENTER],
+        class_list: Optional[List] = None,
+        per_class_display: Optional[bool] = False,
+        triggering_positions: Optional[List[AnchorPoint]] = [AnchorPoint.BOTTOM_CENTER],
         bounding_box_scale: float = 1.0,
-        iopa_threshold: float = 0.0,
-        use_tracking: bool = False,
-        timeout_frames: int = 1,
+        iopa_threshold: Optional[float] = 0.0,
+        use_tracking: Optional[bool] = False,
+        timeout_frames: Optional[int] = 1,
         window_name: Optional[str] = None,
     ):
         """Constructor
 
         Args:
             count_polygons (nd.array): list of polygons to count objects in; each polygon is a list of points (x,y)
-            class_list (list, optional): list of classes to count; if None, all classes are counted
+            class_list (List, optional): list of classes to count; if None, all classes are counted
             per_class_display (bool, optional): when True, display zone counts per class, otherwise display total zone counts
-            triggering_positions (AnchorPoint, optional): the position(s) within the bounding box that trigger(s) the zone
-            bounding_box_scale: scale factor used to resize bounding boxes
-            iopa_threshold: intersection over polygon area (IoPA) threshold
-            use_tracking: If True, use tracking information to select objects
+            triggering_positions (List[AnchorPoint], optional): the position(s) within the bounding box that trigger(s) the zone;
+                if None, iopa_threshold is used and must be specified
+            bounding_box_scale (float): scale factor used to downsize detection result bounding boxes before zone
+                triggering is performed, no matter whether triggering positions or IoPA is used; useful when only a portion
+                of a detected object (a "critical mass") inside a bounding box should trigger the zone
+            iopa_threshold (float, optional): intersection over polygon area (IoPA) threshold; if triggering_positions is None,
+                IoPA of bounding boxes greater than this threshold triggers the zone, otherwise this method is not used
+            use_tracking (bool, optional): If True, use tracking information to select objects
                 (object tracker must precede this analyzer in the pipeline)
-            timeout_frames: number of frames to buffer when an object disappears from zone
+            timeout_frames (int, optional): number of frames to buffer when an object disappears from zone
             window_name (str, optional): optional OpenCV window name to configure for interactive zone adjustment
         """
 
         self._wh: Optional[Tuple] = None
-        self._zones: Optional[list] = None
+        self._zones: Optional[List] = None
         self._win_name = window_name
         self._mouse_callback_installed = False
         self._class_list = class_list

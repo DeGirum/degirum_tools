@@ -96,7 +96,7 @@ def xyxy2xywh(x: np.ndarray) -> np.ndarray:
     return y
 
 
-def xyxy2xyxyxyxy(x: np.ndarray) -> np.ndarray:
+def tlbr2allcorners(x: np.ndarray) -> np.ndarray:
     """
     Convert bounding box coordinates from (x1, y1, x2, y2) format to (x1, y1, x2, y2, x3, y3, x4, y4) format where (x1, y1) is the
     top-left corner and (x2, y2) is the bottom-right corner of the input bounding box, and x1-x4, y1-y4 correspond to the four corners
