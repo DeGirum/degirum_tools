@@ -54,7 +54,7 @@ class _PolygonZone:
         frame_resolution_wh (Tuple[int, int]): The frame resolution (width, height)
         triggering_positions (List[AnchorPoint], optional): the position(s) within the bounding box that trigger(s) the zone;
             if None, iopa_threshold is used and must be specified
-        bounding_box_scale (float): scale factor used to downsize detection result bounding boxes before zone
+        bounding_box_scale (float, optional): scale factor used to downsize detection result bounding boxes before zone
             triggering is performed, no matter whether triggering positions or IoPA is used; useful when only a portion
             of a detected object (a "critical mass") inside a bounding box should trigger the zone
         iopa_threshold (float, optional): intersection over polygon area (IoPA) threshold; if triggering_positions is None,
@@ -70,8 +70,8 @@ class _PolygonZone:
         frame_resolution_wh: Tuple[int, int],
         triggering_positions: Optional[List[AnchorPoint]],
         bounding_box_scale: float = 1.0,
-        iopa_threshold: Optional[float] = 0.0,
-        timeout_frames: Optional[int] = 1,
+        iopa_threshold: float = 0.0,
+        timeout_frames: int = 1,
     ):
         self.frame_resolution_wh = frame_resolution_wh
         self.triggering_positions = triggering_positions
@@ -163,9 +163,9 @@ class ZoneCounter(ResultAnalyzerBase):
         per_class_display: Optional[bool] = False,
         triggering_positions: Optional[List[AnchorPoint]] = [AnchorPoint.BOTTOM_CENTER],
         bounding_box_scale: float = 1.0,
-        iopa_threshold: Optional[float] = 0.0,
+        iopa_threshold: float = 0.0,
         use_tracking: Optional[bool] = False,
-        timeout_frames: Optional[int] = 1,
+        timeout_frames: int = 1,
         window_name: Optional[str] = None,
     ):
         """Constructor
@@ -176,7 +176,7 @@ class ZoneCounter(ResultAnalyzerBase):
             per_class_display (bool, optional): when True, display zone counts per class, otherwise display total zone counts
             triggering_positions (List[AnchorPoint], optional): the position(s) within the bounding box that trigger(s) the zone;
                 if None, iopa_threshold is used and must be specified
-            bounding_box_scale (float): scale factor used to downsize detection result bounding boxes before zone
+            bounding_box_scale (float, optional): scale factor used to downsize detection result bounding boxes before zone
                 triggering is performed, no matter whether triggering positions or IoPA is used; useful when only a portion
                 of a detected object (a "critical mass") inside a bounding box should trigger the zone
             iopa_threshold (float, optional): intersection over polygon area (IoPA) threshold; if triggering_positions is None,
