@@ -71,7 +71,7 @@ class _PolygonZone:
         triggering_positions: Optional[List[AnchorPoint]],
         bounding_box_scale: float = 1.0,
         iopa_threshold: float = 0.0,
-        timeout_frames: int = 1,
+        timeout_frames: int = 0,
     ):
         self.frame_resolution_wh = frame_resolution_wh
         self.triggering_positions = triggering_positions
@@ -165,7 +165,7 @@ class ZoneCounter(ResultAnalyzerBase):
         bounding_box_scale: float = 1.0,
         iopa_threshold: float = 0.0,
         use_tracking: Optional[bool] = False,
-        timeout_frames: int = 1,
+        timeout_frames: int = 0,
         window_name: Optional[str] = None,
     ):
         """Constructor
@@ -248,17 +248,18 @@ class ZoneCounter(ResultAnalyzerBase):
 
         if self._use_tracking:
             filtered_results = [obj for obj in filtered_results if "track_id" in obj]
-            active_tids = [obj["track_id"] for obj in filtered_results]
-            lost_results = [
-                {
-                    "bbox": result.trails[tid][-1],
-                    "label": result.trail_classes[tid],
-                    "track_id": tid,
-                }
-                for tid in set(result.trails.keys())
-                if tid not in active_tids and in_class_list(result.trail_classes[tid])
-            ]
-            filtered_results.extend(lost_results)
+            if hasattr(result, "trails"):
+                active_tids = [obj["track_id"] for obj in filtered_results]
+                lost_results = [
+                    {
+                        "bbox": result.trails[tid][-1],
+                        "label": result.trail_classes[tid],
+                        "track_id": tid,
+                    }
+                    for tid in set(result.trails.keys())
+                    if tid not in active_tids and in_class_list(result.trail_classes[tid])
+                ]
+                filtered_results.extend(lost_results)
 
         if len(filtered_results) == 0:
             return
@@ -268,7 +269,7 @@ class ZoneCounter(ResultAnalyzerBase):
         for zi, zone in enumerate(self._zones):
             triggers = zone.trigger(bboxes)
             zone_counts = result.zone_counts[zi]
-            if self._use_tracking:
+            if self._use_tracking and self._timeout_frames > 0:
                 all_tids_in_zone = []
 
             for obj, flag in zip(filtered_results, triggers):
@@ -280,13 +281,13 @@ class ZoneCounter(ResultAnalyzerBase):
                         else "total"
                     )
                     zone_counts[label] = zone_counts.get(label, 0) + 1
-                    if self._use_tracking:
+                    if self._use_tracking and self._timeout_frames > 0:
                         tid = obj["track_id"]
                         zone._timeout_count_dict[tid] = zone._timeout_count_initial
                         zone._object_label_dict[tid] = obj["label"]
                         all_tids_in_zone.append(tid)
 
-            if self._use_tracking:
+            if self._use_tracking and self._timeout_frames > 0:
                 inactive_set = set(zone._timeout_count_dict.keys())
                 if len(all_tids_in_zone) > 0:
                     inactive_set -= set(all_tids_in_zone)
