@@ -489,7 +489,7 @@ class ResizingGizmo(Gizmo):
         - allow_drop: allow dropping frames from input stream on overflow
         """
         super().__init__([(stream_depth, allow_drop)])
-        self._h = w
+        self._h = h
         self._w = w
         self._pad_method = pad_method
         self._resize_method = resize_method
