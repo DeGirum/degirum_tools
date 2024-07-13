@@ -257,7 +257,8 @@ class ZoneCounter(ResultAnalyzerBase):
                         "track_id": tid,
                     }
                     for tid in set(result.trails.keys())
-                    if tid not in active_tids and in_class_list(result.trail_classes[tid])
+                    if tid not in active_tids
+                    and in_class_list(result.trail_classes[tid])
                 ]
                 filtered_results.extend(lost_results)
 

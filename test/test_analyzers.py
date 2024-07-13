@@ -315,7 +315,7 @@ def test_zone_counter():
             "params": {
                 "count_polygons": zones,
                 "triggering_positions": [AnchorPoint.TOP_RIGHT],
-                "use_tracking": False
+                "use_tracking": False,
             },
             "inp": [[]],
             "res": [[[], [{}, {}]]],
@@ -325,22 +325,50 @@ def test_zone_counter():
             "params": {
                 "count_polygons": zones,
                 "triggering_positions": [AnchorPoint.TOP_RIGHT],
-                "use_tracking": False
+                "use_tracking": False,
             },
-            "inp": [[{"bbox": box_1_zone_1, "label": "label1"}, {"bbox": box_2_zone_1, "label": "label2"}, {"bbox": box_1_zone_2, "label": "label3"}]],
-            "res": [[[{"bbox": box_1_zone_1, "label": "label1", "in_zone": 0}, {"bbox": box_2_zone_1, "label": "label2"}, {"bbox": box_1_zone_2, "label": "label3"}],
-                     [{"total": 1}, {}]]],
+            "inp": [
+                [
+                    {"bbox": box_1_zone_1, "label": "label1"},
+                    {"bbox": box_2_zone_1, "label": "label2"},
+                    {"bbox": box_1_zone_2, "label": "label3"},
+                ]
+            ],
+            "res": [
+                [
+                    [
+                        {"bbox": box_1_zone_1, "label": "label1", "in_zone": 0},
+                        {"bbox": box_2_zone_1, "label": "label2"},
+                        {"bbox": box_1_zone_2, "label": "label3"},
+                    ],
+                    [{"total": 1}, {}],
+                ]
+            ],
         },
         # multiple triggers
         {
             "params": {
                 "count_polygons": zones,
                 "triggering_positions": [AnchorPoint.TOP_RIGHT, AnchorPoint.TOP_LEFT],
-                "use_tracking": False
+                "use_tracking": False,
             },
-            "inp": [[{"bbox": box_1_zone_1, "label": "label1"}, {"bbox": box_2_zone_1, "label": "label2"}, {"bbox": box_1_zone_2, "label": "label3"}]],
-            "res": [[[{"bbox": box_1_zone_1, "label": "label1", "in_zone": 0}, {"bbox": box_2_zone_1, "label": "label2", "in_zone": 0}, {"bbox": box_1_zone_2, "label": "label3"}],
-                     [{"total": 2}, {}]]],
+            "inp": [
+                [
+                    {"bbox": box_1_zone_1, "label": "label1"},
+                    {"bbox": box_2_zone_1, "label": "label2"},
+                    {"bbox": box_1_zone_2, "label": "label3"},
+                ]
+            ],
+            "res": [
+                [
+                    [
+                        {"bbox": box_1_zone_1, "label": "label1", "in_zone": 0},
+                        {"bbox": box_2_zone_1, "label": "label2", "in_zone": 0},
+                        {"bbox": box_1_zone_2, "label": "label3"},
+                    ],
+                    [{"total": 2}, {}],
+                ]
+            ],
         },
         # multiple triggers, defined class list
         {
@@ -348,11 +376,25 @@ def test_zone_counter():
                 "class_list": ["label1"],
                 "count_polygons": zones,
                 "triggering_positions": [AnchorPoint.TOP_RIGHT, AnchorPoint.TOP_LEFT],
-                "use_tracking": False
+                "use_tracking": False,
             },
-            "inp": [[{"bbox": box_1_zone_1, "label": "label1"}, {"bbox": box_2_zone_1, "label": "label2"}, {"bbox": box_1_zone_2, "label": "label3"}]],
-            "res": [[[{"bbox": box_1_zone_1, "label": "label1", "in_zone": 0}, {"bbox": box_2_zone_1, "label": "label2"}, {"bbox": box_1_zone_2, "label": "label3"}],
-                     [{"total": 1}, {}]]],
+            "inp": [
+                [
+                    {"bbox": box_1_zone_1, "label": "label1"},
+                    {"bbox": box_2_zone_1, "label": "label2"},
+                    {"bbox": box_1_zone_2, "label": "label3"},
+                ]
+            ],
+            "res": [
+                [
+                    [
+                        {"bbox": box_1_zone_1, "label": "label1", "in_zone": 0},
+                        {"bbox": box_2_zone_1, "label": "label2"},
+                        {"bbox": box_1_zone_2, "label": "label3"},
+                    ],
+                    [{"total": 1}, {}],
+                ]
+            ],
         },
         # one trigger, bbox scaling
         {
@@ -360,11 +402,25 @@ def test_zone_counter():
                 "count_polygons": zones,
                 "triggering_positions": [AnchorPoint.TOP_RIGHT],
                 "bounding_box_scale": 0.5,
-                "use_tracking": False
+                "use_tracking": False,
             },
-            "inp": [[{"bbox": box_1_zone_1, "label": "label1"}, {"bbox": box_2_zone_1, "label": "label2"}, {"bbox": box_1_zone_2, "label": "label3"}]],
-            "res": [[[{"bbox": box_1_zone_1, "label": "label1"}, {"bbox": box_2_zone_1, "label": "label2", "in_zone": 0}, {"bbox": box_1_zone_2, "label": "label3"}],
-                     [{"total": 1}, {}]]],
+            "inp": [
+                [
+                    {"bbox": box_1_zone_1, "label": "label1"},
+                    {"bbox": box_2_zone_1, "label": "label2"},
+                    {"bbox": box_1_zone_2, "label": "label3"},
+                ]
+            ],
+            "res": [
+                [
+                    [
+                        {"bbox": box_1_zone_1, "label": "label1"},
+                        {"bbox": box_2_zone_1, "label": "label2", "in_zone": 0},
+                        {"bbox": box_1_zone_2, "label": "label3"},
+                    ],
+                    [{"total": 1}, {}],
+                ]
+            ],
         },
         # IoPA
         {
@@ -372,11 +428,25 @@ def test_zone_counter():
                 "count_polygons": zones,
                 "triggering_positions": None,
                 "iopa_threshold": 0.2,
-                "use_tracking": False
+                "use_tracking": False,
             },
-            "inp": [[{"bbox": box_1_zone_1, "label": "label1"}, {"bbox": box_2_zone_1, "label": "label2"}, {"bbox": box_1_zone_2, "label": "label3"}]],
-            "res": [[[{"bbox": box_1_zone_1, "label": "label1"}, {"bbox": box_2_zone_1, "label": "label2", "in_zone": 0}, {"bbox": box_1_zone_2, "label": "label3", "in_zone": 1}],
-                     [{"total": 1}, {"total": 1}]]],
+            "inp": [
+                [
+                    {"bbox": box_1_zone_1, "label": "label1"},
+                    {"bbox": box_2_zone_1, "label": "label2"},
+                    {"bbox": box_1_zone_2, "label": "label3"},
+                ]
+            ],
+            "res": [
+                [
+                    [
+                        {"bbox": box_1_zone_1, "label": "label1"},
+                        {"bbox": box_2_zone_1, "label": "label2", "in_zone": 0},
+                        {"bbox": box_1_zone_2, "label": "label3", "in_zone": 1},
+                    ],
+                    [{"total": 1}, {"total": 1}],
+                ]
+            ],
         },
         # IoPA, bbox scaling
         {
@@ -385,11 +455,25 @@ def test_zone_counter():
                 "triggering_positions": None,
                 "bounding_box_scale": 0.5,
                 "iopa_threshold": 0.2,
-                "use_tracking": False
+                "use_tracking": False,
             },
-            "inp": [[{"bbox": box_1_zone_1, "label": "label1"}, {"bbox": box_2_zone_1, "label": "label2"}, {"bbox": box_1_zone_2, "label": "label3"}]],
-            "res": [[[{"bbox": box_1_zone_1, "label": "label1"}, {"bbox": box_2_zone_1, "label": "label2"}, {"bbox": box_1_zone_2, "label": "label3", "in_zone": 1}],
-                     [{}, {"total": 1}]]],
+            "inp": [
+                [
+                    {"bbox": box_1_zone_1, "label": "label1"},
+                    {"bbox": box_2_zone_1, "label": "label2"},
+                    {"bbox": box_1_zone_2, "label": "label3"},
+                ]
+            ],
+            "res": [
+                [
+                    [
+                        {"bbox": box_1_zone_1, "label": "label1"},
+                        {"bbox": box_2_zone_1, "label": "label2"},
+                        {"bbox": box_1_zone_2, "label": "label3", "in_zone": 1},
+                    ],
+                    [{}, {"total": 1}],
+                ]
+            ],
         },
         # ----------------------------------------------------------------
         # With tracking
@@ -399,7 +483,7 @@ def test_zone_counter():
             "params": {
                 "count_polygons": zones,
                 "triggering_positions": [AnchorPoint.TOP_RIGHT],
-                "use_tracking": True
+                "use_tracking": True,
             },
             "inp": [[[]]],
             "res": [[[], [{}, {}]]],
@@ -409,36 +493,133 @@ def test_zone_counter():
             "params": {
                 "count_polygons": zones,
                 "triggering_positions": [AnchorPoint.TOP_RIGHT],
-                "use_tracking": True
+                "use_tracking": True,
             },
-            "inp": [[[{"bbox": box_1_zone_1, "label": "label1"}, {"bbox": box_2_zone_1, "label": "label2"}, {"bbox": box_1_zone_2, "label": "label3"}]]],
-            "res": [[[{"bbox": box_1_zone_1, "label": "label1"}, {"bbox": box_2_zone_1, "label": "label2"}, {"bbox": box_1_zone_2, "label": "label3"}],
-                     [{}, {}]]],
+            "inp": [
+                [
+                    [
+                        {"bbox": box_1_zone_1, "label": "label1"},
+                        {"bbox": box_2_zone_1, "label": "label2"},
+                        {"bbox": box_1_zone_2, "label": "label3"},
+                    ]
+                ]
+            ],
+            "res": [
+                [
+                    [
+                        {"bbox": box_1_zone_1, "label": "label1"},
+                        {"bbox": box_2_zone_1, "label": "label2"},
+                        {"bbox": box_1_zone_2, "label": "label3"},
+                    ],
+                    [{}, {}],
+                ]
+            ],
         },
         # one trigger, object disappears and appears again
         {
             "params": {
                 "count_polygons": zones,
                 "triggering_positions": [AnchorPoint.TOP_RIGHT],
-                "use_tracking": True
+                "use_tracking": True,
             },
-            "inp": [[[{"bbox": box_1_zone_1, "label": "label1", "track_id": 0}, {"bbox": box_2_zone_1, "label": "label2", "track_id": 1}, {"bbox": box_1_zone_2, "label": "label3", "track_id": 2}],
-                     [{0: [np.array(box_1_zone_1, dtype=np.int32)], 1: [np.array(box_2_zone_1, dtype=np.int32)], 2: [np.array(box_1_zone_2, dtype=np.int32)]}],
-                     [{0: "label1", 1: "label2", 2: "label3"}]],
-                    [[{"bbox": box_2_zone_1, "label": "label2", "track_id": 1}, {"bbox": box_1_zone_2, "label": "label3", "track_id": 2}],
-                     [{0: [np.array(box_1_zone_1, dtype=np.int32)], 1: [np.array(box_2_zone_1, dtype=np.int32), np.array(box_2_zone_1, dtype=np.int32)], 2: [np.array(box_1_zone_2, dtype=np.int32), np.array(box_1_zone_2, dtype=np.int32)]}],
-                     [{0: "label1", 1: "label2", 2: "label3"}]],
-                    [[{"bbox": box_1_zone_1, "label": "label1", "track_id": 0}, {"bbox": box_2_zone_1, "label": "label2", "track_id": 1}, {"bbox": box_1_zone_2, "label": "label3", "track_id": 2}],
-                     [{0: [np.array(box_1_zone_1, dtype=np.int32), np.array(box_1_zone_1, dtype=np.int32)], 1: [np.array(box_2_zone_1, dtype=np.int32), np.array(box_2_zone_1, dtype=np.int32), np.array(box_2_zone_1, dtype=np.int32)], 2: [np.array(box_1_zone_2, dtype=np.int32), np.array(box_1_zone_2, dtype=np.int32), np.array(box_1_zone_2, dtype=np.int32)]}],
-                     [{0: "label1", 1: "label2", 2: "label3"}]]
+            "inp": [
+                [
+                    [
+                        {"bbox": box_1_zone_1, "label": "label1", "track_id": 0},
+                        {"bbox": box_2_zone_1, "label": "label2", "track_id": 1},
+                        {"bbox": box_1_zone_2, "label": "label3", "track_id": 2},
                     ],
-            "res": [[[{"bbox": box_1_zone_1, "label": "label1", "track_id": 0, "in_zone": 0}, {"bbox": box_2_zone_1, "label": "label2", "track_id": 1}, {"bbox": box_1_zone_2, "label": "label3", "track_id": 2}],
-                     [{"total": 1}, {}]],
-                    [[{"bbox": box_2_zone_1, "label": "label2", "track_id": 1}, {"bbox": box_1_zone_2, "label": "label3", "track_id": 2}],
-                     [{"total": 1}, {}]],
-                    [[{"bbox": box_1_zone_1, "label": "label1", "track_id": 0, "in_zone": 0}, {"bbox": box_2_zone_1, "label": "label2", "track_id": 1}, {"bbox": box_1_zone_2, "label": "label3", "track_id": 2}],
-                     [{"total": 1}, {}]]
+                    [
+                        {
+                            0: [np.array(box_1_zone_1, dtype=np.int32)],
+                            1: [np.array(box_2_zone_1, dtype=np.int32)],
+                            2: [np.array(box_1_zone_2, dtype=np.int32)],
+                        }
                     ],
+                    [{0: "label1", 1: "label2", 2: "label3"}],
+                ],
+                [
+                    [
+                        {"bbox": box_2_zone_1, "label": "label2", "track_id": 1},
+                        {"bbox": box_1_zone_2, "label": "label3", "track_id": 2},
+                    ],
+                    [
+                        {
+                            0: [np.array(box_1_zone_1, dtype=np.int32)],
+                            1: [
+                                np.array(box_2_zone_1, dtype=np.int32),
+                                np.array(box_2_zone_1, dtype=np.int32),
+                            ],
+                            2: [
+                                np.array(box_1_zone_2, dtype=np.int32),
+                                np.array(box_1_zone_2, dtype=np.int32),
+                            ],
+                        }
+                    ],
+                    [{0: "label1", 1: "label2", 2: "label3"}],
+                ],
+                [
+                    [
+                        {"bbox": box_1_zone_1, "label": "label1", "track_id": 0},
+                        {"bbox": box_2_zone_1, "label": "label2", "track_id": 1},
+                        {"bbox": box_1_zone_2, "label": "label3", "track_id": 2},
+                    ],
+                    [
+                        {
+                            0: [
+                                np.array(box_1_zone_1, dtype=np.int32),
+                                np.array(box_1_zone_1, dtype=np.int32),
+                            ],
+                            1: [
+                                np.array(box_2_zone_1, dtype=np.int32),
+                                np.array(box_2_zone_1, dtype=np.int32),
+                                np.array(box_2_zone_1, dtype=np.int32),
+                            ],
+                            2: [
+                                np.array(box_1_zone_2, dtype=np.int32),
+                                np.array(box_1_zone_2, dtype=np.int32),
+                                np.array(box_1_zone_2, dtype=np.int32),
+                            ],
+                        }
+                    ],
+                    [{0: "label1", 1: "label2", 2: "label3"}],
+                ],
+            ],
+            "res": [
+                [
+                    [
+                        {
+                            "bbox": box_1_zone_1,
+                            "label": "label1",
+                            "track_id": 0,
+                            "in_zone": 0,
+                        },
+                        {"bbox": box_2_zone_1, "label": "label2", "track_id": 1},
+                        {"bbox": box_1_zone_2, "label": "label3", "track_id": 2},
+                    ],
+                    [{"total": 1}, {}],
+                ],
+                [
+                    [
+                        {"bbox": box_2_zone_1, "label": "label2", "track_id": 1},
+                        {"bbox": box_1_zone_2, "label": "label3", "track_id": 2},
+                    ],
+                    [{"total": 1}, {}],
+                ],
+                [
+                    [
+                        {
+                            "bbox": box_1_zone_1,
+                            "label": "label1",
+                            "track_id": 0,
+                            "in_zone": 0,
+                        },
+                        {"bbox": box_2_zone_1, "label": "label2", "track_id": 1},
+                        {"bbox": box_1_zone_2, "label": "label3", "track_id": 2},
+                    ],
+                    [{"total": 1}, {}],
+                ],
+            ],
         },
     ]
 
@@ -448,9 +629,12 @@ def test_zone_counter():
         for i, input in enumerate(case["inp"]):
             inference_results = input[0] if case["params"]["use_tracking"] else input
             result = dg.postprocessor.InferenceResults(
-                model_params=None, input_image=np.zeros((200, 200)), inference_results=inference_results, conversion=None
+                model_params=None,
+                input_image=np.zeros((200, 200)),
+                inference_results=inference_results,
+                conversion=None,
             )
-            if case["params"]["use_tracking"] == True:
+            if case["params"]["use_tracking"]:
                 if len(input) == 3:
                     result.trails = input[1][0]
                     result.trail_classes = input[2][0]
