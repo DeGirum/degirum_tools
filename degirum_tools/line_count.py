@@ -12,7 +12,7 @@ from typing import List, Dict
 from copy import deepcopy
 from .ui_support import put_text, color_complement, deduce_text_color, CornerPosition
 from .result_analyzer_base import ResultAnalyzerBase
-from .math_support import intersect
+from .math_support import intersect, get_anchor_coordinates, AnchorPoint
 
 
 class SingleLineCounts:
@@ -55,6 +55,7 @@ class LineCounter(ResultAnalyzerBase):
     def __init__(
         self,
         lines: List[tuple],
+        anchor_point: AnchorPoint = AnchorPoint.BOTTOM_CENTER,
         *,
         per_class_display: bool = False,
     ):
@@ -63,12 +64,14 @@ class LineCounter(ResultAnalyzerBase):
         Args:
             lines (list[tuple]): list of line coordinates;
                 each list element is 4-element tuple of (x1,y1,x2,y2) line coordinates
+            anchor_point (AnchorPoint, optional): bbox anchor point to be used for tracing object trails
             per_class_display (bool, optional): when True, display counts per class,
                 otherwise display total counts
 
         """
 
         self._lines = lines
+        self._anchor_point = anchor_point
         self._per_class_display = per_class_display
         self.reset()
 
@@ -115,7 +118,9 @@ class LineCounter(ResultAnalyzerBase):
                 counts.bottom += 1
 
         for tid in new_trails:
-            trail = result.trails[tid]
+            trail = get_anchor_coordinates(
+                np.array(result.trails[tid]), self._anchor_point
+            )
             if len(trail) > 1:
                 trail_start = trail[0]
                 trail_end = trail[-1]

@@ -62,7 +62,7 @@ class ImageRegressionModelEvaluator(ModelEvaluatorBase):
         Returns:
             - List(float, float): the MAE and the MSE.
         """
-        with open(ground_truth_annotations_path, 'r') as fi:
+        with open(ground_truth_annotations_path, "r") as fi:
             anno = json.load(fi)
         img_names = [anno["images"][i]["file_name"] for i in range(len(anno["images"]))]
         gt = [anno["images"][i]["value"] for i in range(len(anno["images"]))]
