@@ -96,6 +96,42 @@ def xyxy2xywh(x: np.ndarray) -> np.ndarray:
     return y
 
 
+def tlbr2allcorners(x: np.ndarray) -> np.ndarray:
+    """
+    Convert bounding box coordinates from (x1, y1, x2, y2) format to (x1, y1, x2, y2, x3, y3, x4, y4) format where (x1, y1) is the
+    top-left corner and (x2, y2) is the bottom-right corner of the input bounding box, and x1-x4, y1-y4 correspond to the four corners
+    of the bounding box, starting with the top-left corner and proceeding clockwise.
+
+    Args:
+        x (np.ndarray): The input bounding box coordinates in (x1, y1, x2, y2) format.
+
+    Returns:
+        y (np.ndarray): The bounding box coordinates in (x1, y1, x2, y2, x3, y3, x4, y4) format.
+    """
+    y = np.empty((x.shape[0], 8))
+    y[..., 0:2] = x[..., 0:2]  # top left (x, y)
+    y[:, [2, 3]] = x[:, [2, 1]]  # top right (x, y)
+    y[..., 4:6] = x[..., 2:4]  # bottom right (x, y)
+    y[:, [6, 7]] = x[:, [0, 3]]  # bottom right (x, y)
+    return y
+
+
+def xywh2xyxy(x: np.ndarray) -> np.ndarray:
+    """
+    Convert bounding box coordinates from (x, y, width, height) format to (x1, y1, x2, y2) format where (x1, y1) is the
+    top-left corner and (x2, y2) is the bottom-right corner.
+
+    Args:
+        x (np.ndarray): The input bounding box coordinates in (x, y, width, height) format.
+    Returns:
+        y (np.ndarray): The bounding box coordinates in (x1, y1, x2, y2) format.
+    """
+    y = np.copy(x)
+    y[..., 0:2] = x[..., 0:2] - x[..., 2:4] / 2  # top left (x, y)
+    y[..., 2:4] = x[..., 0:2] + x[..., 2:4] / 2  # bottom right (x, y)
+    return y
+
+
 def box_iou_batch(boxes_true: np.ndarray, boxes_detection: np.ndarray) -> np.ndarray:
     """
     Compute Intersection over Union (IoU) of two sets of bounding boxes -
@@ -208,7 +244,8 @@ def _nms_custom(
             sel = order[overlap > iou_threshold]
             if not agnostic:
                 bboxes[i] = (
-                    np.average(bboxes[sel], axis=0, weights=scores[sel]) - class_offsets[i]
+                    np.average(bboxes[sel], axis=0, weights=scores[sel])
+                    - class_offsets[i]
                 )
             else:
                 bboxes[i] = np.average(bboxes[sel], axis=0, weights=scores[sel])
@@ -260,9 +297,9 @@ def nms(
     try:
         for i, r in enumerate(result_list):
             # Need this to benchmark blank image. Not sure if its necessary for a real image.
-            if 'bbox' not in r:
+            if "bbox" not in r:
                 continue
-            if 'score' not in r:
+            if "score" not in r:
                 continue
             bboxes[i] = r["bbox"]
             scores[i] = r["score"]
@@ -283,7 +320,14 @@ def nms(
             keep = cv2.dnn.NMSBoxes(bboxes, scores, 0, iou_threshold)  # type: ignore[arg-type]
     else:
         keep = _nms_custom(
-            bboxes, scores, classes, iou_threshold, use_iou, box_select, max_wh, agnostic
+            bboxes,
+            scores,
+            classes,
+            iou_threshold,
+            use_iou,
+            box_select,
+            max_wh,
+            agnostic,
         )
 
         if box_select != NmsBoxSelectionPolicy.MOST_PROBABLE:
@@ -293,10 +337,12 @@ def nms(
     detections._inference_results = [result_list[i] for i in keep]
 
 
-def _prefilter_boxes(boxes: Sequence[Sequence],
-                     scores: Sequence[float],
-                     labels: Sequence[int],
-                     thr: float) -> Tuple[Dict[int, np.ndarray], List]:
+def _prefilter_boxes(
+    boxes: Sequence[Sequence],
+    scores: Sequence[float],
+    labels: Sequence[int],
+    thr: float,
+) -> Tuple[Dict[int, np.ndarray], List]:
     # dict with boxes stored by category id
     new_boxes: Dict[int, Any] = dict()
     skipped_boxes = []
@@ -331,9 +377,9 @@ def _prefilter_boxes(boxes: Sequence[Sequence],
     return (new_boxes, skipped_boxes)
 
 
-def _find_matching_box(boxes: Sequence[np.ndarray],
-                       new_box: np.ndarray,
-                       match_iou: float) -> Tuple[int, Union[float, int]]:
+def _find_matching_box(
+    boxes: Sequence[np.ndarray], new_box: np.ndarray, match_iou: float
+) -> Tuple[int, Union[float, int]]:
 
     def _bb_1d_iou(boxes: np.ndarray, new_box: np.ndarray) -> np.ndarray:
         # Returns the larger of the x or y 1D-IoU if the boxes overlap.
@@ -405,10 +451,10 @@ def _fuse_boxes(box_sets: Sequence[np.ndarray]) -> np.ndarray:
 
 
 def edge_box_fusion(
-        detections: Sequence[dict],
-        iou_threshold: float = 0.55,
-        skip_threshold: float = 0.0,
-        destructive=True
+    detections: Sequence[dict],
+    iou_threshold: float = 0.55,
+    skip_threshold: float = 0.0,
+    destructive=True,
 ) -> List[dict]:
     """
     Perform box fusion on a set of edge detections. Edge detections are detections within a certain threshold of an edge.
@@ -432,11 +478,13 @@ def edge_box_fusion(
         return []
 
     for det in detections:
-        boxes_list.append(det['wbf_info'])
-        scores_list.append(det['score'])
-        labels_list.append(det['category_id'])
+        boxes_list.append(det["wbf_info"])
+        scores_list.append(det["score"])
+        labels_list.append(det["category_id"])
 
-    filtered_boxes, skipped_boxes = _prefilter_boxes(boxes_list, scores_list, labels_list, skip_threshold)
+    filtered_boxes, skipped_boxes = _prefilter_boxes(
+        boxes_list, scores_list, labels_list, skip_threshold
+    )
 
     if len(filtered_boxes) == 0:
         if not destructive:
@@ -444,9 +492,9 @@ def edge_box_fusion(
                 results = []
                 for box in skipped_boxes:
                     det = dict()
-                    det['score'] = float(box[1])
-                    det['bbox'] = box[2:6]
-                    det['category_id'] = int(box[0])
+                    det["score"] = float(box[1])
+                    det["bbox"] = box[2:6]
+                    det["category_id"] = int(box[0])
                     results.append(det)
 
                 return results
@@ -491,17 +539,17 @@ def edge_box_fusion(
     results = []
     for i in range(boxes.shape[0]):
         det = dict()
-        det['score'] = float(scores[i])
-        det['bbox'] = boxes[i].tolist()
-        det['category_id'] = int(labels[i])
+        det["score"] = float(scores[i])
+        det["bbox"] = boxes[i].tolist()
+        det["category_id"] = int(labels[i])
         results.append(det)
 
     if not destructive:
         for box in skipped_boxes:
             det = dict()
-            det['score'] = float(box[1])
-            det['bbox'] = box[2:6]
-            det['category_id'] = int(box[0])
+            det["score"] = float(box[1])
+            det["bbox"] = box[2:6]
+            det["category_id"] = int(box[0])
             results.append(det)
 
     return results
