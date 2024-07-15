@@ -294,13 +294,13 @@ class ZoneCounter(ResultAnalyzerBase):
                     inactive_set -= set(all_tids_in_zone)
 
                 for tid in inactive_set:
-                    zone._timeout_count_dict[tid] -= 1
                     if zone._timeout_count_dict[tid] == 0:
                         del (
                             zone._timeout_count_dict[tid],
                             zone._object_label_dict[tid],
                         )
                     else:
+                        zone._timeout_count_dict[tid] -= 1
                         label = (
                             zone._object_label_dict[tid]
                             if self._per_class_display

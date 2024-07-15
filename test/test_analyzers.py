@@ -300,6 +300,7 @@ def test_zone_counter():
     from degirum_tools import AnchorPoint
 
     box_1_zone_1 = [5, 40, 35, 70]
+    box_1_zone_1_shifted = [55, 40, 85, 70]
     box_2_zone_1 = [50, 50, 90, 100]
     box_1_zone_2 = [155, 50, 185, 110]
     zone_1 = [[30, 30], [80, 30], [80, 80], [30, 80]]
@@ -605,6 +606,294 @@ def test_zone_counter():
                         {"bbox": box_1_zone_2, "label": "label3", "track_id": 2},
                     ],
                     [{"total": 1}, {}],
+                ],
+                [
+                    [
+                        {
+                            "bbox": box_1_zone_1,
+                            "label": "label1",
+                            "track_id": 0,
+                            "in_zone": 0,
+                        },
+                        {"bbox": box_2_zone_1, "label": "label2", "track_id": 1},
+                        {"bbox": box_1_zone_2, "label": "label3", "track_id": 2},
+                    ],
+                    [{"total": 1}, {}],
+                ],
+            ],
+        },
+        # one trigger, object exits and re-enters zone within timeout period
+        {
+            "params": {
+                "count_polygons": zones,
+                "triggering_positions": [AnchorPoint.TOP_RIGHT],
+                "use_tracking": True,
+                "timeout_frames": 1,
+            },
+            "inp": [
+                [
+                    [
+                        {"bbox": box_1_zone_1, "label": "label1", "track_id": 0},
+                        {"bbox": box_2_zone_1, "label": "label2", "track_id": 1},
+                        {"bbox": box_1_zone_2, "label": "label3", "track_id": 2},
+                    ],
+                    [
+                        {
+                            0: [np.array(box_1_zone_1, dtype=np.int32)],
+                            1: [np.array(box_2_zone_1, dtype=np.int32)],
+                            2: [np.array(box_1_zone_2, dtype=np.int32)],
+                        }
+                    ],
+                    [{0: "label1", 1: "label2", 2: "label3"}],
+                ],
+                [
+                    [
+                        {
+                            "bbox": box_1_zone_1_shifted,
+                            "label": "label1",
+                            "track_id": 0,
+                        },
+                        {"bbox": box_2_zone_1, "label": "label2", "track_id": 1},
+                        {"bbox": box_1_zone_2, "label": "label3", "track_id": 2},
+                    ],
+                    [
+                        {
+                            0: [
+                                np.array(box_1_zone_1, dtype=np.int32),
+                                np.array(box_1_zone_1_shifted, dtype=np.int32),
+                            ],
+                            1: [
+                                np.array(box_2_zone_1, dtype=np.int32),
+                                np.array(box_2_zone_1, dtype=np.int32),
+                            ],
+                            2: [
+                                np.array(box_1_zone_2, dtype=np.int32),
+                                np.array(box_1_zone_2, dtype=np.int32),
+                            ],
+                        }
+                    ],
+                    [{0: "label1", 1: "label2", 2: "label3"}],
+                ],
+                [
+                    [
+                        {"bbox": box_1_zone_1, "label": "label1", "track_id": 0},
+                        {"bbox": box_2_zone_1, "label": "label2", "track_id": 1},
+                        {"bbox": box_1_zone_2, "label": "label3", "track_id": 2},
+                    ],
+                    [
+                        {
+                            0: [
+                                np.array(box_1_zone_1, dtype=np.int32),
+                                np.array(box_1_zone_1_shifted, dtype=np.int32),
+                                np.array(box_1_zone_1, dtype=np.int32),
+                            ],
+                            1: [
+                                np.array(box_2_zone_1, dtype=np.int32),
+                                np.array(box_2_zone_1, dtype=np.int32),
+                                np.array(box_2_zone_1, dtype=np.int32),
+                            ],
+                            2: [
+                                np.array(box_1_zone_2, dtype=np.int32),
+                                np.array(box_1_zone_2, dtype=np.int32),
+                                np.array(box_1_zone_2, dtype=np.int32),
+                            ],
+                        }
+                    ],
+                    [{0: "label1", 1: "label2", 2: "label3"}],
+                ],
+            ],
+            "res": [
+                [
+                    [
+                        {
+                            "bbox": box_1_zone_1,
+                            "label": "label1",
+                            "track_id": 0,
+                            "in_zone": 0,
+                        },
+                        {"bbox": box_2_zone_1, "label": "label2", "track_id": 1},
+                        {"bbox": box_1_zone_2, "label": "label3", "track_id": 2},
+                    ],
+                    [{"total": 1}, {}],
+                ],
+                [
+                    [
+                        {
+                            "bbox": box_1_zone_1_shifted,
+                            "label": "label1",
+                            "track_id": 0,
+                        },
+                        {"bbox": box_2_zone_1, "label": "label2", "track_id": 1},
+                        {"bbox": box_1_zone_2, "label": "label3", "track_id": 2},
+                    ],
+                    [{"total": 1}, {}],
+                ],
+                [
+                    [
+                        {
+                            "bbox": box_1_zone_1,
+                            "label": "label1",
+                            "track_id": 0,
+                            "in_zone": 0,
+                        },
+                        {"bbox": box_2_zone_1, "label": "label2", "track_id": 1},
+                        {"bbox": box_1_zone_2, "label": "label3", "track_id": 2},
+                    ],
+                    [{"total": 1}, {}],
+                ],
+            ],
+        },
+        # one trigger, object exits and re-enters the zone late
+        {
+            "params": {
+                "count_polygons": zones,
+                "triggering_positions": [AnchorPoint.TOP_RIGHT],
+                "use_tracking": True,
+                "timeout_frames": 1,
+            },
+            "inp": [
+                [
+                    [
+                        {"bbox": box_1_zone_1, "label": "label1", "track_id": 0},
+                        {"bbox": box_2_zone_1, "label": "label2", "track_id": 1},
+                        {"bbox": box_1_zone_2, "label": "label3", "track_id": 2},
+                    ],
+                    [
+                        {
+                            0: [np.array(box_1_zone_1, dtype=np.int32)],
+                            1: [np.array(box_2_zone_1, dtype=np.int32)],
+                            2: [np.array(box_1_zone_2, dtype=np.int32)],
+                        }
+                    ],
+                    [{0: "label1", 1: "label2", 2: "label3"}],
+                ],
+                [
+                    [
+                        {
+                            "bbox": box_1_zone_1_shifted,
+                            "label": "label1",
+                            "track_id": 0,
+                        },
+                        {"bbox": box_2_zone_1, "label": "label2", "track_id": 1},
+                        {"bbox": box_1_zone_2, "label": "label3", "track_id": 2},
+                    ],
+                    [
+                        {
+                            0: [
+                                np.array(box_1_zone_1, dtype=np.int32),
+                                np.array(box_1_zone_1_shifted, dtype=np.int32),
+                            ],
+                            1: [
+                                np.array(box_2_zone_1, dtype=np.int32),
+                                np.array(box_2_zone_1, dtype=np.int32),
+                            ],
+                            2: [
+                                np.array(box_1_zone_2, dtype=np.int32),
+                                np.array(box_1_zone_2, dtype=np.int32),
+                            ],
+                        }
+                    ],
+                    [{0: "label1", 1: "label2", 2: "label3"}],
+                ],
+                [
+                    [
+                        {
+                            "bbox": box_1_zone_1_shifted,
+                            "label": "label1",
+                            "track_id": 0,
+                        },
+                        {"bbox": box_2_zone_1, "label": "label2", "track_id": 1},
+                        {"bbox": box_1_zone_2, "label": "label3", "track_id": 2},
+                    ],
+                    [
+                        {
+                            0: [
+                                np.array(box_1_zone_1, dtype=np.int32),
+                                np.array(box_1_zone_1_shifted, dtype=np.int32),
+                                np.array(box_1_zone_1_shifted, dtype=np.int32),
+                            ],
+                            1: [
+                                np.array(box_2_zone_1, dtype=np.int32),
+                                np.array(box_2_zone_1, dtype=np.int32),
+                                np.array(box_2_zone_1, dtype=np.int32),
+                            ],
+                            2: [
+                                np.array(box_1_zone_2, dtype=np.int32),
+                                np.array(box_1_zone_2, dtype=np.int32),
+                                np.array(box_1_zone_2, dtype=np.int32),
+                            ],
+                        }
+                    ],
+                    [{0: "label1", 1: "label2", 2: "label3"}],
+                ],
+                [
+                    [
+                        {"bbox": box_1_zone_1, "label": "label1", "track_id": 0},
+                        {"bbox": box_2_zone_1, "label": "label2", "track_id": 1},
+                        {"bbox": box_1_zone_2, "label": "label3", "track_id": 2},
+                    ],
+                    [
+                        {
+                            0: [
+                                np.array(box_1_zone_1, dtype=np.int32),
+                                np.array(box_1_zone_1_shifted, dtype=np.int32),
+                                np.array(box_1_zone_1_shifted, dtype=np.int32),
+                                np.array(box_1_zone_1, dtype=np.int32),
+                            ],
+                            1: [
+                                np.array(box_2_zone_1, dtype=np.int32),
+                                np.array(box_2_zone_1, dtype=np.int32),
+                                np.array(box_2_zone_1, dtype=np.int32),
+                                np.array(box_2_zone_1, dtype=np.int32),
+                            ],
+                            2: [
+                                np.array(box_1_zone_2, dtype=np.int32),
+                                np.array(box_1_zone_2, dtype=np.int32),
+                                np.array(box_1_zone_2, dtype=np.int32),
+                                np.array(box_1_zone_2, dtype=np.int32),
+                            ],
+                        }
+                    ],
+                    [{0: "label1", 1: "label2", 2: "label3"}],
+                ],
+            ],
+            "res": [
+                [
+                    [
+                        {
+                            "bbox": box_1_zone_1,
+                            "label": "label1",
+                            "track_id": 0,
+                            "in_zone": 0,
+                        },
+                        {"bbox": box_2_zone_1, "label": "label2", "track_id": 1},
+                        {"bbox": box_1_zone_2, "label": "label3", "track_id": 2},
+                    ],
+                    [{"total": 1}, {}],
+                ],
+                [
+                    [
+                        {
+                            "bbox": box_1_zone_1_shifted,
+                            "label": "label1",
+                            "track_id": 0,
+                        },
+                        {"bbox": box_2_zone_1, "label": "label2", "track_id": 1},
+                        {"bbox": box_1_zone_2, "label": "label3", "track_id": 2},
+                    ],
+                    [{"total": 1}, {}],
+                ],
+                [
+                    [
+                        {
+                            "bbox": box_1_zone_1_shifted,
+                            "label": "label1",
+                            "track_id": 0,
+                        },
+                        {"bbox": box_2_zone_1, "label": "label2", "track_id": 1},
+                        {"bbox": box_1_zone_2, "label": "label3", "track_id": 2},
+                    ],
+                    [{}, {}],
                 ],
                 [
                     [
