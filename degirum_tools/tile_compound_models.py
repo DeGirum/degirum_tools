@@ -5,7 +5,14 @@ import cv2
 import numpy as np
 
 import degirum as dg
-from degirum_tools import CroppingAndDetectingCompoundModel, CropExtentOptions, ModelLike, NmsOptions, MotionDetectOptions, detect_motion
+from degirum_tools import (
+    CroppingAndDetectingCompoundModel,
+    CropExtentOptions,
+    ModelLike,
+    NmsOptions,
+    MotionDetectOptions,
+    detect_motion,
+)
 from degirum_tools.math_support import nms, edge_box_fusion
 
 
@@ -65,8 +72,12 @@ class TileExtractorPseudoModel(ModelLike):
         self._custom_postprocessor: Optional[type] = None
 
         if global_tile:
-            assert tile_mask is None, "Tile masking not supported with global tile inference."
-            assert motion_detect is None, "Motion detection not supported with global tile inference."
+            assert (
+                tile_mask is None
+            ), "Tile masking not supported with global tile inference."
+            assert (
+                motion_detect is None
+            ), "Motion detection not supported with global tile inference."
 
     @property
     def non_blocking_batch_predict(self):
@@ -89,10 +100,16 @@ class TileExtractorPseudoModel(ModelLike):
         return getattr(self._model2, attr)
 
     def _calculate_tile_parameters(self) -> List[float]:
-        model_aspect_ratio = self._model2.model_info.InputW[0] / self._model2.model_info.InputH[0]
+        model_aspect_ratio = (
+            self._model2.model_info.InputW[0] / self._model2.model_info.InputH[0]
+        )
 
-        tile_width = self._width / (self._cols - self._overlap_percent * (self._cols - 1))
-        tile_height = self._height / (self._rows - self._overlap_percent * (self._rows - 1))
+        tile_width = self._width / (
+            self._cols - self._overlap_percent * (self._cols - 1)
+        )
+        tile_height = self._height / (
+            self._rows - self._overlap_percent * (self._rows - 1)
+        )
 
         expand_offsets = [0.0, 0.0]
 
@@ -108,9 +125,13 @@ class TileExtractorPseudoModel(ModelLike):
             expand_offsets[1] = dim - tile_height
 
         if expand_offsets[0] > tile_width * 2:
-            raise Exception('Horizontal overlap is greater than 100%. Lower the amount of columns.')
+            raise Exception(
+                "Horizontal overlap is greater than 100%. Lower the amount of columns."
+            )
         elif expand_offsets[1] > tile_height * 2:
-            raise Exception('Vertical overlap is greater than 100%. Lower the amount of rows.')
+            raise Exception(
+                "Vertical overlap is greater than 100%. Lower the amount of rows."
+            )
 
         return [tile_width, tile_height] + expand_offsets
 
@@ -232,7 +253,9 @@ class TileExtractorPseudoModel(ModelLike):
                     motion_detected = all_tiles
                 else:
                     motion_detected = [
-                        cv2.countNonZero(motion_img[bbox[1] : bbox[3], bbox[0] : bbox[2]])
+                        cv2.countNonZero(
+                            motion_img[bbox[1] : bbox[3], bbox[0] : bbox[2]]
+                        )
                         > self._motion_detect.threshold
                         * (bbox[2] - bbox[0])
                         * (bbox[3] - bbox[1])
@@ -242,13 +265,28 @@ class TileExtractorPseudoModel(ModelLike):
                 motion_detected = all_tiles
 
             tile_results = [
-                {"bbox": bbox, "label": "LOCAL", "score": 1.0, "category_id": idx, "tile_info": _TileInfo(self._cols, self._rows, self._overlap_percent, idx)}
+                {
+                    "bbox": bbox,
+                    "label": "LOCAL",
+                    "score": 1.0,
+                    "category_id": idx,
+                    "tile_info": _TileInfo(
+                        self._cols, self._rows, self._overlap_percent, idx
+                    ),
+                }
                 for idx, bbox in enumerate(tile_list)
                 if (motion_detected[idx] and idx in self._tile_mask)
             ]
 
             if self._global_tile:
-                tile_results.append({"bbox": [0, 0, self._width, self._height], "label": "GLOBAL", "score": 1.0, "category_id": -999})
+                tile_results.append(
+                    {
+                        "bbox": [0, 0, self._width, self._height],
+                        "label": "GLOBAL",
+                        "score": 1.0,
+                        "category_id": -999,
+                    }
+                )
 
             # generate pseudo inference results
             pp = (
@@ -304,11 +342,18 @@ class _EdgeMixin:
 
         return relevant_edge
 
-    def _calculate_overlapped_edges(self,
-                                    box: MutableSequence[Union[int, float]],
-                                    relevant_edges: Sequence[bool],
-                                    compensation: float = 1.0) -> Tuple[bool, bool, bool, bool]:
-        overlap_top, overlap_bot, overlap_left, overlap_right = False, False, False, False
+    def _calculate_overlapped_edges(
+        self,
+        box: MutableSequence[Union[int, float]],
+        relevant_edges: Sequence[bool],
+        compensation: float = 1.0,
+    ) -> Tuple[bool, bool, bool, bool]:
+        overlap_top, overlap_bot, overlap_left, overlap_right = (
+            False,
+            False,
+            False,
+            False,
+        )
 
         # Compensation for rounding errors due to slicing.
         box = copy.copy(box)
@@ -329,19 +374,25 @@ class _EdgeMixin:
         return overlap_top, overlap_bot, overlap_left, overlap_right
 
     @staticmethod
-    def _is_box_overlap(box1: Sequence[Union[int, float]], box2: Sequence[Union[int, float]]) -> bool:
+    def _is_box_overlap(
+        box1: Sequence[Union[int, float]], box2: Sequence[Union[int, float]]
+    ) -> bool:
         # Boxes are in tlbr format
         # Zero width/height rectangle check.
-        if (box1[0] == box1[2] or box1[1] == box1[3]
-                or box2[0] == box2[2] or box2[1] == box2[3]):
+        if (
+            box1[0] == box1[2]
+            or box1[1] == box1[3]
+            or box2[0] == box2[2]
+            or box2[1] == box2[3]
+        ):
             return False
 
         # Rectangles are to the left/right of each other.
-        if (box1[0] > box2[2] or box2[0] > box1[2]):
+        if box1[0] > box2[2] or box2[0] > box1[2]:
             return False
 
         # Rectangles are above/below each other. (signs inverted because y axis is inverted)
-        if (box1[3] < box2[1] or box2[3] < box1[1]):
+        if box1[3] < box2[1] or box2[3] < box1[1]:
             return False
 
         return True
@@ -383,12 +434,14 @@ class TileModel(CroppingAndDetectingCompoundModel):
                 f"Image backends of both models should be the same, but got {model1.image_backend} and {model2.image_backend}"
             )
 
-        super().__init__(model1,
-                         model2,
-                         crop_extent=crop_extent,
-                         crop_extent_option=crop_extent_option,
-                         add_model1_results=add_model1_results,
-                         nms_options=nms_options)
+        super().__init__(
+            model1,
+            model2,
+            crop_extent=crop_extent,
+            crop_extent_option=crop_extent_option,
+            add_model1_results=add_model1_results,
+            nms_options=nms_options,
+        )
 
         self.output_postprocess_type = self.model2.output_postprocess_type
 
@@ -438,12 +491,14 @@ class LocalGlobalTileModel(TileModel):
             nms_options: non-maximum suppression (NMS) options
         """
 
-        super().__init__(model1,
-                         model2,
-                         crop_extent=crop_extent,
-                         crop_extent_option=crop_extent_option,
-                         add_model1_results=add_model1_results,
-                         nms_options=nms_options)
+        super().__init__(
+            model1,
+            model2,
+            crop_extent=crop_extent,
+            crop_extent_option=crop_extent_option,
+            add_model1_results=add_model1_results,
+            nms_options=nms_options,
+        )
 
         self._large_obj_thr = large_object_threshold
 
@@ -466,8 +521,10 @@ class LocalGlobalTileModel(TileModel):
         idx = result2.info.sub_result
 
         # This presupposes the last element is the GLOBAL box.
-        width, height = result1.results[-1]['bbox'][2:4]
-        assert result1.results[-1]['category_id'] == -999, 'Global tile does not exist, make sure the tile extractor is set to extract a global tile.'
+        width, height = result1.results[-1]["bbox"][2:4]
+        assert (
+            result1.results[-1]["category_id"] == -999
+        ), "Global tile does not exist, make sure the tile extractor is set to extract a global tile."
 
         def _is_large_object(box, thr):
             area = (box[2] - box[0]) * (box[3] - box[1])
@@ -475,8 +532,8 @@ class LocalGlobalTileModel(TileModel):
 
         if idx >= 0:
             # adjust bbox coordinates to original image coordinates
-            is_global = True if result1.results[idx]['label'] == 'GLOBAL' else False
-            overlap_percent = result1.results[0]['tile_info'].overlap
+            is_global = True if result1.results[idx]["label"] == "GLOBAL" else False
+            overlap_percent = result1.results[0]["tile_info"].overlap
 
             x, y = result1.results[idx]["bbox"][:2]
 
@@ -485,14 +542,16 @@ class LocalGlobalTileModel(TileModel):
                     if "bbox" not in r:
                         continue
                     r["bbox"] = np.add(r["bbox"], [x, y, x, y]).tolist()
-                    if not _is_large_object(r['bbox'], self._large_obj_thr * overlap_percent * 5):
+                    if not _is_large_object(
+                        r["bbox"], self._large_obj_thr * overlap_percent * 5
+                    ):
                         del result2._inference_results[i]
             else:
                 for i, r in _reverse_enumerate(result2._inference_results):
                     if "bbox" not in r:
                         continue
                     r["bbox"] = np.add(r["bbox"], [x, y, x, y]).tolist()
-                    if _is_large_object(r['bbox'], self._large_obj_thr):
+                    if _is_large_object(r["bbox"], self._large_obj_thr):
                         del result2._inference_results[i]
 
             if self._add_model1_results:
@@ -557,12 +616,14 @@ class BoxFusionTileModel(_EdgeMixin, TileModel):
             nms_options: non-maximum suppression (NMS) options
         """
 
-        super().__init__(model1,
-                         model2,
-                         crop_extent=crop_extent,
-                         crop_extent_option=crop_extent_option,
-                         add_model1_results=add_model1_results,
-                         nms_options=nms_options)
+        super().__init__(
+            model1,
+            model2,
+            crop_extent=crop_extent,
+            crop_extent_option=crop_extent_option,
+            add_model1_results=add_model1_results,
+            nms_options=nms_options,
+        )
 
         self._edge_thr = edge_threshold
         self._fusion_thr = fusion_threshold
@@ -575,10 +636,12 @@ class BoxFusionTileModel(_EdgeMixin, TileModel):
         edge_boxes = []
 
         for i, det in enumerate(dets):
-            if 'bbox' not in det:
+            if "bbox" not in det:
                 continue
 
-            overlap_top, overlap_bot, overlap_left, overlap_right = self._calculate_overlapped_edges(det['bbox'], relevant_edges)
+            overlap_top, overlap_bot, overlap_left, overlap_right = (
+                self._calculate_overlapped_edges(det["bbox"], relevant_edges)
+            )
 
             if overlap_top:
                 edge_boxes.append(i)  # edge_boxes.append(det)
@@ -608,14 +671,18 @@ class BoxFusionTileModel(_EdgeMixin, TileModel):
             for i, r in _reverse_enumerate(self._current_result._inference_results):
                 if "wbf_info" in r:
                     # Normalize
-                    r["wbf_info"] = np.divide(r["wbf_info"], [width, height, width, height]).tolist()
+                    r["wbf_info"] = np.divide(
+                        r["wbf_info"], [width, height, width, height]
+                    ).tolist()
                     edge_boxes.append(self._current_result._inference_results.pop(i))
 
             edge_boxes = edge_box_fusion(edge_boxes, self._fusion_thr)
 
             for r in edge_boxes:
-                r['label'] = self.model2.label_dictionary[r['category_id']]
-                r["bbox"] = np.multiply(r["bbox"], [width, height, width, height]).tolist()
+                r["label"] = self.model2.label_dictionary[r["category_id"]]
+                r["bbox"] = np.multiply(
+                    r["bbox"], [width, height, width, height]
+                ).tolist()
 
             self._current_result._inference_results.extend(edge_boxes)
 
@@ -653,8 +720,8 @@ class BoxFusionTileModel(_EdgeMixin, TileModel):
             # maybe make _categorize instead returns indices.
             x, y = result1.results[idx]["bbox"][:2]
 
-            if result1.results[idx]['label'] != "GLOBAL":
-                tile_info = result1.results[idx]['tile_info']
+            if result1.results[idx]["label"] != "GLOBAL":
+                tile_info = result1.results[idx]["tile_info"]
                 slice_id = tile_info.id
                 cols = tile_info.cols
                 rows = tile_info.rows
@@ -669,7 +736,9 @@ class BoxFusionTileModel(_EdgeMixin, TileModel):
                 self._left_edge = (0, 0, int(w * self._edge_thr), h)
                 self._right_edge = (int(w - w * self._edge_thr), 0, w, h)
 
-                central_boxes, edge_boxes = self._categorize(cols, rows, slice_id, result2._inference_results)
+                central_boxes, edge_boxes = self._categorize(
+                    cols, rows, slice_id, result2._inference_results
+                )
 
                 # for r in edge_boxes:
                 #     r['wbf_info'] = np.add(r["bbox"], [x, y, x, y]).tolist()
@@ -678,7 +747,9 @@ class BoxFusionTileModel(_EdgeMixin, TileModel):
                 # result2._inference_results = central_boxes
 
                 for i in edge_boxes:
-                    result2._inference_results[i]['wbf_info'] = np.add(result2._inference_results[i]["bbox"], [x, y, x, y]).tolist()
+                    result2._inference_results[i]["wbf_info"] = np.add(
+                        result2._inference_results[i]["bbox"], [x, y, x, y]
+                    ).tolist()
 
             # adjust bbox coordinates to original image coordinates
             for r in result2._inference_results:
@@ -755,14 +826,16 @@ class BoxFusionLocalGlobalTileModel(BoxFusionTileModel):
             nms_options: non-maximum suppression (NMS) options
         """
 
-        super().__init__(model1,
-                         model2,
-                         edge_threshold,
-                         fusion_threshold,
-                         crop_extent=crop_extent,
-                         crop_extent_option=crop_extent_option,
-                         add_model1_results=add_model1_results,
-                         nms_options=nms_options)
+        super().__init__(
+            model1,
+            model2,
+            edge_threshold,
+            fusion_threshold,
+            crop_extent=crop_extent,
+            crop_extent_option=crop_extent_option,
+            add_model1_results=add_model1_results,
+            nms_options=nms_options,
+        )
 
         self._large_obj_thr = large_object_threshold
 
@@ -785,8 +858,10 @@ class BoxFusionLocalGlobalTileModel(BoxFusionTileModel):
         idx = result2.info.sub_result
 
         # This presupposes the last element is the GLOBAL box.
-        width, height = result1.results[-1]['bbox'][2:4]
-        assert result1.results[-1]['category_id'] == -999, 'Global tile does not exist, make sure the tile extractor is set to extract a global tile.'
+        width, height = result1.results[-1]["bbox"][2:4]
+        assert (
+            result1.results[-1]["category_id"] == -999
+        ), "Global tile does not exist, make sure the tile extractor is set to extract a global tile."
 
         def _is_large_object(box, thr):
             area = (box[2] - box[0]) * (box[3] - box[1])
@@ -794,8 +869,8 @@ class BoxFusionLocalGlobalTileModel(BoxFusionTileModel):
 
         if idx >= 0:
             # adjust bbox coordinates to original image coordinates
-            is_global = True if result1.results[idx]['label'] == 'GLOBAL' else False
-            overlap_percent = result1.results[0]['tile_info'].overlap
+            is_global = True if result1.results[idx]["label"] == "GLOBAL" else False
+            overlap_percent = result1.results[0]["tile_info"].overlap
 
             x, y = result1.results[idx]["bbox"][:2]
 
@@ -804,13 +879,15 @@ class BoxFusionLocalGlobalTileModel(BoxFusionTileModel):
                     if "bbox" not in r:
                         continue
                     r["bbox"] = np.add(r["bbox"], [x, y, x, y]).tolist()
-                    if not _is_large_object(r['bbox'], self._large_obj_thr * overlap_percent * 5):
+                    if not _is_large_object(
+                        r["bbox"], self._large_obj_thr * overlap_percent * 5
+                    ):
                         del result2._inference_results[i]
             else:
                 for i, r in _reverse_enumerate(result2._inference_results):
                     if "bbox" not in r:
                         continue
-                    if _is_large_object(r['bbox'], self._large_obj_thr):
+                    if _is_large_object(r["bbox"], self._large_obj_thr):
                         del result2._inference_results[i]
 
                 return super().transform_result2(result2)

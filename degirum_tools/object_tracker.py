@@ -782,23 +782,19 @@ class _Tracer:
     Class to keep traces of tracked objects in video stream
     """
 
-    def __init__(
-        self, timeout_frames: int, trail_depth: int, anchor_point: AnchorPoint
-    ) -> None:
+    def __init__(self, timeout_frames: int, trail_depth: int) -> None:
         """
         Constructor
 
         Args:
             timeout_frames (int): number of frames to keep inactive track
             trail_depth (int): number of frames in a trace to keep
-            anchor_point (AnchorPoint): bbox anchor point to be used for tracing
         """
         self._timeout_count_dict: Dict[int, int] = {}
         self.active_trails: Dict[int, list] = {}
         self.trail_classes: Dict[int, str] = {}
         self._timeout_count_initial = timeout_frames
         self._trace_depth = trail_depth
-        self._anchor_point = anchor_point
 
     def update(self, result):
         """
@@ -820,21 +816,15 @@ class _Tracer:
         )
 
         if len(tracked_objects) > 0:
-            # compute anchor coordinates
-            tracked_objects[:, 2:4] = get_anchor_coordinates(
-                tracked_objects[:, 2:], self._anchor_point
-            ).astype(np.int32)
-
-            # here tracked_objects[:, 1] are track IDs, tracked_objects[:, 2:4] are anchor coordinates
-
             # update active trails
-            for idx, tid, x, y in tracked_objects[:, 0:4]:
+            for idx, tid, x1, y1, x2, y2 in tracked_objects[:, 0:6]:
+                bbox = np.array([x1, y1, x2, y2])
                 trail = self.active_trails.get(tid, None)
                 if trail is None:
                     trail = []
                     self.active_trails[tid] = trail
                     self.trail_classes[tid] = result.results[idx]["label"]
-                trail.append(np.array([x, y]))
+                trail.append(bbox)
                 if len(trail) > self._trace_depth:
                     trail.pop(0)
 
@@ -862,7 +852,7 @@ class ObjectTracker(ResultAnalyzerBase):
     Class to track objects in video stream.
 
     Analyzes the object detection `result` object passed to `analyze` method and, for each detected
-    object in the `result.results[]` list, keeps its frame-to-frame track, assigning that thrack an
+    object in the `result.results[]` list, keeps its frame-to-frame track, assigning that track a
     unique track ID. Only objects belonging to the class list specified by the `class_list` constructor
     parameter are tracked.
 
@@ -870,8 +860,8 @@ class ObjectTracker(ResultAnalyzerBase):
     track ID.
 
     If the `trail_depth` constructor parameter is not zero, also adds `trails` dictionary to the
-    `result` object. This dictionary is keyed by track IDs and contains lists of trail (x,y)
-    coordinates of object anchor points for every active trail.
+    `result` object. This dictionary is keyed by track IDs and contains lists of (x1, y1, x2, y2)
+    coordinates of object bounding boxes for every active trail.
 
     """
 
@@ -884,6 +874,7 @@ class ObjectTracker(ResultAnalyzerBase):
         match_thresh: float = 0.8,
         anchor_point: AnchorPoint = AnchorPoint.BOTTOM_CENTER,
         trail_depth: int = 0,
+        show_overlay: bool = True,
     ):
         """Constructor
 
@@ -892,14 +883,15 @@ class ObjectTracker(ResultAnalyzerBase):
             track_thresh (float, optional): Detection confidence threshold for track activation.
             track_buffer (int, optional): Number of frames to buffer when a track is lost.
             match_thresh (float, optional): IOU threshold for matching tracks with detections.
-            anchor_point (AnchorPoint, optional): bbox anchor point to be used for tracing object trails
+            anchor_point (AnchorPoint, optional): bbox anchor point to be used for showing object trails
             trail_depth (int, optional): number of frames in object trail to keep; 0 to disable tracing
+            show_overlay (bool, optional): if True, annotate image; if False, send through original image
         """
         self._tracker = _ByteTrack(class_list, track_thresh, track_buffer, match_thresh)
+        self._anchor_point = anchor_point
+        self._show_overlay = show_overlay
         self._tracer: Optional[_Tracer] = (
-            _Tracer(track_buffer, trail_depth, anchor_point)
-            if trail_depth > 0
-            else None
+            _Tracer(track_buffer, trail_depth) if trail_depth > 0 else None
         )
 
     def analyze(self, result):
@@ -907,7 +899,7 @@ class ObjectTracker(ResultAnalyzerBase):
         Track object bounding boxes.
         Updates each element of `result.results[]` by adding the `track_id` key - unique track ID of the detected object
         If trail_depth is not zero, also adds `trails` dictionary to result object. This dictionary is keyed by track IDs
-        and contains lists of trail (x,y) coordinates for every active trail.
+        and contains lists of (x1, y1, x2, y2) coordinates of object bounding boxes for every active trail.
         Also adds `trail_classes` dictionary to result object. This dictionary is keyed by track IDs and contains
         object class labels for every active trail.
 
@@ -924,7 +916,8 @@ class ObjectTracker(ResultAnalyzerBase):
 
     def annotate(self, result, image: np.ndarray) -> np.ndarray:
         """
-        Display polygon zones and zone counts on a given image
+        Display track IDs inside bounding boxes on a given image if tracing is disabled, trails computed using
+        the specified bbox anchor point otherwise
 
         Args:
             result: PySDK result object to display (should be the same as used in analyze() method)
@@ -933,6 +926,9 @@ class ObjectTracker(ResultAnalyzerBase):
         Returns:
             np.ndarray: annotated image
         """
+
+        if not self._show_overlay:
+            return image
 
         line_color = color_complement(result.overlay_color)
         text_color = deduce_text_color(line_color)
@@ -956,7 +952,11 @@ class ObjectTracker(ResultAnalyzerBase):
             # if tracing is enabled, show trails
 
             all_trails = [
-                np.array(trail) for _, trail in result.trails.items() if len(trail) > 1
+                get_anchor_coordinates(np.array(trail), self._anchor_point).astype(
+                    np.int32
+                )
+                for _, trail in result.trails.items()
+                if len(trail) > 1
             ]
             cv2.polylines(
                 image, all_trails, False, line_color, result.overlay_line_width
