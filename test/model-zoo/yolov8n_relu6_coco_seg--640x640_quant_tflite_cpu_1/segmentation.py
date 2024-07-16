@@ -240,8 +240,6 @@ class PostProcessor:
         mi = 4 + nc  # mask start index
         xc = np.max(prediction[:, 4:mi], axis=1) > conf_thres  # candidates
         # Settings
-        # min_wh = 2  # (pixels) minimum box width and height
-        time_limit = 0.5 + max_time_img * bs  # seconds to quit after
         multi_label &= nc > 1  # multiple labels per box (adds 0.5ms/img)
 
         prediction = np.transpose(prediction, (0, 2, 1))
