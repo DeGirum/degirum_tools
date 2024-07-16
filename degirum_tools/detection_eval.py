@@ -251,5 +251,6 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
         return (
             True
             if ("segmentation" in element and "keypoints" not in element)
+            and type(element["segmentation"]) is dict
             else False
         )

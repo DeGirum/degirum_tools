@@ -15,11 +15,16 @@ def do():
     in_root = cur_dir + "/sample_dataset_in/"
     out_root = cur_dir + "/sample_dataset/"
 
-    dataset = fiftyone.zoo.load_zoo_dataset("quickstart")
+    dataset = fiftyone.zoo.load_zoo_dataset(
+        "coco-2017",
+        label_types=["detections", "segmentations"],
+        split="validation",
+        max_samples=200,
+    )
     dataset.export(
         export_dir=in_root,
         dataset_type=fiftyone.types.COCODetectionDataset,
-        label_field="ground_truth",
+        label_field="segmentations",
         export_media=True,
     )
 
