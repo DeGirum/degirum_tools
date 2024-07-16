@@ -416,19 +416,20 @@ class PostProcessor:
             classes=None,
             nc=self._output_num_classes,
         )
-        pred = np.vstack(p)
-        masks = self.process_mask(
-            proto[0], pred[:, 6:], pred[:, :4], (self._input_h, self._input_w)
-        )  # HW
+        if len(p) > 0:
+            pred = np.vstack(p)
+            masks = self.process_mask(
+                proto[0], pred[:, 6:], pred[:, :4], (self._input_h, self._input_w)
+            )  # HW
 
-        for i in range(len(pred)):
-            result = {
-                "bbox": pred[i][:4].tolist(),
-                "category_id": int(pred[i][5]),
-                "label": self._labels[str(int(pred[i][5]))],
-                "score": float(pred[i][4]),
-                "mask": self.run_length_encode(masks[i]),
-            }
-            new_inference_results.append(result)
+            for i in range(len(pred)):
+                result = {
+                    "bbox": pred[i][:4].tolist(),
+                    "category_id": int(pred[i][5]),
+                    "label": self._labels[str(int(pred[i][5]))],
+                    "score": float(pred[i][4]),
+                    "mask": self.run_length_encode(masks[i]),
+                }
+                new_inference_results.append(result)
 
         return json.dumps(new_inference_results)
