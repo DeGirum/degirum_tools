@@ -188,7 +188,6 @@ class PostProcessor:
         labels=(),
         max_det=300,
         nc=80,  # number of classes (optional)
-        max_time_img=0.05,
         max_nms=30000,
         max_wh=7680,
     ):
@@ -234,7 +233,6 @@ class PostProcessor:
             prediction = prediction[0]  # select only inference output
 
         output = []
-        bs = prediction.shape[0]  # batch size
         nc = nc or (prediction.shape[1] - 4)  # number of classes
         nm = prediction.shape[1] - nc - 4
         mi = 4 + nc  # mask start index
