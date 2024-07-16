@@ -111,7 +111,7 @@ class PostProcessor:
         )
         x = np.transpose(x, (0, 2, 1))
         reg_max = (x.shape[1] - num_classes) // 4
-        dfl = self.DFL(reg_max) if reg_max > 1 else np.identity()
+        dfl = self.DFL(reg_max) if reg_max > 1 else np.identity(reg_max)
         img_h, img_w = img_shape[-2], img_shape[-1]
         strides = [
             int(math.sqrt(img_shape[-2] * img_shape[-1] / preds[p].shape[1]))
