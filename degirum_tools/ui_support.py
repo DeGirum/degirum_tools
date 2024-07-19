@@ -201,12 +201,12 @@ def put_text(
 def stack_images(
     image1: Union[np.ndarray, PIL.Image.Image],
     image2: Union[np.ndarray, PIL.Image.Image],
-    dimension: str = 'horizontal',
+    dimension: str = "horizontal",
     downscale: Optional[float] = None,
     labels: Optional[list] = None,
     font_color: tuple = (255, 255, 255),
 ) -> Union[np.ndarray, PIL.Image.Image]:
-    """ Stacks two images, either vertically or horizontally with the option to downscale
+    """Stacks two images, either vertically or horizontally with the option to downscale
         the images and have labels in the bottom left corner. The two images must be the same
         size on the stacking dimension.
 
@@ -233,25 +233,33 @@ def stack_images(
 
     if downscale is not None:
         if downscale < 1.0:
-            img1 = cv2.resize(img1,
-                              dsize=None, fx=downscale, fy=downscale,
-                              interpolation=cv2.INTER_AREA)
-            img2 = cv2.resize(img2,
-                              dsize=None, fx=downscale, fy=downscale,
-                              interpolation=cv2.INTER_AREA)
+            img1 = cv2.resize(
+                img1,
+                dsize=None,
+                fx=downscale,
+                fy=downscale,
+                interpolation=cv2.INTER_AREA,
+            )
+            img2 = cv2.resize(
+                img2,
+                dsize=None,
+                fx=downscale,
+                fy=downscale,
+                interpolation=cv2.INTER_AREA,
+            )
 
     h, w, c = img1.shape
     h2, w2, c = img2.shape
     img_dtype = img1.dtype
 
-    if dimension == 'horizontal':
+    if dimension == "horizontal":
         if img1.shape[0] != img2.shape[0]:
             raise Exception("Image heights must match for horizontal stacking.")
 
         stacked_img = np.zeros((h, w + w2, c), dtype=img_dtype)
         stacked_img[:h, :w, :] = img1
         stacked_img[:h, w:, :] = img2
-    elif dimension == 'vertical':
+    elif dimension == "vertical":
         if img1.shape[1] != img2.shape[1]:
             raise Exception("Image widths must match for vertical stacking.")
 
@@ -263,22 +271,22 @@ def stack_images(
 
     if isinstance(labels, list) and isinstance(labels[0], str):
         if len(labels) != 2:
-            raise Exception('Must have two labels for stacked images.')
+            raise Exception("Must have two labels for stacked images.")
 
-        if dimension == 'horizontal':
+        if dimension == "horizontal":
             stacked_img = put_text(
                 stacked_img,
                 labels[0],
                 (0, 0),
                 font_color=font_color,
-                corner_position=CornerPosition.BOTTOM_LEFT
+                corner_position=CornerPosition.BOTTOM_LEFT,
             )
             stacked_img = put_text(
                 stacked_img,
                 labels[1],
                 (w, 0),
                 font_color=font_color,
-                corner_position=CornerPosition.BOTTOM_LEFT
+                corner_position=CornerPosition.BOTTOM_LEFT,
             )
         else:
             stacked_img = put_text(
@@ -286,14 +294,14 @@ def stack_images(
                 labels[0],
                 (0, h),
                 font_color=font_color,
-                corner_position=CornerPosition.BOTTOM_LEFT
+                corner_position=CornerPosition.BOTTOM_LEFT,
             )
             stacked_img = put_text(
                 stacked_img,
                 labels[1],
                 (0, 0),
                 font_color=font_color,
-                corner_position=CornerPosition.BOTTOM_LEFT
+                corner_position=CornerPosition.BOTTOM_LEFT,
             )
 
     return ret_type(stacked_img)

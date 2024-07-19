@@ -19,8 +19,7 @@ from typing import Union, Generator, Optional, Callable
 
 @contextmanager
 def open_video_stream(
-    video_source: Union[int, str, Path, None] = None,
-    max_yt_quality: int = 0
+    video_source: Union[int, str, Path, None] = None, max_yt_quality: int = 0
 ) -> Generator[cv2.VideoCapture, None, None]:
     """Open OpenCV video stream from camera with given identifier.
 
@@ -58,14 +57,35 @@ def open_video_stream(
         else:
             # Ignore DASH/HLS YouTube videos because we cannot download them trivially w/ OpenCV or ffmpeg.
             # Format ids are from pafy backend https://github.com/ytdl-org/youtube-dl/blob/master/youtube_dl/extractor/youtube.py
-            dash_hls_formats = [91, 92, 93, 94, 95, 96, 132, 151, 133, 134, 135, 136, 137, 138, 160, 212, 264, 298, 299, 266,]
+            dash_hls_formats = [
+                91,
+                92,
+                93,
+                94,
+                95,
+                96,
+                132,
+                151,
+                133,
+                134,
+                135,
+                136,
+                137,
+                138,
+                160,
+                212,
+                264,
+                298,
+                299,
+                266,
+            ]
 
             video_qualities = pafy.new(video_source).videostreams
             # Sort descending based on vertical pixel count.
             video_qualities = sorted(video_qualities, key=cmp_to_key(lambda a, b: b.dimensions[1] - a.dimensions[1]))  # type: ignore[attr-defined]
 
             for video in video_qualities:
-                if video.dimensions[1] <= max_yt_quality and video.extension == 'mp4':
+                if video.dimensions[1] <= max_yt_quality and video.extension == "mp4":
                     if video.itag not in dash_hls_formats:
                         video_source = video.url
                         break
@@ -126,11 +146,7 @@ def video_source(
     is_file = stream.get(cv2.CAP_PROP_FRAME_COUNT) > 0
     # do not report errors for files and in test mode;
     # report errors only for camera streams
-    report_error = (
-        False
-        if env.get_test_mode() or is_file
-        else True
-    )
+    report_error = False if env.get_test_mode() or is_file else True
 
     if fps:
         # Decimate if file
@@ -141,7 +157,9 @@ def video_source(
                 fps = None
             else:
                 drop_frames_count = int(video_fps - fps)
-                drop_indices = np.linspace(0, video_fps - 1, drop_frames_count, dtype=int)
+                drop_indices = np.linspace(
+                    0, video_fps - 1, drop_frames_count, dtype=int
+                )
                 frame_id = -1
         # Throttle if camera feed
         else:
@@ -202,7 +220,9 @@ class VideoWriter:
 
             # use ffmpeg-wrapped VideoWriter on other platforms;
             # reason: OpenCV VideoWriter does not support H264 on Linux
-            self._writer = ffmpegcv.VideoWriter(fname, codec=None, fps=fps, resize=(w, h))
+            self._writer = ffmpegcv.VideoWriter(
+                fname, codec=None, fps=fps, resize=(w, h)
+            )
         else:
             # use OpenCV VideoWriter on Windows
             self._writer = cv2.VideoWriter(

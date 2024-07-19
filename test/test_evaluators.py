@@ -18,33 +18,46 @@ def test_ObjectDetectionModelEvaluator():
 
     cur_dir = os.path.dirname(os.path.abspath(__file__))
 
-    # load COCO detection model
-    model_name = "mobilenet_v2_ssd_coco--300x300_quant_n2x_cpu_1"
-    model_path = f"{cur_dir}/model-zoo/{model_name}/{model_name}.json"
-    zoo = dg.connect(dg.LOCAL, model_path)
-    model = zoo.load_model(model_name)
+    # load COCO detection and segmentation models
+    object_detection_model_name = "mobilenet_v2_ssd_coco--300x300_quant_n2x_cpu_1"
+    object_detection_model_path = f"{cur_dir}/model-zoo/{object_detection_model_name}/{object_detection_model_name}.json"
+    object_detection_zoo = dg.connect(dg.LOCAL, object_detection_model_path)
+    object_detection_model = object_detection_zoo.load_model(
+        object_detection_model_name
+    )
+
+    object_segmentation_model_name = (
+        "yolov8n_relu6_coco_seg--640x640_quant_tflite_cpu_1"
+    )
+    object_segmentation_model_path = f"{cur_dir}/model-zoo/{object_segmentation_model_name}/{object_segmentation_model_name}.json"
+    object_segmentation_zoo = dg.connect(dg.LOCAL, object_segmentation_model_path)
+    object_segmentation_model = object_segmentation_zoo.load_model(
+        object_segmentation_model_name
+    )
 
     #
     # test evaluator creation
     #
 
     # default parameters
-    evaluator_default = degirum_tools.ObjectDetectionModelEvaluator(model)
+    evaluator_default = degirum_tools.ObjectDetectionModelEvaluator(
+        object_detection_model
+    )
     assert not evaluator_default.show_progress
     assert evaluator_default.classmap is None
     assert evaluator_default.pred_path is None
-    assert model.input_pad_method == "letterbox"
-    assert model.image_backend == "opencv"
+    assert object_detection_model.input_pad_method == "letterbox"
+    assert object_detection_model.image_backend == "opencv"
 
     # handling invalid parameters
     with pytest.raises(Exception):
         degirum_tools.ObjectDetectionModelEvaluator.init_from_yaml(
-            model, io.StringIO("non_existent_parameter: 0")
+            object_detection_model, io.StringIO("non_existent_parameter: 0")
         )
 
     # test parameters
     evaluator1 = degirum_tools.ObjectDetectionModelEvaluator.init_from_yaml(
-        model,
+        object_detection_model,
         io.StringIO(
             """
                 show_progress: true
@@ -58,17 +71,17 @@ def test_ObjectDetectionModelEvaluator():
     assert evaluator1.show_progress
     assert evaluator1.classmap is not None and evaluator1.classmap.get(1) == 2
     assert evaluator1.pred_path == "test.json"
-    assert model.input_pad_method == "crop-last"
-    assert model.image_backend == "pil"
+    assert object_detection_model.input_pad_method == "crop-last"
+    assert object_detection_model.image_backend == "pil"
 
     #
-    # test model evaluation
+    # test object detection model evaluation
     #
     predictions_file = "test/ObjectDetectionModelEvaluator_predictions.json"
     predictions_cnt = 20
     try:
         evaluator = degirum_tools.ObjectDetectionModelEvaluator(
-            model, pred_path=predictions_file
+            object_detection_model, pred_path=predictions_file
         )
         res = evaluator.evaluate(
             "test/sample_dataset", "test/sample_dataset/labels.json", predictions_cnt
@@ -77,6 +90,33 @@ def test_ObjectDetectionModelEvaluator():
         # validate results
         assert len(res) == 1
         assert len(res[0]) == 12
+        assert os.path.exists(predictions_file)
+
+        saved_predictions = json.load(open(predictions_file))
+        assert (
+            isinstance(saved_predictions, list)
+            and len(saved_predictions) >= predictions_cnt
+        )
+    finally:
+        if os.path.exists(predictions_file):
+            os.remove(predictions_file)
+
+    #
+    # test object segmentation model evaluation
+    #
+    predictions_file = "test/ObjectSegmentationModelEvaluator_predictions.json"
+    predictions_cnt = 20
+    try:
+        evaluator = degirum_tools.ObjectDetectionModelEvaluator(
+            object_segmentation_model, pred_path=predictions_file
+        )
+        res = evaluator.evaluate(
+            "test/sample_dataset", "test/sample_dataset/labels.json", predictions_cnt
+        )
+
+        # validate results
+        assert len(res) == 2
+        assert len(res[1]) == len(res[0]) == 12
         assert os.path.exists(predictions_file)
 
         saved_predictions = json.load(open(predictions_file))
@@ -227,10 +267,10 @@ def test_ImageRegressionModelEvaluator():
 
     # run evaluation
     predictions_cnt = 50
-    evaluator = degirum_tools.ImageRegressionModelEvaluator(
-        model
+    evaluator = degirum_tools.ImageRegressionModelEvaluator(model)
+    res = evaluator.evaluate(
+        dataset_root, dataset_root + "/annotations.json", predictions_cnt
     )
-    res = evaluator.evaluate(dataset_root, dataset_root + "/annotations.json", predictions_cnt)
 
     # validate results
     assert isinstance(res, list) and len(res) == 1
