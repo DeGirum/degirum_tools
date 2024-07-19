@@ -285,7 +285,7 @@ class PostProcessor:
                 continue
             if n > max_nms:  # excess boxes
                 x = x[
-                    x[:, 4].argsort(descending=True)[:max_nms]
+                    x[:, 4].argsort()[::-1][:max_nms]
                 ]  # sort by confidence and remove excess boxes
 
             # Batched NMS
