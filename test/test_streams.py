@@ -56,7 +56,7 @@ def test_streams_error_handling():
     src >> dst
     c.start(wait=False)
 
-    with pytest.raises(Exception, match=SinkWithException.error_msg) as exc_info:
+    with pytest.raises(Exception, match=SinkWithException.error_msg):
         c.wait()
 
     assert src.n > dst.limit
