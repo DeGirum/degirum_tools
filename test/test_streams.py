@@ -59,7 +59,7 @@ def test_streams_error_handling():
     with pytest.raises(Exception, match=SinkWithException.error_msg):
         c.wait()
 
-    assert src.n > dst.limit
+    assert src.n > dst.limit  # type: ignore[attr-defined]
 
     #
     # Exception in source
@@ -104,4 +104,4 @@ def test_streams_error_handling():
     with pytest.raises(Exception, match=SourceWithException.error_msg):
         c.wait()
 
-    assert dst.n == src.limit
+    assert dst.n == src.limit  # type: ignore[attr-defined]
