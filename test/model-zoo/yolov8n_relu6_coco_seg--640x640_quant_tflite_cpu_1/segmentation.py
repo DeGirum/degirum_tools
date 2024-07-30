@@ -126,10 +126,7 @@ class PostProcessor:
         box = x[:, :-num_classes, :]
         dbox = (
             self.dist2bbox(
-                dfl.forward(box) if reg_max > 1 else box,
-                np.expand_dims(anchors, axis=0),
-                xywh=True,
-                dim=1,
+                dfl.forward(box) if reg_max > 1 else box, np.expand_dims(anchors, axis=0), xywh=True, dim=1
             )
             * strides
         )
@@ -285,7 +282,7 @@ class PostProcessor:
                 continue
             if n > max_nms:  # excess boxes
                 x = x[
-                    x[:, 4].argsort(descending=True)[:max_nms]
+                    x[:, 4].argsort()[::-1][:max_nms]
                 ]  # sort by confidence and remove excess boxes
 
             # Batched NMS
@@ -319,7 +316,7 @@ class PostProcessor:
         protos = protos.astype(float)
         protos = protos.reshape(c, (protos.shape[1] * protos.shape[2]))
         n_shape = (masks_in @ protos).shape
-        masks = self.sigmoid(masks_in @ protos).reshape(n_shape[0], mw, mh)
+        masks = self.sigmoid(masks_in @ protos).reshape(n_shape[0], mh, mw)
         masks = np.moveaxis(masks, 0, -1)  # masks, (H, W, N)
         masks = self.scale_image(masks, shape)
         masks = np.moveaxis(masks, -1, 0)  # masks, (N, H, W))
@@ -402,7 +399,7 @@ class PostProcessor:
             if index not in [pidx, lci]
         ]
         pred_decoded = self.decode_bbox(
-            pred_order, (1, self._input_c, self._input_h, self._input_w)
+            pred_order, (1, self._input_c, self._input_w, self._input_h)
         )
         mask = float_preds_list[lci]
         proto = float_preds_list[pidx]
