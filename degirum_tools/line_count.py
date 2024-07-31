@@ -15,6 +15,12 @@ from .result_analyzer_base import ResultAnalyzerBase
 from .math_support import intersect, get_anchor_coordinates, AnchorPoint
 
 
+import numpy as np, cv2
+from typing import Dict, Optional, Any
+from copy import deepcopy
+from degirum_tools import put_text, color_complement, deduce_text_color, CornerPosition, ResultAnalyzerBase, intersect, get_anchor_coordinates, AnchorPoint
+
+
 class SingleLineCounts:
     """Class to hold line crossing counts"""
 
@@ -59,6 +65,7 @@ class LineCounter(ResultAnalyzerBase):
         whole_trail: bool = True,
         count_first_crossing: bool = True,
         absolute_directions: bool = True,
+        accumulate: bool = True,
         *,
         per_class_display: bool = False,
         window_name: Optional[str] = None,
@@ -76,6 +83,8 @@ class LineCounter(ResultAnalyzerBase):
             absolute_directions (bool, optional): when True, direction of trail is calculated relative to coordinate
                 system of image; when False, direction of trail is calculated relative to coordinate system defined
                 by line that it intersects
+            accumulate (bool, optional): when True, accumulate line counts; when False, store line counts only for current
+                frame
             per_class_display (bool, optional): when True, display counts per class,
                 otherwise display total counts
             window_name (str, optional): optional OpenCV window name to configure for interactive line adjustment
@@ -88,6 +97,7 @@ class LineCounter(ResultAnalyzerBase):
         self._whole_trail = whole_trail
         self._count_first_crossing = count_first_crossing
         self._absolute_directions = absolute_directions
+        self._accumulate = accumulate
         self._win_name = window_name
         self._mouse_callback_installed = False
         self._per_class_display = per_class_display
@@ -169,6 +179,9 @@ class LineCounter(ResultAnalyzerBase):
                             counts.top += 1
                     else:
                         counts.bottom += 1
+
+        if not self._accumulate:
+            self._line_counts = [LineCounts() for _ in self._lines]
 
         for tid in new_trails:
             trail = get_anchor_coordinates(
