@@ -269,7 +269,7 @@ class ZoneCounter(ResultAnalyzerBase):
         use_trails = self._use_tracking and self._timeout_frames > 0
 
         for zi, zone in enumerate(self._zones):
-            triggers = zone.trigger(bboxes) # detect object in zones
+            triggers = zone.trigger(bboxes)  # detect object in zones
             zone_counts = result.zone_counts[zi]
             if use_trails:
                 all_tids_in_zone = []
