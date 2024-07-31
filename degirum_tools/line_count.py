@@ -15,12 +15,6 @@ from .result_analyzer_base import ResultAnalyzerBase
 from .math_support import intersect, get_anchor_coordinates, AnchorPoint
 
 
-import numpy as np, cv2
-from typing import Dict, Optional, Any
-from copy import deepcopy
-from degirum_tools import put_text, color_complement, deduce_text_color, CornerPosition, ResultAnalyzerBase, intersect, get_anchor_coordinates, AnchorPoint
-
-
 class SingleLineCounts:
     """Class to hold line crossing counts"""
 
