@@ -130,7 +130,14 @@ class LineCounter(ResultAnalyzerBase):
         if self._count_first_crossing:
             new_trails = new_trails - self._counted_trails
 
-        def count_increment(counts, trail_vector, line_vector, cross_product, trail_onto_line_projection, absolute_directions):
+        def count_increment(
+            counts,
+            trail_vector,
+            line_vector,
+            cross_product,
+            trail_onto_line_projection,
+            absolute_directions,
+        ):
             if absolute_directions:
                 if trail_vector[0] < 0:
                     counts.left += 1
@@ -150,7 +157,7 @@ class LineCounter(ResultAnalyzerBase):
                         counts.left += 1
                     else:
                         counts.right += 1
-                
+
                 trail_onto_line_projection_sign = np.sign(trail_onto_line_projection)
                 if np.all(trail_onto_line_projection_sign == np.sign(line_vector)):
                     counts.top += 1
@@ -171,19 +178,37 @@ class LineCounter(ResultAnalyzerBase):
                 trail_start = trail[0] if self._whole_trail else trail[-2]
                 trail_end = trail[-1]
 
-                for total_count, line, line_vector in zip(self._line_counts, self._lines, self._line_vectors):
+                for total_count, line, line_vector in zip(
+                    self._line_counts, self._lines, self._line_vectors
+                ):
                     if intersect(line[0], line[1], trail_start, trail_end):
                         if self._count_first_crossing:
                             self._counted_trails.add(tid)
                         trail_vector = self._line_to_vector((trail_start, trail_end))
                         cross_product = np.cross(trail_vector, line_vector)
-                        trail_onto_line_projection = self._projection(line_vector, trail_vector)
-                        count_increment(total_count, trail_vector, line_vector, cross_product, trail_onto_line_projection, self._absolute_directions)
+                        trail_onto_line_projection = self._projection(
+                            line_vector, trail_vector
+                        )
+                        count_increment(
+                            total_count,
+                            trail_vector,
+                            line_vector,
+                            cross_product,
+                            trail_onto_line_projection,
+                            self._absolute_directions,
+                        )
                         if self._per_class_display:
                             class_count = total_count.for_class.setdefault(
                                 result.trail_classes[tid], SingleLineCounts()
                             )
-                            count_increment(class_count, trail_vector, line_vector, cross_product, trail_onto_line_projection, self._absolute_directions)
+                            count_increment(
+                                class_count,
+                                trail_vector,
+                                line_vector,
+                                cross_product,
+                                trail_onto_line_projection,
+                                self._absolute_directions,
+                            )
 
         result.line_counts = deepcopy(self._line_counts)
 
@@ -272,7 +297,7 @@ class LineCounter(ResultAnalyzerBase):
                 )
 
         return image
-    
+
     def window_attach(self, win_name: str):
         """Attach OpenCV window for interactive line adjustment by installing mouse callback
 
@@ -312,13 +337,21 @@ class LineCounter(ResultAnalyzerBase):
         def line_update():
             idx = self._gui_state["update"]
             if idx >= 0:
-                self._line_vectors[idx] = self._line_to_vector(self._vector_order(self._lines[idx]))
+                self._line_vectors[idx] = self._line_to_vector(
+                    self._vector_order(self._lines[idx])
+                )
 
         if event == cv2.EVENT_LBUTTONDOWN:
             for idx, line in enumerate(self._lines):
                 line_start_to_point_vector = click_point - line[0]
                 line_vector = self._line_vectors[idx]
-                if np.linalg.norm(line_start_to_point_vector - self._projection(line_vector, line_start_to_point_vector)) < 10:
+                if (
+                    np.linalg.norm(
+                        line_start_to_point_vector
+                        - self._projection(line_vector, line_start_to_point_vector)
+                    )
+                    < 10
+                ):
                     line_update()
                     self._gui_state["dragging"] = line
                     self._gui_state["offset"] = click_point
