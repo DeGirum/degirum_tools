@@ -62,6 +62,7 @@ class LineCounter(ResultAnalyzerBase):
         accumulate: bool = True,
         *,
         per_class_display: bool = False,
+        show_overlay: bool = True,
         window_name: Optional[str] = None,
     ):
         """Constructor
@@ -81,6 +82,7 @@ class LineCounter(ResultAnalyzerBase):
                 frame
             per_class_display (bool, optional): when True, display counts per class,
                 otherwise display total counts
+            show_overlay (bool, optional): when True, apply annotations; when False, annotate() returns original image
             window_name (str, optional): optional OpenCV window name to configure for interactive line adjustment
 
         """
@@ -95,6 +97,7 @@ class LineCounter(ResultAnalyzerBase):
         self._win_name = window_name
         self._mouse_callback_installed = False
         self._per_class_display = per_class_display
+        self._show_overlay = show_overlay
         self.reset()
 
     def reset(self):
@@ -135,14 +138,9 @@ class LineCounter(ResultAnalyzerBase):
             new_trails = new_trails - self._counted_trails
 
         def count_increment(
-            counts,
-            trail_vector,
-            line_vector,
-            cross_product,
-            trail_onto_line_projection,
-            absolute_directions,
+            counts, trail_vector, line_vector, cross_product, trail_onto_line_projection
         ):
-            if absolute_directions:
+            if self._absolute_directions:
                 if trail_vector[0] < 0:
                     counts.left += 1
                 else:
@@ -202,7 +200,6 @@ class LineCounter(ResultAnalyzerBase):
                             line_vector,
                             cross_product,
                             trail_onto_line_projection,
-                            self._absolute_directions,
                         )
                         if self._per_class_display:
                             class_count = total_count.for_class.setdefault(
@@ -214,7 +211,6 @@ class LineCounter(ResultAnalyzerBase):
                                 line_vector,
                                 cross_product,
                                 trail_onto_line_projection,
-                                self._absolute_directions,
                             )
 
         result.line_counts = deepcopy(self._line_counts)
@@ -231,7 +227,7 @@ class LineCounter(ResultAnalyzerBase):
             np.ndarray: annotated image
         """
 
-        if hasattr(result, "line_counts"):
+        if hasattr(result, "line_counts") and self._show_overlay:
             line_color = color_complement(result.overlay_color)
             text_color = deduce_text_color(line_color)
             margin = 3
@@ -344,9 +340,7 @@ class LineCounter(ResultAnalyzerBase):
         def line_update():
             idx = self._gui_state["update"]
             if idx >= 0:
-                self._line_vectors[idx] = self._line_to_vector(
-                    self._vector_order(self._lines[idx])
-                )
+                self._line_vectors[idx] = self._line_to_vector(self._lines[idx])
 
         if event == cv2.EVENT_LBUTTONDOWN:
             for idx, line in enumerate(self._lines):
