@@ -8,7 +8,7 @@
 #
 
 import numpy as np, cv2
-from typing import List, Dict
+from typing import Dict, Optional, Any
 from copy import deepcopy
 from .ui_support import put_text, color_complement, deduce_text_color, CornerPosition
 from .result_analyzer_base import ResultAnalyzerBase
@@ -54,25 +54,50 @@ class LineCounter(ResultAnalyzerBase):
 
     def __init__(
         self,
-        lines: List[tuple],
+        lines: np.ndarray,
         anchor_point: AnchorPoint = AnchorPoint.BOTTOM_CENTER,
+        whole_trail: bool = True,
+        count_first_crossing: bool = True,
+        absolute_directions: bool = True,
+        accumulate: bool = True,
         *,
         per_class_display: bool = False,
+        show_overlay: bool = True,
+        window_name: Optional[str] = None,
     ):
         """Constructor
 
         Args:
             lines (list[tuple]): list of line coordinates;
-                each list element is 4-element tuple of (x1,y1,x2,y2) line coordinates
+                each list element is 2-element tuple of tuples, each of which is an (x,y) line coordinate
             anchor_point (AnchorPoint, optional): bbox anchor point to be used for tracing object trails
+            whole_trail (bool, optional): when True, last and first points of trail are used to determine if
+                trail intersects a line; when False, last and second-to-last points of trail are used
+            count_first_crossing (bool, optional): when True, count only first time a trail intersects a line;
+                when False, count all times when trail interstects a line
+            absolute_directions (bool, optional): when True, direction of trail is calculated relative to coordinate
+                system of image; when False, direction of trail is calculated relative to coordinate system defined
+                by line that it intersects
+            accumulate (bool, optional): when True, accumulate line counts; when False, store line counts only for current
+                frame
             per_class_display (bool, optional): when True, display counts per class,
                 otherwise display total counts
+            show_overlay (bool, optional): when True, apply annotations; when False, annotate() returns original image
+            window_name (str, optional): optional OpenCV window name to configure for interactive line adjustment
 
         """
 
         self._lines = lines
+        self._line_vectors = [self._line_to_vector(line) for line in lines]
         self._anchor_point = anchor_point
+        self._whole_trail = whole_trail
+        self._count_first_crossing = count_first_crossing
+        self._absolute_directions = absolute_directions
+        self._accumulate = accumulate
+        self._win_name = window_name
+        self._mouse_callback_installed = False
         self._per_class_display = per_class_display
+        self._show_overlay = show_overlay
         self.reset()
 
     def reset(self):
@@ -96,44 +121,97 @@ class LineCounter(ResultAnalyzerBase):
             result: PySDK model result object, containing `trails` dictionary from ObjectTracker
         """
 
+        self._lazy_init()
+
         if not hasattr(result, "trails") or len(result.trails) == 0:
             return
 
         active_trails = set(result.trails.keys())
 
-        # remove old trails, which are not active anymore
-        self._counted_trails = self._counted_trails & active_trails
+        # remove old trails, which are not active anymore (if self._count_first_crossing = True)
+        if self._count_first_crossing:
+            self._counted_trails = self._counted_trails & active_trails
 
-        # obtain a set of new trails, which were not counted yet
-        new_trails = active_trails - self._counted_trails
+        # obtain a set of new trails, which were not counted yet (if self._count_first_crossing = True)
+        new_trails = active_trails
+        if self._count_first_crossing:
+            new_trails = new_trails - self._counted_trails
 
-        def count_increment(counts, trail_start, trail_end):
-            if trail_start[0] > trail_end[0]:
-                counts.left += 1
+        def count_increment(
+            counts, trail_vector, line_vector, cross_product, trail_onto_line_projection
+        ):
+            if self._absolute_directions:
+                if trail_vector[0] < 0:
+                    counts.left += 1
+                else:
+                    counts.right += 1
+                if trail_vector[1] < 0:
+                    counts.top += 1
+                else:
+                    counts.bottom += 1
             else:
-                counts.right += 1
-            if trail_start[1] > trail_end[1]:
-                counts.top += 1
-            else:
-                counts.bottom += 1
+                if cross_product > 0:
+                    counts.left += 1
+                elif cross_product < 0:
+                    counts.right += 1
+                else:
+                    if np.sign(trail_vector) == np.sign(line_vector):
+                        counts.left += 1
+                    else:
+                        counts.right += 1
+
+                trail_onto_line_projection_sign = np.sign(trail_onto_line_projection)
+                if np.all(trail_onto_line_projection_sign == np.sign(line_vector)):
+                    counts.top += 1
+                else:
+                    if not np.any(trail_onto_line_projection_sign):
+                        if cross_product > 0:
+                            counts.bottom += 1
+                        else:
+                            counts.top += 1
+                    else:
+                        counts.bottom += 1
+
+        if not self._accumulate:
+            self._line_counts = [LineCounts() for _ in self._lines]
 
         for tid in new_trails:
             trail = get_anchor_coordinates(
                 np.array(result.trails[tid]), self._anchor_point
             )
             if len(trail) > 1:
-                trail_start = trail[0]
+                trail_start = trail[0] if self._whole_trail else trail[-2]
                 trail_end = trail[-1]
 
-                for total_count, line in zip(self._line_counts, self._lines):
-                    if intersect(line[:2], line[2:], trail_start, trail_end):
-                        self._counted_trails.add(tid)
-                        count_increment(total_count, trail_start, trail_end)
+                for total_count, line, line_vector in zip(
+                    self._line_counts, self._lines, self._line_vectors
+                ):
+                    if intersect(line[0], line[1], trail_start, trail_end):
+                        if self._count_first_crossing:
+                            self._counted_trails.add(tid)
+                        trail_vector = self._line_to_vector((trail_start, trail_end))
+                        cross_product = np.cross(trail_vector, line_vector)
+                        trail_onto_line_projection = self._projection(
+                            line_vector, trail_vector
+                        )
+                        count_increment(
+                            total_count,
+                            trail_vector,
+                            line_vector,
+                            cross_product,
+                            trail_onto_line_projection,
+                        )
                         if self._per_class_display:
                             class_count = total_count.for_class.setdefault(
                                 result.trail_classes[tid], SingleLineCounts()
                             )
-                            count_increment(class_count, trail_start, trail_end)
+                            count_increment(
+                                class_count,
+                                trail_vector,
+                                line_vector,
+                                cross_product,
+                                trail_onto_line_projection,
+                            )
 
         result.line_counts = deepcopy(self._line_counts)
 
@@ -149,15 +227,15 @@ class LineCounter(ResultAnalyzerBase):
             np.ndarray: annotated image
         """
 
-        if hasattr(result, "line_counts"):
+        if hasattr(result, "line_counts") and self._show_overlay:
             line_color = color_complement(result.overlay_color)
             text_color = deduce_text_color(line_color)
             margin = 3
             img_center = (image.shape[1] // 2, image.shape[0] // 2)
 
             for line_count, line in zip(result.line_counts, self._lines):
-                line_start = line[:2]
-                line_end = line[2:]
+                line_start = line[0]
+                line_end = line[1]
 
                 cv2.line(
                     image,
@@ -222,3 +300,91 @@ class LineCounter(ResultAnalyzerBase):
                 )
 
         return image
+
+    def window_attach(self, win_name: str):
+        """Attach OpenCV window for interactive line adjustment by installing mouse callback
+
+        Args:
+            win_name (str): OpenCV window name to attach to
+        """
+
+        self._win_name = win_name
+        self._mouse_callback_installed = False
+
+    def _lazy_init(self):
+        """
+        Complete deferred initialization steps
+            - install mouse callback
+        """
+        if not self._mouse_callback_installed and self._win_name is not None:
+            self._install_mouse_callback()
+
+    def _line_to_vector(self, line):
+        """
+        Return vector defined by line segment.
+        """
+        return line[1] - line[0]
+
+    def _projection(self, a: np.ndarray, b: np.ndarray):
+        """
+        Return projection of vector b onto vector a.
+        """
+        return np.dot(a, b) * a / np.dot(a, a)
+
+    @staticmethod
+    def _mouse_callback(event: int, x: int, y: int, flags: int, self: Any):
+        """Mouse callback for OpenCV window for interactive line operations"""
+
+        click_point = np.array((x, y))
+
+        def line_update():
+            idx = self._gui_state["update"]
+            if idx >= 0:
+                self._line_vectors[idx] = self._line_to_vector(self._lines[idx])
+
+        if event == cv2.EVENT_LBUTTONDOWN:
+            for idx, line in enumerate(self._lines):
+                line_start_to_point_vector = click_point - line[0]
+                line_vector = self._line_vectors[idx]
+                if (
+                    np.linalg.norm(
+                        line_start_to_point_vector
+                        - self._projection(line_vector, line_start_to_point_vector)
+                    )
+                    < 10
+                ):
+                    line_update()
+                    self._gui_state["dragging"] = line
+                    self._gui_state["offset"] = click_point
+                    self._gui_state["update"] = idx
+                    break
+
+        if event == cv2.EVENT_RBUTTONDOWN:
+            for idx, line in enumerate(self._lines):
+                for pt in line:
+                    if np.linalg.norm(pt - click_point) < 10:
+                        line_update()
+                        self._gui_state["dragging"] = pt
+                        self._gui_state["offset"] = click_point
+                        self._gui_state["update"] = idx
+                        break
+
+        elif event == cv2.EVENT_MOUSEMOVE:
+            if self._gui_state["dragging"] is not None:
+                delta = click_point - self._gui_state["offset"]
+                self._gui_state["dragging"] += delta
+                self._gui_state["offset"] = click_point
+
+        elif event == cv2.EVENT_LBUTTONUP or event == cv2.EVENT_RBUTTONUP:
+            self._gui_state["dragging"] = None
+            line_update()
+            self._gui_state["update"] = -1
+
+    def _install_mouse_callback(self):
+        if self._win_name is not None:
+            try:
+                cv2.setMouseCallback(self._win_name, LineCounter._mouse_callback, self)  # type: ignore[attr-defined]
+                self._gui_state = {"dragging": None, "update": -1}
+                self._mouse_callback_installed = True
+            except Exception:
+                pass  # ignore errors
