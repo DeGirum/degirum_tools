@@ -22,12 +22,14 @@ Key_With = "With"
 Key_Is = "Is"
 Key_For = "For"
 Key_Always = "Always"
+Key_Mostly = "Mostly"
 Key_Sometimes = "Sometimes"
 Key_To = "To"
 Key_Than = "Than"
 Key_Classes = "Classes"
 Key_Index = "Index"
 Key_Directions = "Directions"
+Key_MinScore = "MinScore"
 
 # operators
 Op_Equal = "Equal"
@@ -51,6 +53,7 @@ Direction_Bottom = "bottom"
 # metrics
 Metric_ZoneCount = "ZoneCount"
 Metric_LineCount = "LineCount"
+Metric_ObjectCount = "ObjectCount"
 
 # schema YAML
 event_definition_schema_text = f"""
@@ -62,7 +65,7 @@ properties:
         description: The name of event to raise
     {Key_When}:
         type: string
-        enum: [{Metric_ZoneCount}, {Metric_LineCount}]
+        enum: [{Metric_ZoneCount}, {Metric_LineCount}, {Metric_ObjectCount}]
         description: The name of the metric to evaluate
     {Key_With}:
         type: object
@@ -82,6 +85,11 @@ properties:
                     type: string
                     enum: [{Direction_Left}, {Direction_Right}, {Direction_Top}, {Direction_Bottom}]
                 description: The line intersection directions to count; if not specified, all directions are counted
+            {Key_MinScore}:
+                type: number
+                description: The minimum score of the object to count
+                minimum: 0
+                maximum: 1
     {Key_Is}:
         type: object
         additionalProperties: false
@@ -94,6 +102,10 @@ properties:
                 type: string
                 enum: [{Op_Equal}, {Op_NotEqual}, {Op_Greater}, {Op_GreaterOrEqual}, {Op_Less}, {Op_LessOrEqual}]
                 description: Metric comparison operator
+            {Key_Mostly}:
+                type: string
+                enum: [{Op_Equal}, {Op_NotEqual}, {Op_Greater}, {Op_GreaterOrEqual}, {Op_Less}, {Op_LessOrEqual}]
+                description: Metric comparison operator                
             {Key_To}:
                 type: number
                 description: The value to compare against
@@ -105,6 +117,8 @@ properties:
             - required: [{Key_Always}, {Key_Than}]
             - required: [{Key_Sometimes}, {Key_To}]
             - required: [{Key_Sometimes}, {Key_Than}]
+            - required: [{Key_Mostly}, {Key_To}]
+            - required: [{Key_Mostly}, {Key_Than}]
     {Key_For}:
         type: array
         prefixItems:
@@ -168,7 +182,7 @@ def ZoneCount(result, params):
     return count
 
 
-def LineCount(result, params) -> float:
+def LineCount(result, params):
     """
     Count the number of objects in the specified zone
 
@@ -226,6 +240,39 @@ def LineCount(result, params) -> float:
     return count
 
 
+def ObjectCount(result, params):
+    """
+    Get the number of detected objects satisfying the specified conditions
+
+    Args:
+        result: PySDK model result object
+        params: metric parameters as defined in "With" field of the event description
+
+    Returns:
+        number of detected objects satisfying the specified conditions
+    """
+
+    classes = None
+    min_score = None
+
+    if params is not None:
+        classes = params.get(Key_Classes)
+        min_score = params.get(Key_MinScore)
+
+    if classes is not None:
+        count = sum(
+            ("label" in obj and obj["label"] in classes)
+            and (min_score is None or ("score" in obj and obj["score"] >= min_score))
+            for obj in result.results
+        )
+    else:
+        count = sum(
+            min_score is None or ("score" in obj and obj["score"] >= min_score)
+            for obj in result.results
+        )
+    return count
+
+
 class EventDetector(ResultAnalyzerBase):
     """
     Class to detect various events by analyzing inference results
@@ -259,10 +306,13 @@ class EventDetector(ResultAnalyzerBase):
 
         if Key_Always in compare_spec:
             self._op = compare_spec[Key_Always]
-            self._is_always = True
-        else:
+            self._quantifier = Key_Always
+        elif Key_Sometimes in compare_spec:
             self._op = compare_spec[Key_Sometimes]
-            self._is_always = False
+            self._quantifier = Key_Sometimes
+        elif Key_Mostly in compare_spec:
+            self._op = compare_spec[Key_Mostly]
+            self._quantifier = Key_Mostly
 
         self._event_history: deque = deque(
             maxlen=self._duration if duration_unit == Unit_Frames else None
@@ -308,15 +358,21 @@ class EventDetector(ResultAnalyzerBase):
                 self._event_history.popleft()
 
         # check if the condition is met for the required duration
-        if self._is_always:
-            event_detected = (
+        if self._quantifier == Key_Always:
+            event_is_detected = (
                 all(x[1] for x in self._event_history) if self._event_history else False
             )
+        elif self._quantifier == Key_Sometimes:
+            event_is_detected = any(x[1] for x in self._event_history)
+        elif self._quantifier == Key_Mostly:
+            event_is_detected = (
+                sum(x[1] for x in self._event_history) > len(self._event_history) / 2
+            )
         else:
-            event_detected = any(x[1] for x in self._event_history)
+            event_is_detected = False
 
         # add detected event to the result object
-        if event_detected:
+        if event_is_detected:
             if hasattr(result, "events_detected"):
                 result.events_detected.append(self._event_name)
             else:
