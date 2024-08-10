@@ -105,7 +105,7 @@ properties:
             {Key_Mostly}:
                 type: string
                 enum: [{Op_Equal}, {Op_NotEqual}, {Op_Greater}, {Op_GreaterOrEqual}, {Op_Less}, {Op_LessOrEqual}]
-                description: Metric comparison operator                
+                description: Metric comparison operator
             {Key_To}:
                 type: number
                 description: The value to compare against
