@@ -45,6 +45,8 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
             "Detection",
             "DetectionYolo",
             "DetectionYoloV8",
+            "DetectionYoloV10",
+            "PoseDetectionYoloV8",
         ]:
             raise Exception("Model loaded for evaluation is not a Detection Model")
 
