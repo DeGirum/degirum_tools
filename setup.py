@@ -36,7 +36,7 @@ setup(
         "License :: OSI Approved :: MIT License",
     ],
     install_requires=[
-        line for line in open("requirements.txt") if line and not line.startswith("#")
+        line.strip() for line in open(root_path /  "degirum_tools/requirements.txt") if line.strip() and not line.startswith("#")
     ],
     python_requires=">=3.8",
     extras_require={
