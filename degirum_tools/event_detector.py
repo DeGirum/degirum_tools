@@ -24,6 +24,7 @@ Key_Is = "Is"
 Key_For = "For"
 Key_Always = "Always"
 Key_Mostly = "Mostly"
+Key_Rarely = "Rarely"
 Key_Sometimes = "Sometimes"
 Key_To = "To"
 Key_Than = "Than"
@@ -98,15 +99,19 @@ properties:
             {Key_Always}:
                 type: string
                 enum: [{Op_Equal}, {Op_NotEqual}, {Op_Greater}, {Op_GreaterOrEqual}, {Op_Less}, {Op_LessOrEqual}]
-                description: Metric comparison operator
+                description: Metric comparison operator condition is always true
             {Key_Sometimes}:
                 type: string
                 enum: [{Op_Equal}, {Op_NotEqual}, {Op_Greater}, {Op_GreaterOrEqual}, {Op_Less}, {Op_LessOrEqual}]
-                description: Metric comparison operator
+                description: Metric comparison operator condition is true at least once
             {Key_Mostly}:
                 type: string
                 enum: [{Op_Equal}, {Op_NotEqual}, {Op_Greater}, {Op_GreaterOrEqual}, {Op_Less}, {Op_LessOrEqual}]
-                description: Metric comparison operator
+                description: Metric comparison operator condition is true more than half of the time
+            {Key_Rarely}:
+                type: string
+                enum: [{Op_Equal}, {Op_NotEqual}, {Op_Greater}, {Op_GreaterOrEqual}, {Op_Less}, {Op_LessOrEqual}]
+                description: Metric comparison operator condition is true less than half of the time
             {Key_To}:
                 type: number
                 description: The value to compare against
@@ -120,6 +125,8 @@ properties:
             - required: [{Key_Sometimes}, {Key_Than}]
             - required: [{Key_Mostly}, {Key_To}]
             - required: [{Key_Mostly}, {Key_Than}]
+            - required: [{Key_Rarely}, {Key_To}]
+            - required: [{Key_Rarely}, {Key_Than}]
     {Key_For}:
         type: array
         prefixItems:
@@ -329,6 +336,12 @@ class EventDetector(ResultAnalyzerBase):
         elif Key_Mostly in compare_spec:
             self._op = compare_spec[Key_Mostly]
             self._quantifier = Key_Mostly
+        elif Key_Rarely in compare_spec:
+            self._op = compare_spec[Key_Rarely]
+            self._quantifier = Key_Rarely
+
+        if self._duration <= 0:
+            raise ValueError("Duration should be greater than zero")
 
         self._event_history: deque = deque(
             maxlen=self._duration if duration_unit == Unit_Frames else None
@@ -384,6 +397,9 @@ class EventDetector(ResultAnalyzerBase):
             event_is_detected = (
                 sum(x[1] for x in self._event_history) > len(self._event_history) / 2
             )
+        elif self._quantifier == Key_Rarely:
+            s = sum(x[1] for x in self._event_history)
+            event_is_detected = s < len(self._event_history) / 2 and s > 0
         else:
             event_is_detected = False
 
