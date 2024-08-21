@@ -36,7 +36,21 @@ setup(
         "License :: OSI Approved :: MIT License",
     ],
     install_requires=[
-        line.strip() for line in open(root_path /  "degirum_tools/requirements.txt") if line.strip() and not line.startswith("#")
+        "numpy",
+        "scipy",
+        "pillow",
+        "python-dotenv",
+        "requests",
+        "psutil",
+        "opencv-python",
+        "degirum>=0.9.2",
+        "ipython",
+        "pafy",
+        "youtube-dl==2020.12.2",
+        "pycocotools",
+        "pyyaml",
+        "ffmpegcv;platform_system!='Windows'",
+        "typing-extensions",
     ],
     python_requires=">=3.8",
     extras_require={
