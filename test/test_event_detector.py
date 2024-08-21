@@ -7,7 +7,6 @@
 # Implements unit tests to test event detector analyzer functionality
 #
 
-import numpy as np
 from typing import List
 import pytest
 
@@ -17,7 +16,7 @@ def test_event_detector():
     Test for EventDetector analyzer
     """
 
-    import degirum_tools, degirum as dg
+    import degirum_tools
 
     class Result:
         def __init__(self, **kwargs):
@@ -47,7 +46,7 @@ def test_event_detector():
             "params": """
                 Trigger: MyEvent
                 When: ObjectCount
-                Is: 
+                Is:
                     Always: Greater
                     Than: 0
                 For: [1, frames]
@@ -60,7 +59,7 @@ def test_event_detector():
             "params": """
                 Trigger: MyEvent
                 When: ObjectCount
-                Is: 
+                Is:
                     Always: Equal
                     To: 2
                 For: [1, frames]
@@ -95,5 +94,5 @@ def test_event_detector():
             else:
                 event_detector.analyze(result)
                 assert (
-                    result.events_detected == case["res"][i]
+                    result.events_detected == case["res"][i]  # type: ignore[attr-defined]
                 ), f"Case {ci} failed at step {i}: detected events do not match expected."
