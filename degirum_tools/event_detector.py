@@ -10,6 +10,7 @@
 import yaml, time, jsonschema
 from .result_analyzer_base import ResultAnalyzerBase
 from collections import deque
+from typing import Union
 
 #
 # Schema for event definition
@@ -139,7 +140,9 @@ event_definition_schema = yaml.safe_load(event_definition_schema_text)
 
 def ZoneCount(result, params):
     """
-    Get the number of objects in the specified zone
+    Get the number of objects in the specified zone.
+    It uses the following result attributes:
+        result.zone_counts
 
     Args:
         result: PySDK model result object
@@ -155,20 +158,20 @@ def ZoneCount(result, params):
         index = params.get(Key_Index)
         classes = params.get(Key_Classes)
 
-    zone_counts = result.get("zone_counts")
-
-    if zone_counts is None:
+    if not hasattr(result, "zone_counts"):
         raise ValueError(
             "Zone counts are not available in the result: insert ZoneCounter analyzer in a chain"
         )
 
-    if index is not None:
-        if index >= 0 and index < len(zone_counts):
+    if index is None:
+        zone_counts = result.zone_counts
+    else:
+        if index >= 0 and index < len(result.zone_counts):
             # select particular zone
-            zone_counts = result.zone_count[index : index + 1]
+            zone_counts = result.zone_counts[index : index + 1]
         else:
             raise ValueError(
-                f"Zone index {index} is out of range [0, {len(zone_counts)})"
+                f"Zone index {index} is out of range [0, {len(result.zone_counts)})"
             )
 
     # count objects in the zone(s) belonging to the specified classes
@@ -184,7 +187,9 @@ def ZoneCount(result, params):
 
 def LineCount(result, params):
     """
-    Count the number of objects in the specified zone
+    Count the number of objects in the specified zone.
+    It uses the following result attributes:
+        result.line_counts
 
     Args:
         result: PySDK model result object
@@ -203,19 +208,20 @@ def LineCount(result, params):
         classes = params.get(Key_Classes)
         directions = params.get(Key_Directions)
 
-    line_counts = result.get("line_counts")
-    if line_counts is None:
+    if not hasattr(result, "line_counts"):
         raise ValueError(
             "Line counts are not available in the result: insert LineCounter analyzer in a chain"
         )
 
-    if index is not None:
-        if index >= 0 and index < len(line_counts):
+    if index is None:
+        line_counts = result.line_counts
+    else:
+        if index >= 0 and index < len(result.line_counts):
             # select particular line
             line_counts = result.line_counts[index : index + 1]
         else:
             raise ValueError(
-                f"Line index {index} is out of range [0, {len(line_counts)})"
+                f"Line index {index} is out of range [0, {len(result.line_counts)})"
             )
 
     # count line intersections belonging to the specified classes
@@ -242,7 +248,10 @@ def LineCount(result, params):
 
 def ObjectCount(result, params):
     """
-    Get the number of detected objects satisfying the specified conditions
+    Get the number of detected objects satisfying the specified conditions.
+    It uses the following result attributes:
+        result.results[]["label"]
+        result.results[]["score"]
 
     Args:
         result: PySDK model result object
@@ -279,16 +288,23 @@ class EventDetector(ResultAnalyzerBase):
 
     """
 
-    def __init__(self, event_desc: dict):
+    def __init__(self, event_description: Union[str, dict]):
         """
         Constructor
 
         Args:
-            event_desc: event description. It is a dictionary, which defines
+            event_description: event description. It is a dictionary, which defines
                 how to detect the event. The dictionary should conform to the schema provided
                 in the `event_definition_schema` variable.
+                Alternatively, it can be a string in YAML format, which will be parsed into a dictionary.
 
         """
+
+        if isinstance(event_description, str):
+            event_desc = yaml.safe_load(event_description)
+        else:
+            event_desc = event_description
+
         jsonschema.validate(instance=event_desc, schema=event_definition_schema)
         # from here we guarantee that all keys are present in the schema since it passed validation
 
@@ -331,9 +347,9 @@ class EventDetector(ResultAnalyzerBase):
         """
         Detect event analyzing given result according to rules provided in the event description.
 
-        If event is detected, the event name will be appended to the `events_detected` list in the result object.
+        If event is detected, the event name will be appended to the `events_detected` set in the result object.
         If result object does not have `events_detected` attribute, it will be created
-        and initialized with the single element list containing detected event name.
+        and initialized with the single element set containing detected event name.
 
         Args:
             result: PySDK model result object
@@ -345,7 +361,7 @@ class EventDetector(ResultAnalyzerBase):
             metric_value, self._threshold
         )
 
-        # add result the history
+        # add metric value to the history
         self._event_history.append((time.time(), condition_met))
 
         if self._event_history.maxlen is None:
@@ -372,8 +388,7 @@ class EventDetector(ResultAnalyzerBase):
             event_is_detected = False
 
         # add detected event to the result object
+        if not hasattr(result, "events_detected"):
+            result.events_detected = set()
         if event_is_detected:
-            if hasattr(result, "events_detected"):
-                result.events_detected.append(self._event_name)
-            else:
-                result.events_detected = [self._event_name]
+            result.events_detected.add(self._event_name)
