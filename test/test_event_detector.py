@@ -18,7 +18,8 @@ def test_event_detector():
 
     import degirum_tools
 
-    class Result:
+    # helper class to convert dictionary to object
+    class D2C:
         def __init__(self, **kwargs):
             for key, value in kwargs.items():
                 setattr(self, key, value)
@@ -410,6 +411,332 @@ def test_event_detector():
             ],
             "res": [{"MyEvent"}],
         },
+        # ----------------------------------------------------------------
+        # Tests for ZoneCount metric
+        # ----------------------------------------------------------------
+        # Missing zone counts: expect to fail
+        {
+            "params": """
+                Trigger: MyEvent
+                When: ZoneCount
+                Is:
+                    Always: Equal
+                    To: 1
+                For: [1, frames]
+            """,
+            "inp": [{}],
+            "res": None,
+        },
+        # No zone counts
+        {
+            "params": """
+                Trigger: MyEvent
+                When: ZoneCount
+                Is:
+                    Always: Equal
+                    To: 0
+                For: [1, frames]
+            """,
+            "inp": [{"zone_counts": []}],
+            "res": [{"MyEvent"}],
+        },
+        # One zone, one count, no parameters
+        {
+            "params": """
+                Trigger: MyEvent
+                When: ZoneCount
+                Is:
+                    Always: Equal
+                    To: 1
+                For: [1, frames]
+            """,
+            "inp": [{"zone_counts": [{"total": 1}]}],
+            "res": [{"MyEvent"}],
+        },
+        # Multiple zones, no parameters
+        {
+            "params": """
+                Trigger: MyEvent
+                When: ZoneCount
+                Is:
+                    Always: Equal
+                    To: 6
+                For: [1, frames]
+            """,
+            "inp": [{"zone_counts": [{"total": 1}, {"total": 2}, {"total": 3}]}],
+            "res": [{"MyEvent"}],
+        },
+        # Multiple zones, zone filter out of range
+        {
+            "params": """
+                Trigger: MyEvent
+                When: ZoneCount
+                With:
+                    Index: 3
+                Is:
+                    Always: Equal
+                    To: 3
+                For: [1, frames]
+            """,
+            "inp": [{"zone_counts": [{"total": 1}, {"total": 2}, {"total": 3}]}],
+            "res": None,
+        },
+        # Multiple zones, zone filter
+        {
+            "params": """
+                Trigger: MyEvent
+                When: ZoneCount
+                With:
+                    Index: 2
+                Is:
+                    Always: Equal
+                    To: 3
+                For: [1, frames]
+            """,
+            "inp": [{"zone_counts": [{"total": 1}, {"total": 2}, {"total": 3}]}],
+            "res": [{"MyEvent"}],
+        },
+        # Multiple zones, class filter
+        {
+            "params": """
+                Trigger: MyEvent
+                When: ZoneCount
+                With:
+                    Classes: ["cat", "dog"]
+                Is:
+                    Always: Equal
+                    To: 10
+                For: [1, frames]
+            """,
+            "inp": [
+                {
+                    "zone_counts": [
+                        {"cat": 1, "dog": 2},
+                        {"dog": 3},
+                        {"cat": 4},
+                        {"person": 3},
+                    ]
+                }
+            ],
+            "res": [{"MyEvent"}],
+        },
+        # Multiple zones, zone and class filters
+        {
+            "params": """
+                Trigger: MyEvent
+                When: ZoneCount
+                With:
+                    Classes: ["cat", "dog"]
+                    Index: 0
+                Is:
+                    Always: Equal
+                    To: 2
+                For: [1, frames]
+            """,
+            "inp": [
+                {
+                    "zone_counts": [
+                        {"cat": 1, "dog": 1},
+                        {"dog": 3},
+                        {"cat": 4},
+                        {"person": 3},
+                    ]
+                }
+            ],
+            "res": [{"MyEvent"}],
+        },
+        # ----------------------------------------------------------------
+        # Tests for LineCount metric
+        # ----------------------------------------------------------------
+        # Missing line counts: expect to fail
+        {
+            "params": """
+                Trigger: MyEvent
+                When: LineCount
+                Is:
+                    Always: Equal
+                    To: 1
+                For: [1, frames]
+            """,
+            "inp": [{}],
+            "res": None,
+        },
+        # No line counts
+        {
+            "params": """
+                Trigger: MyEvent
+                When: LineCount
+                Is:
+                    Always: Equal
+                    To: 0
+                For: [1, frames]
+            """,
+            "inp": [{"line_counts": []}],
+            "res": [{"MyEvent"}],
+        },
+        # One line, zero counts
+        {
+            "params": """
+                Trigger: MyEvent
+                When: LineCount
+                Is:
+                    Always: Equal
+                    To: 0
+                For: [1, frames]
+            """,
+            "inp": [{"line_counts": [degirum_tools.LineCounts()]}],
+            "res": [{"MyEvent"}],
+        },
+        # Multiple line, some counts, no filters
+        {
+            "params": """
+                Trigger: MyEvent
+                When: LineCount
+                Is:
+                    Always: Equal
+                    To: 110
+                For: [1, frames]
+            """,
+            "inp": [
+                {
+                    "line_counts": [
+                        D2C(left=1, right=2, top=3, bottom=4),
+                        D2C(left=10, right=20, top=30, bottom=40),
+                    ]
+                }
+            ],
+            "res": [{"MyEvent"}],
+        },
+        # Multiple line, some counts, line filter
+        {
+            "params": """
+                Trigger: MyEvent
+                When: LineCount
+                With:
+                    Index: 1
+                Is:
+                    Always: Equal
+                    To: 100
+                For: [1, frames]
+            """,
+            "inp": [
+                {
+                    "line_counts": [
+                        D2C(left=1, right=2, top=3, bottom=4),
+                        D2C(left=10, right=20, top=30, bottom=40),
+                    ]
+                }
+            ],
+            "res": [{"MyEvent"}],
+        },
+        # Multiple line, some counts, direction filter
+        {
+            "params": """
+                Trigger: MyEvent
+                When: LineCount
+                With:
+                    Directions: [left, right]
+                Is:
+                    Always: Equal
+                    To: 33
+                For: [1, frames]
+            """,
+            "inp": [
+                {
+                    "line_counts": [
+                        D2C(left=1, right=2, top=3, bottom=4),
+                        D2C(left=10, right=20, top=30, bottom=40),
+                    ]
+                }
+            ],
+            "res": [{"MyEvent"}],
+        },
+        # Multiple line, some counts, class filter
+        {
+            "params": """
+                Trigger: MyEvent
+                When: LineCount
+                With:
+                    Classes: ["cat", "dog"]
+                Is:
+                    Always: Equal
+                    To: 200
+                For: [1, frames]
+            """,
+            "inp": [
+                {
+                    "line_counts": [
+                        D2C(
+                            left=1,
+                            right=2,
+                            top=3,
+                            bottom=4,
+                            for_class={
+                                "cat": D2C(left=5, right=6, top=7, bottom=8),
+                                "dog": D2C(left=9, right=10, top=11, bottom=12),
+                                "person": D2C(left=99, right=99, top=99, bottom=99),
+                            },
+                        ),
+                        D2C(
+                            left=10,
+                            right=20,
+                            top=30,
+                            bottom=40,
+                            for_class={
+                                "cat": D2C(left=13, right=14, top=15, bottom=16),
+                                "dog": D2C(left=17, right=18, top=19, bottom=20),
+                                "person": D2C(left=99, right=99, top=99, bottom=99),
+                            },
+                        ),
+                    ]
+                }
+            ],
+            "res": [{"MyEvent"}],
+        },
+        # Multiple line, some counts, all filters
+        {
+            "params": """
+                Trigger: MyEvent
+                When: LineCount
+                With:
+                    Index: 1
+                    Classes: ["cat", "dog"]
+                    Directions: [top, bottom]
+                Is:
+                    Always: Equal
+                    To: 70
+                For: [1, frames]
+            """,
+            "inp": [
+                {
+                    "line_counts": [
+                        D2C(
+                            left=1,
+                            right=2,
+                            top=3,
+                            bottom=4,
+                            for_class={
+                                "cat": D2C(left=5, right=6, top=7, bottom=8),
+                                "dog": D2C(left=9, right=10, top=11, bottom=12),
+                                "person": D2C(left=99, right=99, top=99, bottom=99),
+                            },
+                        ),
+                        D2C(
+                            left=10,
+                            right=20,
+                            top=30,
+                            bottom=40,
+                            for_class={
+                                "cat": D2C(left=13, right=14, top=15, bottom=16),
+                                "dog": D2C(left=17, right=18, top=19, bottom=20),
+                                "person": D2C(left=99, right=99, top=99, bottom=99),
+                            },
+                        ),
+                    ]
+                }
+            ],
+            "res": [{"MyEvent"}],
+        },
     ]
 
     for ci, case in enumerate(test_cases):
@@ -422,7 +749,7 @@ def test_event_detector():
         event_detector = degirum_tools.EventDetector(case["params"])
 
         for i, input in enumerate(case["inp"]):
-            result = Result(**input)
+            result = D2C(**input)
 
             if case["res"] is None:
                 with pytest.raises(Exception):
