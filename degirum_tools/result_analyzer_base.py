@@ -24,7 +24,6 @@ class ResultAnalyzerBase(ABC):
             it can be augmented with additional keys added to result.results[] dictionaries.
         """
 
-    @abstractmethod
     def annotate(self, result, image: np.ndarray) -> np.ndarray:
         """
         Annotate image with new data obtained as a result of process() method call
@@ -35,7 +34,10 @@ class ResultAnalyzerBase(ABC):
 
         Returns:
             np.ndarray: annotated image
+
+        Default implementation does nothing and returns the original image.
         """
+        return image
 
     def analyze_and_annotate(self, result, image: np.ndarray) -> np.ndarray:
         """

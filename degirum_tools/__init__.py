@@ -13,6 +13,7 @@ from .compound_models import *
 from .classification_eval import *
 from .detection_eval import *
 from .environment import *
+from .event_detector import *
 from .inference_support import *
 from .line_count import *
 from .math_support import *

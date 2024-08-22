@@ -42,11 +42,13 @@ class LineCounter(ResultAnalyzerBase):
     constructor parameter. If the trail crosses the line, the corresponding object is counted in
     two out of four directions: left-to-right vs right-to-left, and top-to-bottom vs bottom-to-top.
 
-    Adds `line_counts` list of dataclasses to the `result` object - one element per crossing line.
-    Each dataclass contains four attributes: `left`, `right`, `top`, and `bottom`. Each attribute
+    Adds `line_counts` list of `LineCounts` objects to the `result` object - one objects per crossing line.
+    Each object contains four attributes: `left`, `right`, `top`, and `bottom`. Each attribute
     value is the number of occurrences of a trail crossing the corresponding line from the
     corresponding direction. For each trail crossing, two directions are updated:
     `left` vs `right`, and `top` vs `bottom`.
+    Additionally, if `per_class_display` constructor parameter is set to True, the pre-class counts are
+    stored in the `for_class` dictionary of the `LineCounts` object.
 
     This class works in conjunction with `ObjectTracker` class that should be used to track object trails.
 
