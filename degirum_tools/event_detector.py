@@ -7,10 +7,12 @@
 # Implements analyzer class to detect various events by analyzing inference results
 #
 
+import numpy as np
 import yaml, time, jsonschema
 from .result_analyzer_base import ResultAnalyzerBase
+from .ui_support import put_text, color_complement, deduce_text_color, CornerPosition
 from collections import deque
-from typing import Union
+from typing import Union, Optional
 
 #
 # Schema for event definition
@@ -166,7 +168,7 @@ def ZoneCount(result, params):
         classes = params.get(Key_Classes)
 
     if not hasattr(result, "zone_counts"):
-        raise ValueError(
+        raise AttributeError(
             "Zone counts are not available in the result: insert ZoneCounter analyzer in a chain"
         )
 
@@ -216,7 +218,7 @@ def LineCount(result, params):
         directions = params.get(Key_Directions)
 
     if not hasattr(result, "line_counts"):
-        raise ValueError(
+        raise AttributeError(
             "Line counts are not available in the result: insert LineCounter analyzer in a chain"
         )
 
@@ -295,7 +297,14 @@ class EventDetector(ResultAnalyzerBase):
 
     """
 
-    def __init__(self, event_description: Union[str, dict]):
+    def __init__(
+        self,
+        event_description: Union[str, dict],
+        *,
+        show_overlay: bool = True,
+        annotation_color: Optional[tuple] = None,
+        annotation_corner: CornerPosition = CornerPosition.BOTTOM_LEFT,
+    ):
         """
         Constructor
 
@@ -304,8 +313,14 @@ class EventDetector(ResultAnalyzerBase):
                 how to detect the event. The dictionary should conform to the schema provided
                 in the `event_definition_schema` variable.
                 Alternatively, it can be a string in YAML format, which will be parsed into a dictionary.
-
+            show_overlay: if True, annotate image; if False, send through original image
+            annotation_color: Color to use for annotations, None to use complement to result overlay color
+            annotation_corner: corner to place annotation text
         """
+
+        self._show_overlay = show_overlay
+        self._annotation_color = annotation_color
+        self._annotation_corner = annotation_corner
 
         if isinstance(event_description, str):
             event_desc = yaml.safe_load(event_description)
@@ -408,3 +423,48 @@ class EventDetector(ResultAnalyzerBase):
             result.events_detected = set()
         if event_is_detected:
             result.events_detected.add(self._event_name)
+
+    def annotate(self, result, image: np.ndarray) -> np.ndarray:
+        """
+        Display fired events on a given image
+
+        Args:
+            result: PySDK result object to display (should be the same as used in analyze() method)
+            image (np.ndarray): image to display on
+
+        Returns:
+            np.ndarray: annotated image
+        """
+
+        if (
+            not self._show_overlay
+            or not hasattr(result, "events_detected")
+            or not result.events_detected
+        ):
+            return image
+
+        bg_color = (
+            color_complement(result.overlay_color)
+            if self._annotation_color is None
+            else self._annotation_color
+        )
+        text_color = deduce_text_color(bg_color)
+
+        if self._annotation_corner == CornerPosition.TOP_LEFT:
+            pos = (0, 0)
+        elif self._annotation_corner == CornerPosition.TOP_RIGHT:
+            pos = (image.shape[1], 0)
+        elif self._annotation_corner == CornerPosition.BOTTOM_RIGHT:
+            pos = (image.shape[1], image.shape[0])
+        else:
+            pos = (0, image.shape[0])
+
+        return put_text(
+            image,
+            "\n".join(result.events_detected),
+            pos,
+            font_color=text_color,
+            bg_color=bg_color,
+            font_scale=result.overlay_font_scale,
+            corner_position=self._annotation_corner,
+        )

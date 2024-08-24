@@ -17,12 +17,20 @@ from pathlib import Path
 
 
 def deduce_text_color(bg_color: tuple):
-    """Deduce text color from background color"""
+    """Deduce text color from background color
+
+    Args:
+        bg_color - background color (RGB)
+    """
     return (0, 0, 0) if luminance(bg_color) > 180 else (255, 255, 255)
 
 
 def color_complement(color):
-    """Return color complement: 255 - color"""
+    """Return color complement: 255 - color
+
+    Args:
+        color - color to complement (RGB)
+    """
     adj_color = (color[0] if isinstance(color, list) else color)[::-1]
     return tuple([255 - c for c in adj_color])
 
@@ -94,8 +102,8 @@ def put_text(
         label - text to draw
         corner_xy - text corner coordinate tuple (x,y); meaning depends on `corner_position` argument
         corner_position - where to place text relative to corner_xy
-        font_color - text color (BGR)
-        bg_color - background color (BGR) or None for transparent
+        font_color - text color (RGB)
+        bg_color - background color (RGB) or None for transparent
         font_face - font to use
         font_scale - font scale factor to use
         font_thickness - font thickness to use
@@ -107,6 +115,9 @@ def put_text(
 
     if not label:
         return image
+
+    font_color = font_color[::-1]  # RGB to BGR
+    bg_color = bg_color[::-1] if bg_color is not None else None
 
     im_h, im_w = image.shape[:2]
     margin = 6

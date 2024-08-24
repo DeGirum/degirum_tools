@@ -875,6 +875,7 @@ class ObjectTracker(ResultAnalyzerBase):
         anchor_point: AnchorPoint = AnchorPoint.BOTTOM_CENTER,
         trail_depth: int = 0,
         show_overlay: bool = True,
+        annotation_color: Optional[tuple] = None,
     ):
         """Constructor
 
@@ -885,11 +886,13 @@ class ObjectTracker(ResultAnalyzerBase):
             match_thresh (float, optional): IOU threshold for matching tracks with detections.
             anchor_point (AnchorPoint, optional): bbox anchor point to be used for showing object trails
             trail_depth (int, optional): number of frames in object trail to keep; 0 to disable tracing
-            show_overlay (bool, optional): if True, annotate image; if False, send through original image
+            show_overlay: if True, annotate image; if False, send through original image
+            annotation_color: Color to use for annotations, None to use complement to result overlay color
         """
         self._tracker = _ByteTrack(class_list, track_thresh, track_buffer, match_thresh)
         self._anchor_point = anchor_point
         self._show_overlay = show_overlay
+        self._annotation_color = annotation_color
         self._tracer: Optional[_Tracer] = (
             _Tracer(track_buffer, trail_depth) if trail_depth > 0 else None
         )
@@ -930,7 +933,11 @@ class ObjectTracker(ResultAnalyzerBase):
         if not self._show_overlay:
             return image
 
-        line_color = color_complement(result.overlay_color)
+        line_color = (
+            color_complement(result.overlay_color)
+            if self._annotation_color is None
+            else self._annotation_color
+        )
         text_color = deduce_text_color(line_color)
 
         if self._tracer is None:
