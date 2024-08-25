@@ -520,7 +520,67 @@ def test_event_detector():
             ],
             "res": [{"MyEvent"}],
         },
-        # Multiple zones, zone and class filters
+        # Aggregation in multiple zones: max
+        {
+            "params": """
+                Trigger: MyEvent
+                When: ZoneCount
+                With:
+                    Aggregation: max
+                Is:
+                    Always: Equal
+                    To: 3
+                For: [1, frames]
+            """,
+            "inp": [{"zone_counts": [{"total": 1}, {"total": 2}, {"total": 3}]}],
+            "res": [{"MyEvent"}],
+        },
+        # Aggregation in multiple zones: min
+        {
+            "params": """
+                Trigger: MyEvent
+                When: ZoneCount
+                With:
+                    Aggregation: min
+                Is:
+                    Always: Equal
+                    To: 1
+                For: [1, frames]
+            """,
+            "inp": [{"zone_counts": [{"total": 1}, {"total": 2}, {"total": 3}]}],
+            "res": [{"MyEvent"}],
+        },
+        # Aggregation in multiple zones: mean
+        {
+            "params": """
+                Trigger: MyEvent
+                When: ZoneCount
+                With:
+                    Aggregation: mean
+                Is:
+                    Always: Equal
+                    To: 1.5
+                For: [1, frames]
+            """,
+            "inp": [{"zone_counts": [{"total": 1}, {"total": 2}]}],
+            "res": [{"MyEvent"}],
+        },
+        # Aggregation in multiple zones: std
+        {
+            "params": """
+                Trigger: MyEvent
+                When: ZoneCount
+                With:
+                    Aggregation: std
+                Is:
+                    Always: Equal
+                    To: 0
+                For: [1, frames]
+            """,
+            "inp": [{"zone_counts": [{"total": 1}, {"total": 1}, {"total": 1}]}],
+            "res": [{"MyEvent"}],
+        },
+        # Multiple zones, zone and class filters, aggregation sum
         {
             "params": """
                 Trigger: MyEvent
@@ -528,6 +588,7 @@ def test_event_detector():
                 With:
                     Classes: ["cat", "dog"]
                     Index: 0
+                    Aggregation: sum
                 Is:
                     Always: Equal
                     To: 2

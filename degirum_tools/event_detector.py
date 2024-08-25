@@ -34,6 +34,7 @@ Key_Classes = "Classes"
 Key_Index = "Index"
 Key_Directions = "Directions"
 Key_MinScore = "MinScore"
+Key_Aggregation = "Aggregation"
 
 # operators
 Op_Equal = "Equal"
@@ -53,11 +54,17 @@ Direction_Right = "right"
 Direction_Top = "top"
 Direction_Bottom = "bottom"
 
-
 # metrics
 Metric_ZoneCount = "ZoneCount"
 Metric_LineCount = "LineCount"
 Metric_ObjectCount = "ObjectCount"
+
+# aggregate functions
+Aggregate_Sum = "sum"
+Aggregate_Max = "max"
+Aggregate_Min = "min"
+Aggregate_Mean = "mean"
+Aggregate_Std = "std"
 
 # schema YAML
 event_definition_schema_text = f"""
@@ -94,6 +101,9 @@ properties:
                 description: The minimum score of the object to count
                 minimum: 0
                 maximum: 1
+            {Key_Aggregation}:
+                type: string
+                enum: [{Aggregate_Sum}, {Aggregate_Max}, {Aggregate_Min}, {Aggregate_Mean}, {Aggregate_Std}]
     {Key_Is}:
         type: object
         additionalProperties: false
@@ -161,16 +171,19 @@ def ZoneCount(result, params):
         number of objects in the zone(s) belonging to the specified classes
     """
 
-    index = None
-    classes = None
-    if params is not None:
-        index = params.get(Key_Index)
-        classes = params.get(Key_Classes)
-
     if not hasattr(result, "zone_counts"):
         raise AttributeError(
             "Zone counts are not available in the result: insert ZoneCounter analyzer in a chain"
         )
+
+    index = None
+    classes = None
+    aggregate = Aggregate_Sum
+
+    if params is not None:
+        index = params.get(Key_Index)
+        classes = params.get(Key_Classes)
+        aggregate = params.get(Key_Aggregation, Aggregate_Sum)
 
     if index is None:
         zone_counts = result.zone_counts
@@ -184,14 +197,16 @@ def ZoneCount(result, params):
             )
 
     # count objects in the zone(s) belonging to the specified classes
-    count = 0
-    for zone in zone_counts:
-        if classes is not None:
-            count += sum(zone[key] for key in classes if key in zone)
-        else:
-            count += sum(zone.values())
-
-    return count
+    counts = [
+        (
+            sum(zone.values())
+            if classes is None
+            else sum(zone[key] for key in classes if key in zone)
+        )
+        for zone in zone_counts
+    ]
+    # return the aggregated value
+    return getattr(np, aggregate)(counts)
 
 
 def LineCount(result, params):
