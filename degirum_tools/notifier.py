@@ -18,7 +18,8 @@ import time
 class EventNotifier(ResultAnalyzerBase):
     """
     Class to generate notifications based on triggered events.
-    It works with conjunction with EventDetector analyzer.
+    It works with conjunction with EventDetector analyzer, analyzing `events_detected` set
+    in the `result` object.
 
     Adds `notifications` dictionary to the `result` object, where keys are names of generated
     notifications and values are notification messages.
@@ -29,8 +30,8 @@ class EventNotifier(ResultAnalyzerBase):
         name: str,
         condition: str,
         *,
-        holdoff: Union[Tuple[float, str], int, float],
-        message: str,
+        message: str = "",
+        holdoff: Union[Tuple[float, str], int, float] = 0.0,
         token: Optional[str] = None,
         show_overlay: bool = True,
         annotation_color: Optional[tuple] = None,
@@ -59,6 +60,7 @@ class EventNotifier(ResultAnalyzerBase):
         """
 
         self._name = name
+        self._message = message if message else f"Notification triggered: {name}"
         self._token = token
         self._show_overlay = show_overlay
         self._annotation_color = annotation_color
@@ -75,7 +77,7 @@ class EventNotifier(ResultAnalyzerBase):
             self._holdoff_frames = holdoff
         elif isinstance(holdoff, float):
             self._holdoff_sec = holdoff
-        elif isinstance(holdoff, tuple):
+        elif isinstance(holdoff, tuple) or isinstance(holdoff, list):
             if holdoff[1] == "seconds":
                 self._holdoff_sec = holdoff[0]
             elif holdoff[1] == "frames":
@@ -87,7 +89,6 @@ class EventNotifier(ResultAnalyzerBase):
         else:
             raise TypeError(f"Invalid holdoff time type: {holdoff}")
 
-        self._message = message
         self._frame = 0
         self._prev_cond = False
         self._prev_frame = -1_000_000_000  # arbitrary big negative number
@@ -123,17 +124,22 @@ class EventNotifier(ResultAnalyzerBase):
         var_dict = {v: (v in result.events_detected) for v in self._condition.co_names}
         cond = eval(self._condition, var_dict)
 
+        if not hasattr(result, "notifications"):
+            result.notifications = {}
+
         if cond and not self._prev_cond:  # condition is met for the first time
             # check for holdoff time
             if (
-                self._holdoff_frames > 0
-                and (self._frame - self._prev_frame > self._holdoff_frames)
-            ) or (
-                self._holdoff_sec > 0
-                and (time.time() - self._prev_time > self._holdoff_sec)
+                (self._holdoff_frames == 0 and self._holdoff_sec == 0)  # no holdoff
+                or (
+                    self._holdoff_frames > 0
+                    and (self._frame - self._prev_frame > self._holdoff_frames)
+                )  # holdoff in frames is passed
+                or (
+                    self._holdoff_sec > 0
+                    and (time.time() - self._prev_time > self._holdoff_sec)
+                )  # holdoff in seconds is passed
             ):
-                if not hasattr(result, "notifications"):
-                    result.notifications = {}
                 result.notifications[self._name] = self._message.format(result=result)
 
                 if self._token is not None:
