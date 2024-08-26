@@ -195,7 +195,7 @@ class EventNotifier(ResultAnalyzerBase):
 
         return put_text(
             image,
-            "\n".join(result.notifications.values()),
+            "\n".join(self._last_notifications.values()),
             pos,
             font_color=text_color,
             bg_color=bg_color,
