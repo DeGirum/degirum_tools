@@ -34,9 +34,9 @@ class EventNotifier(ResultAnalyzerBase):
         *,
         message: str = "",
         holdoff: Union[Tuple[float, str], int, float] = 0.0,
-        # For now, token contains path to yaml. Eventually, it'll be the token and we can fetch the yaml from 
+        # For now, token contains path to yaml. Eventually, it'll be the token and we can fetch the yaml from
         # the backend using this token as an identifier.
-        token: Optional[str] = None, 
+        token: Optional[str] = None,
         # Tags needs to be in the proper "and" (using commas) or "or" (using spaces)
         # ex: Tag1, Tag2 == Tag1 and Tag2
         # Tag1 Tag2 == Tag1 or Tag2
@@ -61,7 +61,7 @@ class EventNotifier(ResultAnalyzerBase):
                 For example: "Total {len(result.results)} objects detected"
             token: optional cloud API access token to use for cloud notifications;
                 if not specified, the notification is not sent to cloud
-            apprise_config_path: The config file (either in yaml or txt) for the apprise library on github which is 
+            apprise_config_path: The config file (either in yaml or txt) for the apprise library on github which is
                 used by us to send notifications. [https://github.com/caronc/apprise]
             show_overlay: if True, annotate image; if False, send through original image
             annotation_color: Color to use for annotations, None to use complement to result overlay color
@@ -77,7 +77,7 @@ class EventNotifier(ResultAnalyzerBase):
         self._annotation_corner = annotation_corner
         self._annotation_cool_down = annotation_cool_down
         self._tag = tag
-        
+
         # Setting up apprise object and config if the user provides a path to a config file
         self._apprise_obj = None
         if self._token:
@@ -88,7 +88,6 @@ class EventNotifier(ResultAnalyzerBase):
 
             for entry in iter(self._apprise_obj):
                 print(entry)
-        
 
         # compile condition to evaluate it later
         self._condition = compile(condition, "<string>", "eval")
@@ -168,15 +167,9 @@ class EventNotifier(ResultAnalyzerBase):
                 if self._token is not None and self._apprise_obj is not None:
                     # TODO: send notification to cloud
 
-                    
                     # For now, assuming a hardcoded message
                     for title, body in result.notifications.items():
-                        self._apprise_obj.notify(
-                                body=body,
-                                title=title,
-                                tag=self._tag
-                                )
-
+                        self._apprise_obj.notify(body=body, title=title, tag=self._tag)
 
         # update holdoff timestamp and frame number if condition is met
         if cond:
