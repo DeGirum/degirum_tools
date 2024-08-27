@@ -146,8 +146,10 @@ class EventNotifier(ResultAnalyzerBase):
                     # TODO: send notification to cloud
                     pass
 
-                self._prev_frame = self._frame
-                self._prev_time = time.time()
+        # update holdoff timestamp and frame number if condition is met
+        if cond:
+            self._prev_frame = self._frame
+            self._prev_time = time.time()
 
         self._prev_cond = cond
         self._frame += 1
