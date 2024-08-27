@@ -76,6 +76,7 @@ def ipython_display(obj: Any, clear: bool = False, display_id: Optional[str] = N
 class CornerPosition(Enum):
     """Corner position options"""
 
+    AUTO = 0
     TOP_LEFT = 1
     TOP_RIGHT = 2
     BOTTOM_LEFT = 3
@@ -151,6 +152,19 @@ def put_text(
         lines.append(li)
 
     max_width += margin
+
+    # deduce corner position if AUTO
+    if corner_position == CornerPosition.AUTO:
+        if corner_xy[0] < im_w / 2:
+            if corner_xy[1] < im_h / 2:
+                corner_position = CornerPosition.TOP_LEFT
+            else:
+                corner_position = CornerPosition.BOTTOM_LEFT
+        else:
+            if corner_xy[1] < im_h / 2:
+                corner_position = CornerPosition.TOP_RIGHT
+            else:
+                corner_position = CornerPosition.BOTTOM_RIGHT
 
     # adjust coordinates according to corner_position option
     if corner_position != CornerPosition.TOP_LEFT:

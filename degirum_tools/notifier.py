@@ -11,6 +11,7 @@
 import numpy as np
 from .result_analyzer_base import ResultAnalyzerBase
 from .ui_support import put_text, color_complement, deduce_text_color, CornerPosition
+from .math_support import AnchorPoint, get_image_anchor_point
 from typing import Tuple, Union, Optional
 import time
 from apprise import Apprise
@@ -43,7 +44,8 @@ class EventNotifier(ResultAnalyzerBase):
         tag: Optional[str] = None,
         show_overlay: bool = True,
         annotation_color: Optional[tuple] = None,
-        annotation_corner: CornerPosition = CornerPosition.BOTTOM_LEFT,
+        annotation_font_scale: Optional[float] = None,
+        annotation_pos: Union[AnchorPoint, tuple] = AnchorPoint.BOTTOM_LEFT,
         annotation_cool_down: float = 3.0,
     ):
         """
@@ -65,7 +67,8 @@ class EventNotifier(ResultAnalyzerBase):
                 used by us to send notifications. [https://github.com/caronc/apprise]
             show_overlay: if True, annotate image; if False, send through original image
             annotation_color: Color to use for annotations, None to use complement to result overlay color
-            annotation_corner: corner to place annotation text
+            annotation_font_scale: font scale to use for annotations or None to use model default
+            annotation_pos: position to place annotation text (either predefined point or (x,y) tuple)
             annotation_cool_down: time in seconds to keep notification on the screen
         """
 
@@ -74,7 +77,8 @@ class EventNotifier(ResultAnalyzerBase):
         self._token = token
         self._show_overlay = show_overlay
         self._annotation_color = annotation_color
-        self._annotation_corner = annotation_corner
+        self._annotation_font_scale = annotation_font_scale
+        self._annotation_pos = annotation_pos
         self._annotation_cool_down = annotation_cool_down
         self._tag = tag
 
@@ -211,14 +215,12 @@ class EventNotifier(ResultAnalyzerBase):
         )
         text_color = deduce_text_color(bg_color)
 
-        if self._annotation_corner == CornerPosition.TOP_LEFT:
-            pos = (0, 0)
-        elif self._annotation_corner == CornerPosition.TOP_RIGHT:
-            pos = (image.shape[1], 0)
-        elif self._annotation_corner == CornerPosition.BOTTOM_RIGHT:
-            pos = (image.shape[1], image.shape[0])
+        if isinstance(self._annotation_pos, AnchorPoint):
+            pos = get_image_anchor_point(
+                image.shape[1], image.shape[0], self._annotation_pos
+            )
         else:
-            pos = (0, image.shape[0])
+            pos = self._annotation_pos
 
         return put_text(
             image,
@@ -226,6 +228,10 @@ class EventNotifier(ResultAnalyzerBase):
             pos,
             font_color=text_color,
             bg_color=bg_color,
-            font_scale=result.overlay_font_scale,
-            corner_position=self._annotation_corner,
+            font_scale=(
+                result.overlay_font_scale
+                if self._annotation_font_scale is None
+                else self._annotation_font_scale
+            ),
+            corner_position=CornerPosition.AUTO,
         )
