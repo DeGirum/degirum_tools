@@ -187,27 +187,21 @@ class LineCounter(ResultAnalyzerBase):
 
             # compute coordinate where to put text
             if mostly_horizontal:
-                cx = min(line_start[0], line_end[0]) + margin
-                if max(line_start[1], line_end[1]) < img_center[1]:
-                    cy = max(line_start[1], line_end[1]) + margin
+                cx = line_start[0] + margin
+                if line_start[1] <= img_center[1]:
+                    cy = line_start[1] + margin
                     corner = CornerPosition.TOP_LEFT
-                elif min(line_start[1], line_end[1]) > img_center[1]:
-                    cy = min(line_start[1], line_end[1]) - margin
+                elif line_start[1] > img_center[1]:
+                    cy = line_start[1] - margin
                     corner = CornerPosition.BOTTOM_LEFT
-                else:
-                    cy = (line_start[1] + line_end[1]) // 2
-                    corner = CornerPosition.TOP_LEFT
             else:
-                cy = min(line_start[1], line_end[1]) + margin
-                if max(line_start[0], line_end[0]) < img_center[0]:
-                    cx = max(line_start[0], line_end[0]) + margin
+                cy = line_start[1] + margin
+                if line_start[0] <= img_center[0]:
+                    cx = line_start[0] + margin
                     corner = CornerPosition.TOP_LEFT
-                elif min(line_start[0], line_end[0]) > img_center[1]:
-                    cx = min(line_start[0], line_end[0]) - margin
+                elif line_start[0] > img_center[1]:
+                    cx = line_start[0] - margin
                     corner = CornerPosition.TOP_RIGHT
-                else:
-                    cx = (line_start[0] + line_end[0]) // 2
-                    corner = CornerPosition.TOP_LEFT
 
             def line_count_str(lc: SingleLineCounts, prefix: str = "") -> str:
                 return f"{prefix}^({lc.top}) v({lc.bottom}) <({lc.left}) >({lc.right})"
