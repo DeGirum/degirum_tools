@@ -36,7 +36,9 @@ setup(
         "License :: OSI Approved :: MIT License",
     ],
     install_requires=[
-        line for line in open(root_path / "requirements.txt") if line and not line.startswith("#")
+        line
+        for line in open(root_path / "requirements.txt")
+        if line and not line.startswith("#")
     ],
     python_requires=">=3.8",
     extras_require={
