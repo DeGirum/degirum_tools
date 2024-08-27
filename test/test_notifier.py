@@ -168,6 +168,33 @@ def test_notifier():
             ],
             "res": [{}, {"test": "OK"}, {}, {}, {}, {}, {}, {}, {}],
         },
+        # -------------------------------------------------------
+        # Notification Tests
+        # -------------------------------------------------------
+
+        # Same test as before, but now with a notification added
+        {
+            "params": {
+                "name": "test",
+                "condition": "a",
+                "message": "OK",
+                "holdoff": [10.0, "seconds"],
+                "tag" : "Chirayu, Tg",
+                "token" : "/home/chirayurai/Code/apprise_demo/single-docker-container/mqtt-version/src/apprise.yaml"
+            },
+            "inp": [
+                {"events_detected": {}},
+                {"events_detected": {"a"}},
+                {"events_detected": {"a"}},
+                {"events_detected": {"a"}},
+                {"events_detected": {}},
+                {"events_detected": {}},
+                {"events_detected": {"a"}},
+                {"events_detected": {}},
+                {"events_detected": {"a"}},
+            ],
+            "res": [{}, {"test": "OK"}, {}, {}, {}, {}, {}, {}, {}],
+        },
     ]
 
     for ci, case in enumerate(test_cases):
