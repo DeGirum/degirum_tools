@@ -126,7 +126,10 @@ class PostProcessor:
         box = x[:, :-num_classes, :]
         dbox = (
             self.dist2bbox(
-                dfl.forward(box) if reg_max > 1 else box, np.expand_dims(anchors, axis=0), xywh=True, dim=1
+                dfl.forward(box) if reg_max > 1 else box,
+                np.expand_dims(anchors, axis=0),
+                xywh=True,
+                dim=1,
             )
             * strides
         )
