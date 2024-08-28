@@ -1,7 +1,7 @@
 #
 # video_support.py: video stream handling classes and functions
 #
-# Copyright DeGirum Corporation 2023
+# Copyright DeGirum Corporation 2024
 # All rights reserved
 #
 # Implements classes and functions to handle video streams for capturing and saving
@@ -14,7 +14,7 @@ from functools import cmp_to_key
 from pathlib import Path
 from . import environment as env
 from .ui_support import Progress
-from typing import Union, Generator, Optional, Callable
+from typing import Union, Generator, Optional, Callable, Any
 
 
 @contextmanager
@@ -202,31 +202,40 @@ class VideoWriter:
     H264 mp4 video stream writer class
     """
 
-    def __init__(self, fname: str, w: int, h: int, fps: float = 30.0):
+    def __init__(self, fname: str, w: int = 0, h: int = 0, fps: float = 30.0):
         """Create, open, and return video stream writer
 
         Args:
             fname: filename to save video
-            w, h: frame width/height
+            w, h: frame width/height (optional, can be zero to deduce on first frame)
             fps: frames per second
         """
-        self._count = 0
-
         import platform
 
+        self._count = 0
+        self._writer: Any = None
         self._use_ffmpeg = platform.system() != "Windows"
+        self._fps = fps
+        self._fname = fname
+        if w > 0 and h > 0:
+            self._writer = self._create_writer(w, h)
+
+    def _create_writer(self, w: int, h: int) -> Any:
         if self._use_ffmpeg:
             import ffmpegcv
 
             # use ffmpeg-wrapped VideoWriter on other platforms;
             # reason: OpenCV VideoWriter does not support H264 on Linux
-            self._writer = ffmpegcv.VideoWriter(
-                fname, codec=None, fps=fps, resize=(w, h)
+            return ffmpegcv.VideoWriter(
+                self._fname, codec=None, fps=self._fps, resize=(w, h)
             )
         else:
             # use OpenCV VideoWriter on Windows
-            self._writer = cv2.VideoWriter(
-                fname, int.from_bytes("H264".encode(), byteorder="little"), fps, (w, h)
+            return cv2.VideoWriter(
+                self._fname,
+                int.from_bytes("H264".encode(), byteorder="little"),
+                self._fps,
+                (w, h),
             )
 
     def write(self, img: np.ndarray):
@@ -235,6 +244,8 @@ class VideoWriter:
         Args:
             img (np.ndarray): image to write
         """
+        if self._writer is None:
+            self._writer = self._create_writer(img.shape[1], img.shape[0])
         self._count += 1
         self._writer.write(img)
 
@@ -243,6 +254,9 @@ class VideoWriter:
         Close video stream
         """
 
+        if self._writer is None:
+            return
+        
         process_to_wait = None
         if self._use_ffmpeg:
             import psutil
@@ -275,11 +289,13 @@ class VideoWriter:
         return self._count
 
 
-def create_video_writer(fname: str, w: int, h: int, fps: float = 30.0) -> VideoWriter:
+def create_video_writer(
+    fname: str, w: int = 0, h: int = 0, fps: float = 30.0
+) -> VideoWriter:
     """Create, open, and return OpenCV video stream writer
 
     fname - filename to save video
-    w, h - frame width/height
+    w, h - frame width/height (optional, can be zero to deduce on first frame)
     fps - frames per second
     """
 
@@ -292,12 +308,12 @@ def create_video_writer(fname: str, w: int, h: int, fps: float = 30.0) -> VideoW
 
 @contextmanager
 def open_video_writer(
-    fname: str, w: int, h: int, fps: float = 30.0
+    fname: str, w: int = 0, h: int = 0, fps: float = 30.0
 ) -> Generator[VideoWriter, None, None]:
     """Create, open, and yield OpenCV video stream writer; release on exit
 
     fname - filename to save video
-    w, h - frame width/height
+    w, h - frame width/height (optional, can be zero to deduce on first frame)
     fps - frames per second
     """
 
