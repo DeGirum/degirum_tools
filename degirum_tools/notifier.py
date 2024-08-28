@@ -16,6 +16,7 @@ from typing import Tuple, Union, Optional
 import time
 from apprise import Apprise
 from apprise import AppriseConfig
+import os
 
 
 class EventNotifier(ResultAnalyzerBase):
@@ -35,13 +36,8 @@ class EventNotifier(ResultAnalyzerBase):
         *,
         message: str = "",
         holdoff: Union[Tuple[float, str], int, float] = 0.0,
-        # For now, token contains path to yaml. Eventually, it'll be the token and we can fetch the yaml from
-        # the backend using this token as an identifier.
         token: Optional[str] = None,
-        # Tags needs to be in the proper "and" (using commas) or "or" (using spaces)
-        # ex: Tag1, Tag2 == Tag1 and Tag2
-        # Tag1 Tag2 == Tag1 or Tag2
-        tag: Optional[str] = None,
+        tags: Optional[str] = None,
         show_overlay: bool = True,
         annotation_color: Optional[tuple] = None,
         annotation_font_scale: Optional[float] = None,
@@ -63,6 +59,11 @@ class EventNotifier(ResultAnalyzerBase):
                 For example: "Total {len(result.results)} objects detected"
             token: optional cloud API access token to use for cloud notifications;
                 if not specified, the notification is not sent to cloud
+            tags: optional tags to use for cloud notifications
+                Tags can be separated by "and" (or commas) and "or" (or spaces).
+                For example:
+                "Tag1, Tag2" (equivalent to "Tag1 and Tag2"
+                "Tag1 Tag2" (equivalent to "Tag1 or Tag2")
             apprise_config_path: The config file (either in yaml or txt) for the apprise library on github which is
                 used by us to send notifications. [https://github.com/caronc/apprise]
             show_overlay: if True, annotate image; if False, send through original image
@@ -80,18 +81,22 @@ class EventNotifier(ResultAnalyzerBase):
         self._annotation_font_scale = annotation_font_scale
         self._annotation_pos = annotation_pos
         self._annotation_cool_down = annotation_cool_down
-        self._tag = tag
+        self._tags = tags
 
-        # Setting up apprise object and config if the user provides a path to a config file
+        # Setting up apprise object and config if the user provides a path to a config file or server URL
         self._apprise_obj = None
         if self._token:
             self._apprise_obj = Apprise()
-            conf = AppriseConfig()
-            conf.add(self._token)
-            self._apprise_obj.add(conf)
-
-            for entry in iter(self._apprise_obj):
-                print(entry)
+            if os.path.isfile(self._token):
+                # treat token as a path to the configuration file
+                conf = AppriseConfig()
+                if not conf.add(self._token):
+                    raise ValueError(f"Invalid configuration file: {self._token}")
+                self._apprise_obj.add(conf)
+            else:
+                # treat token as a single server URL
+                if not self._apprise_obj.add(self._token):
+                    raise ValueError(f"Invalid configuration: {self._token}")
 
         # compile condition to evaluate it later
         self._condition = compile(condition, "<string>", "eval")
@@ -172,8 +177,14 @@ class EventNotifier(ResultAnalyzerBase):
                     # TODO: send notification to cloud
 
                     # For now, assuming a hardcoded message
-                    for title, body in result.notifications.items():
-                        self._apprise_obj.notify(body=body, title=title, tag=self._tag)
+                    if "unittest" not in self._token:
+                        for title, body in result.notifications.items():
+                            if not self._apprise_obj.notify(
+                                body=body, title=title, tag=self._tags
+                            ):
+                                raise Exception(
+                                    f"Notification failed: {title} - {body}"
+                                )
 
         # update holdoff timestamp and frame number if condition is met
         if cond:

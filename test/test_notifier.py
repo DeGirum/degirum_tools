@@ -171,7 +171,6 @@ def test_notifier():
         # -------------------------------------------------------
         # Notification Tests
         # -------------------------------------------------------
-
         # Same test as before, but now with a notification added
         {
             "params": {
@@ -179,8 +178,8 @@ def test_notifier():
                 "condition": "a",
                 "message": "OK",
                 "holdoff": [10.0, "seconds"],
-                "tag" : "Chirayu, Tg",
-                "token" : "/home/chirayurai/Code/apprise_demo/single-docker-container/mqtt-version/src/apprise.yaml"
+                "tags": "Test, Tg",
+                "token": "json://unittest",
             },
             "inp": [
                 {"events_detected": {}},
