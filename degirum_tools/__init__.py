@@ -17,6 +17,7 @@ from .event_detector import *
 from .inference_support import *
 from .line_count import *
 from .math_support import *
+from .notifier import *
 from .object_selector import *
 from .object_tracker import *
 from .regression_eval import *

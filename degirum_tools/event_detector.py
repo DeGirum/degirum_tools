@@ -7,10 +7,13 @@
 # Implements analyzer class to detect various events by analyzing inference results
 #
 
+import numpy as np
 import yaml, time, jsonschema
 from .result_analyzer_base import ResultAnalyzerBase
+from .ui_support import put_text, color_complement, deduce_text_color, CornerPosition
+from .math_support import AnchorPoint, get_image_anchor_point
 from collections import deque
-from typing import Union
+from typing import Union, Optional
 
 #
 # Schema for event definition
@@ -18,32 +21,30 @@ from typing import Union
 
 # keys
 Key_Trigger = "Trigger"
-Key_When = "When"
-Key_With = "With"
-Key_Is = "Is"
-Key_For = "For"
-Key_Always = "Always"
-Key_Mostly = "Mostly"
-Key_Rarely = "Rarely"
-Key_Sometimes = "Sometimes"
-Key_To = "To"
-Key_Than = "Than"
-Key_Classes = "Classes"
-Key_Index = "Index"
-Key_Directions = "Directions"
-Key_MinScore = "MinScore"
-
-# operators
-Op_Equal = "Equal"
-Op_NotEqual = "NotEqual"
-Op_Greater = "Greater"
-Op_GreaterOrEqual = "GreaterOrEqual"
-Op_Less = "Less"
-Op_LessOrEqual = "LessOrEqual"
+Key_When = "when"
+Key_With = "with"
+Key_During = "during"
+Key_IsEqualTo = "is equal to"
+Key_IsNotEqualTo = "is not equal to"
+Key_IsGreaterThan = "is greater than"
+Key_IsGreaterThanOrEqualTo = "is greater than or equal to"
+Key_IsLessThan = "is less than"
+Key_IsLessThanOrEqualTo = "is less than or equal to"
+Key_ForAtLeast = "for at least"
+Key_ForAtMost = "for at most"
+Key_Classes = "classes"
+Key_Index = "index"
+Key_Directions = "directions"
+Key_MinScore = "min score"
+Key_Aggregation = "aggregation"
 
 # units
+Unit_Second = "second"
 Unit_Seconds = "seconds"
+Unit_Frame = "frame"
 Unit_Frames = "frames"
+Unit_Percent = "percent"
+
 
 # directions
 Direction_Left = "left"
@@ -51,11 +52,18 @@ Direction_Right = "right"
 Direction_Top = "top"
 Direction_Bottom = "bottom"
 
-
 # metrics
 Metric_ZoneCount = "ZoneCount"
 Metric_LineCount = "LineCount"
 Metric_ObjectCount = "ObjectCount"
+Metric_Custom = "Custom"
+
+# aggregate functions
+Aggregate_Sum = "sum"
+Aggregate_Max = "max"
+Aggregate_Min = "min"
+Aggregate_Mean = "mean"
+Aggregate_Std = "std"
 
 # schema YAML
 event_definition_schema_text = f"""
@@ -67,7 +75,7 @@ properties:
         description: The name of event to raise
     {Key_When}:
         type: string
-        enum: [{Metric_ZoneCount}, {Metric_LineCount}, {Metric_ObjectCount}]
+        enum: [{Metric_ZoneCount}, {Metric_LineCount}, {Metric_ObjectCount}, {Metric_Custom}]
         description: The name of the metric to evaluate
     {Key_With}:
         type: object
@@ -92,49 +100,62 @@ properties:
                 description: The minimum score of the object to count
                 minimum: 0
                 maximum: 1
-    {Key_Is}:
-        type: object
-        additionalProperties: false
-        properties:
-            {Key_Always}:
+            {Key_Aggregation}:
                 type: string
-                enum: [{Op_Equal}, {Op_NotEqual}, {Op_Greater}, {Op_GreaterOrEqual}, {Op_Less}, {Op_LessOrEqual}]
-                description: Metric comparison operator condition is always true
-            {Key_Sometimes}:
-                type: string
-                enum: [{Op_Equal}, {Op_NotEqual}, {Op_Greater}, {Op_GreaterOrEqual}, {Op_Less}, {Op_LessOrEqual}]
-                description: Metric comparison operator condition is true at least once
-            {Key_Mostly}:
-                type: string
-                enum: [{Op_Equal}, {Op_NotEqual}, {Op_Greater}, {Op_GreaterOrEqual}, {Op_Less}, {Op_LessOrEqual}]
-                description: Metric comparison operator condition is true more than half of the time
-            {Key_Rarely}:
-                type: string
-                enum: [{Op_Equal}, {Op_NotEqual}, {Op_Greater}, {Op_GreaterOrEqual}, {Op_Less}, {Op_LessOrEqual}]
-                description: Metric comparison operator condition is true less than half of the time
-            {Key_To}:
-                type: number
-                description: The value to compare against
-            {Key_Than}:
-                type: number
-                description: The value to compare against
-        oneOf:
-            - required: [{Key_Always}, {Key_To}]
-            - required: [{Key_Always}, {Key_Than}]
-            - required: [{Key_Sometimes}, {Key_To}]
-            - required: [{Key_Sometimes}, {Key_Than}]
-            - required: [{Key_Mostly}, {Key_To}]
-            - required: [{Key_Mostly}, {Key_Than}]
-            - required: [{Key_Rarely}, {Key_To}]
-            - required: [{Key_Rarely}, {Key_Than}]
-    {Key_For}:
+                enum: [{Aggregate_Sum}, {Aggregate_Max}, {Aggregate_Min}, {Aggregate_Mean}, {Aggregate_Std}]
+    {Key_IsEqualTo}:
+        type: number
+        description: The value to compare against
+    {Key_IsNotEqualTo}:
+        type: number
+        description: The value to compare against
+    {Key_IsGreaterThan}:
+        type: number
+        description: The value to compare against
+    {Key_IsGreaterThanOrEqualTo}:
+        type: number
+        description: The value to compare against
+    {Key_IsLessThan}:
+        type: number
+        description: The value to compare against
+    {Key_IsLessThanOrEqualTo}:
+        type: number
+        description: The value to compare against
+    {Key_During}:
         type: array
         prefixItems:
             - type: number
-            - enum: [{Unit_Seconds}, {Unit_Frames}]
+            - enum: [{Unit_Seconds}, {Unit_Frames}, {Unit_Second}, {Unit_Frame}]
         items: false
         description: Duration to evaluate the metric
-required: [{Key_Trigger}, {Key_When}, {Key_Is}, {Key_For}]
+    {Key_ForAtLeast}:
+        type: array
+        prefixItems:
+            - type: number
+            - enum: [{Unit_Percent}, {Unit_Frames}, {Unit_Frame}]
+        items: false
+        description: Minimum duration the metric needs to be true in order to trigger event
+    {Key_ForAtMost}:
+        type: array
+        prefixItems:
+            - type: number
+            - enum: [{Unit_Percent}, {Unit_Frames}, {Unit_Frame}]
+        items: false
+        description: Maximum duration the metric needs to be true in order to trigger event
+required: [{Key_Trigger}, {Key_When}, {Key_During}]
+oneOf:
+    - required: [{Key_IsEqualTo}]
+      type: object
+    - required: [{Key_IsNotEqualTo}]
+      type: object
+    - required: [{Key_IsGreaterThan}]
+      type: object
+    - required: [{Key_IsGreaterThanOrEqualTo}]
+      type: object
+    - required: [{Key_IsLessThan}]
+      type: object
+    - required: [{Key_IsLessThanOrEqualTo}]
+      type: object
 """
 
 event_definition_schema = yaml.safe_load(event_definition_schema_text)
@@ -159,16 +180,19 @@ def ZoneCount(result, params):
         number of objects in the zone(s) belonging to the specified classes
     """
 
+    if not hasattr(result, "zone_counts"):
+        raise AttributeError(
+            "Zone counts are not available in the result: insert ZoneCounter analyzer in a chain"
+        )
+
     index = None
     classes = None
+    aggregate = Aggregate_Sum
+
     if params is not None:
         index = params.get(Key_Index)
         classes = params.get(Key_Classes)
-
-    if not hasattr(result, "zone_counts"):
-        raise ValueError(
-            "Zone counts are not available in the result: insert ZoneCounter analyzer in a chain"
-        )
+        aggregate = params.get(Key_Aggregation, Aggregate_Sum)
 
     if index is None:
         zone_counts = result.zone_counts
@@ -182,14 +206,16 @@ def ZoneCount(result, params):
             )
 
     # count objects in the zone(s) belonging to the specified classes
-    count = 0
-    for zone in zone_counts:
-        if classes is not None:
-            count += sum(zone[key] for key in classes if key in zone)
-        else:
-            count += sum(zone.values())
-
-    return count
+    counts = [
+        (
+            sum(zone.values())
+            if classes is None
+            else sum(zone[key] for key in classes if key in zone)
+        )
+        for zone in zone_counts
+    ]
+    # return the aggregated value
+    return getattr(np, aggregate)(counts)
 
 
 def LineCount(result, params):
@@ -216,7 +242,7 @@ def LineCount(result, params):
         directions = params.get(Key_Directions)
 
     if not hasattr(result, "line_counts"):
-        raise ValueError(
+        raise AttributeError(
             "Line counts are not available in the result: insert LineCounter analyzer in a chain"
         )
 
@@ -295,7 +321,15 @@ class EventDetector(ResultAnalyzerBase):
 
     """
 
-    def __init__(self, event_description: Union[str, dict]):
+    def __init__(
+        self,
+        event_description: Union[str, dict],
+        *,
+        show_overlay: bool = True,
+        annotation_color: Optional[tuple] = None,
+        annotation_font_scale: Optional[float] = None,
+        annotation_pos: Union[AnchorPoint, tuple] = AnchorPoint.BOTTOM_LEFT,
+    ):
         """
         Constructor
 
@@ -304,8 +338,16 @@ class EventDetector(ResultAnalyzerBase):
                 how to detect the event. The dictionary should conform to the schema provided
                 in the `event_definition_schema` variable.
                 Alternatively, it can be a string in YAML format, which will be parsed into a dictionary.
-
+            show_overlay: if True, annotate image; if False, send through original image
+            annotation_color: Color to use for annotations, None to use complement to result overlay color
+            annotation_font_scale: font scale to use for annotations or None to use model default
+            annotation_pos: position to place annotation text (either predefined point or (x,y) tuple)
         """
+
+        self._show_overlay = show_overlay
+        self._annotation_color = annotation_color
+        self._annotation_font_scale = annotation_font_scale
+        self._annotation_pos = annotation_pos
 
         if isinstance(event_description, str):
             event_desc = yaml.safe_load(event_description)
@@ -319,41 +361,47 @@ class EventDetector(ResultAnalyzerBase):
         self._event_name = event_desc[Key_Trigger]
         self._metric_name = event_desc[Key_When]
         self._metric_params = event_desc.get(Key_With)
-        self._duration = event_desc[Key_For][0]
-        duration_unit = event_desc[Key_For][1]
-        compare_spec = event_desc[Key_Is]
+        self._duration = event_desc[Key_During][0]
+        duration_unit = event_desc[Key_During][1]
 
-        self._threshold = (
-            compare_spec[Key_To] if Key_To in compare_spec else compare_spec[Key_Than]
-        )
+        self._op = ""
+        self._threshold = 0.0
+        for op in EventDetector.comparators:
+            if op in event_desc:
+                self._op = op
+                self._threshold = event_desc[op]
+                break
 
-        if Key_Always in compare_spec:
-            self._op = compare_spec[Key_Always]
-            self._quantifier = Key_Always
-        elif Key_Sometimes in compare_spec:
-            self._op = compare_spec[Key_Sometimes]
-            self._quantifier = Key_Sometimes
-        elif Key_Mostly in compare_spec:
-            self._op = compare_spec[Key_Mostly]
-            self._quantifier = Key_Mostly
-        elif Key_Rarely in compare_spec:
-            self._op = compare_spec[Key_Rarely]
-            self._quantifier = Key_Rarely
+        if not self._op:
+            raise ValueError("Comparison operator should be specified")
+
+        if Key_ForAtLeast in event_desc:
+            self._quantifier = Key_ForAtLeast
+            self._quota = event_desc[Key_ForAtLeast][0]
+            self._quota_unit = event_desc[Key_ForAtLeast][1]
+        elif Key_ForAtMost in event_desc:
+            self._quantifier = Key_ForAtMost
+            self._quota = event_desc[Key_ForAtMost][0]
+            self._quota_unit = event_desc[Key_ForAtMost][1]
+        else:
+            self._quantifier = Key_ForAtLeast
+            self._quota = 100.0
+            self._quota_unit = Unit_Percent
 
         if self._duration <= 0:
             raise ValueError("Duration should be greater than zero")
 
         self._event_history: deque = deque(
-            maxlen=self._duration if duration_unit == Unit_Frames else None
+            maxlen=int(self._duration) if duration_unit in Unit_Frames else None
         )
 
     comparators = {
-        Op_Equal: lambda a, b: a == b,
-        Op_NotEqual: lambda a, b: a != b,
-        Op_Greater: lambda a, b: a > b,
-        Op_GreaterOrEqual: lambda a, b: a >= b,
-        Op_Less: lambda a, b: a < b,
-        Op_LessOrEqual: lambda a, b: a <= b,
+        Key_IsEqualTo: lambda a, b: a == b,
+        Key_IsNotEqualTo: lambda a, b: a != b,
+        Key_IsGreaterThan: lambda a, b: a > b,
+        Key_IsGreaterThanOrEqualTo: lambda a, b: a >= b,
+        Key_IsLessThan: lambda a, b: a < b,
+        Key_IsLessThanOrEqualTo: lambda a, b: a <= b,
     }
 
     def analyze(self, result):
@@ -387,24 +435,68 @@ class EventDetector(ResultAnalyzerBase):
                 self._event_history.popleft()
 
         # check if the condition is met for the required duration
-        if self._quantifier == Key_Always:
-            event_is_detected = (
-                all(x[1] for x in self._event_history) if self._event_history else False
-            )
-        elif self._quantifier == Key_Sometimes:
-            event_is_detected = any(x[1] for x in self._event_history)
-        elif self._quantifier == Key_Mostly:
-            event_is_detected = (
-                sum(x[1] for x in self._event_history) > len(self._event_history) / 2
-            )
-        elif self._quantifier == Key_Rarely:
-            s = sum(x[1] for x in self._event_history)
-            event_is_detected = s < len(self._event_history) / 2 and s > 0
-        else:
-            event_is_detected = False
+        true_cnt = sum(x[1] for x in self._event_history)
+        quantity_thr = (
+            self._quota * len(self._event_history) / 100.0
+            if self._quota_unit == Unit_Percent
+            else self._quota
+        )
+        event_is_detected = False
+        if self._quantifier == Key_ForAtLeast:
+            event_is_detected = true_cnt >= quantity_thr
+        elif self._quantifier == Key_ForAtMost:
+            event_is_detected = true_cnt <= quantity_thr
 
         # add detected event to the result object
         if not hasattr(result, "events_detected"):
             result.events_detected = set()
         if event_is_detected:
             result.events_detected.add(self._event_name)
+
+    def annotate(self, result, image: np.ndarray) -> np.ndarray:
+        """
+        Display fired events on a given image
+
+        Args:
+            result: PySDK result object to display (should be the same as used in analyze() method)
+            image (np.ndarray): image to display on
+
+        Returns:
+            np.ndarray: annotated image
+        """
+
+        if (
+            not self._show_overlay
+            or not hasattr(result, "events_detected")
+            or not result.events_detected
+            or self._event_name not in result.events_detected
+        ):
+            return image
+
+        bg_color = (
+            color_complement(result.overlay_color)
+            if self._annotation_color is None
+            else self._annotation_color
+        )
+        text_color = deduce_text_color(bg_color)
+
+        if isinstance(self._annotation_pos, AnchorPoint):
+            pos = get_image_anchor_point(
+                image.shape[1], image.shape[0], self._annotation_pos
+            )
+        else:
+            pos = self._annotation_pos
+
+        return put_text(
+            image,
+            self._event_name,
+            pos,
+            font_color=text_color,
+            bg_color=bg_color,
+            font_scale=(
+                result.overlay_font_scale
+                if self._annotation_font_scale is None
+                else self._annotation_font_scale
+            ),
+            corner_position=CornerPosition.AUTO,
+        )

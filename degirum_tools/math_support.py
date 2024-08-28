@@ -627,6 +627,20 @@ def get_anchor_coordinates(xyxy: np.ndarray, anchor: AnchorPoint) -> np.ndarray:
     raise ValueError(f"{anchor} is not supported.")
 
 
+def get_image_anchor_point(w: int, h: int, anchor: AnchorPoint) -> tuple:
+    """
+    Get the coordinates of a specific anchor point within the image
+
+    Args:
+        w (int): width of the image
+        h (int): height of the image
+        anchor (AnchorPoint): An anchor point within the image
+    """
+    return tuple(
+        get_anchor_coordinates(np.array([[0, 0, w, h]]), anchor).astype(int)[0]
+    )
+
+
 def intersect(a, b, c, d) -> bool:
     """Check intersection of two lines
 

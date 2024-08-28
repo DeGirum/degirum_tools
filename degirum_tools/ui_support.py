@@ -17,12 +17,20 @@ from pathlib import Path
 
 
 def deduce_text_color(bg_color: tuple):
-    """Deduce text color from background color"""
+    """Deduce text color from background color
+
+    Args:
+        bg_color - background color (RGB)
+    """
     return (0, 0, 0) if luminance(bg_color) > 180 else (255, 255, 255)
 
 
 def color_complement(color):
-    """Return color complement: 255 - color"""
+    """Return color complement: 255 - color
+
+    Args:
+        color - color to complement (RGB)
+    """
     adj_color = (color[0] if isinstance(color, list) else color)[::-1]
     return tuple([255 - c for c in adj_color])
 
@@ -68,6 +76,7 @@ def ipython_display(obj: Any, clear: bool = False, display_id: Optional[str] = N
 class CornerPosition(Enum):
     """Corner position options"""
 
+    AUTO = 0
     TOP_LEFT = 1
     TOP_RIGHT = 2
     BOTTOM_LEFT = 3
@@ -94,8 +103,8 @@ def put_text(
         label - text to draw
         corner_xy - text corner coordinate tuple (x,y); meaning depends on `corner_position` argument
         corner_position - where to place text relative to corner_xy
-        font_color - text color (BGR)
-        bg_color - background color (BGR) or None for transparent
+        font_color - text color (RGB)
+        bg_color - background color (RGB) or None for transparent
         font_face - font to use
         font_scale - font scale factor to use
         font_thickness - font thickness to use
@@ -107,6 +116,9 @@ def put_text(
 
     if not label:
         return image
+
+    font_color = font_color[::-1]  # RGB to BGR
+    bg_color = bg_color[::-1] if bg_color is not None else None
 
     im_h, im_w = image.shape[:2]
     margin = 6
@@ -140,6 +152,19 @@ def put_text(
         lines.append(li)
 
     max_width += margin
+
+    # deduce corner position if AUTO
+    if corner_position == CornerPosition.AUTO:
+        if corner_xy[0] < im_w / 2:
+            if corner_xy[1] < im_h / 2:
+                corner_position = CornerPosition.TOP_LEFT
+            else:
+                corner_position = CornerPosition.BOTTOM_LEFT
+        else:
+            if corner_xy[1] < im_h / 2:
+                corner_position = CornerPosition.TOP_RIGHT
+            else:
+                corner_position = CornerPosition.BOTTOM_RIGHT
 
     # adjust coordinates according to corner_position option
     if corner_position != CornerPosition.TOP_LEFT:
@@ -513,12 +538,20 @@ class Display:
                 cv2.imshow(self._capt, img)
                 self._window_created = True
                 key = cv2.waitKey(waitkey_delay) & 0xFF
+                # process pause
+                if key == ord(" "):
+                    while True:
+                        key = cv2.waitKey(waitkey_delay) & 0xFF
+                        if key == ord(" ") or key == ord("x") or key == ord("q"):
+                            break
+                # process exit keys
                 if key == ord("x") or key == ord("q"):
                     if self._fps:
                         self._fps.reset()
                     raise KeyboardInterrupt
+                # process resize keys
                 elif key == 43 or key == 45:  # +/-
-                    _, _, w, h = cv2.getWindowImageRect(self._capt)
+                    _, _, w, _ = cv2.getWindowImageRect(self._capt)
                     factor = 1.25 if key == 43 else 0.75
                     new_w = max(100, int(w * factor))
                     new_h = int(new_w * img.shape[0] / img.shape[1])

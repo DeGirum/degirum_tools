@@ -167,6 +167,8 @@ class ZoneCounter(ResultAnalyzerBase):
         use_tracking: Optional[bool] = False,
         timeout_frames: int = 0,
         window_name: Optional[str] = None,
+        show_overlay: bool = True,
+        annotation_color: Optional[tuple] = None,
     ):
         """Constructor
 
@@ -185,6 +187,8 @@ class ZoneCounter(ResultAnalyzerBase):
                 (object tracker must precede this analyzer in the pipeline)
             timeout_frames (int, optional): number of frames to buffer when an object disappears from zone
             window_name (str, optional): optional OpenCV window name to configure for interactive zone adjustment
+            show_overlay: if True, annotate image; if False, send through original image
+            annotation_color: Color to use for annotations, None to use complement to result overlay color
         """
 
         self._wh: Optional[Tuple] = None
@@ -206,6 +210,8 @@ class ZoneCounter(ResultAnalyzerBase):
         self._polygons = [
             np.array(polygon, dtype=np.int32) for polygon in count_polygons
         ]
+        self._show_overlay = show_overlay
+        self._annotation_color = annotation_color
 
     def analyze(self, result):
         """
@@ -321,7 +327,14 @@ class ZoneCounter(ResultAnalyzerBase):
             np.ndarray: annotated image
         """
 
-        line_color = color_complement(result.overlay_color)
+        if not self._show_overlay:
+            return image
+
+        line_color = (
+            color_complement(result.overlay_color)
+            if self._annotation_color is None
+            else self._annotation_color
+        )
         text_color = deduce_text_color(line_color)
 
         # draw annotations

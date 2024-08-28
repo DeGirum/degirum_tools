@@ -8,7 +8,7 @@
 #
 
 import numpy as np, cv2
-from typing import List, Dict
+from typing import List, Dict, Optional
 from copy import deepcopy
 from .ui_support import put_text, color_complement, deduce_text_color, CornerPosition
 from .result_analyzer_base import ResultAnalyzerBase
@@ -59,7 +59,10 @@ class LineCounter(ResultAnalyzerBase):
         lines: List[tuple],
         anchor_point: AnchorPoint = AnchorPoint.BOTTOM_CENTER,
         *,
+        accumulate: bool = True,
         per_class_display: bool = False,
+        show_overlay: bool = True,
+        annotation_color: Optional[tuple] = None,
     ):
         """Constructor
 
@@ -69,12 +72,17 @@ class LineCounter(ResultAnalyzerBase):
             anchor_point (AnchorPoint, optional): bbox anchor point to be used for tracing object trails
             per_class_display (bool, optional): when True, display counts per class,
                 otherwise display total counts
-
+            accumulate (bool, optional): when True, accumulate line counts; when False, store line counts only for current
+            show_overlay: if True, annotate image; if False, send through original image
+            annotation_color: Color to use for annotations, None to use complement to result overlay color
         """
 
         self._lines = lines
         self._anchor_point = anchor_point
         self._per_class_display = per_class_display
+        self._accumulate = accumulate
+        self._show_overlay = show_overlay
+        self._annotation_color = annotation_color
         self.reset()
 
     def reset(self):
@@ -119,6 +127,9 @@ class LineCounter(ResultAnalyzerBase):
             else:
                 counts.bottom += 1
 
+        if not self._accumulate:
+            self._line_counts = [LineCounts() for _ in self._lines]
+
         for tid in new_trails:
             trail = get_anchor_coordinates(
                 np.array(result.trails[tid]), self._anchor_point
@@ -151,76 +162,75 @@ class LineCounter(ResultAnalyzerBase):
             np.ndarray: annotated image
         """
 
-        if hasattr(result, "line_counts"):
-            line_color = color_complement(result.overlay_color)
-            text_color = deduce_text_color(line_color)
-            margin = 3
-            img_center = (image.shape[1] // 2, image.shape[0] // 2)
+        if not self._show_overlay or not hasattr(result, "line_counts"):
+            return image
 
-            for line_count, line in zip(result.line_counts, self._lines):
-                line_start = line[:2]
-                line_end = line[2:]
+        line_color = (
+            color_complement(result.overlay_color)
+            if self._annotation_color is None
+            else self._annotation_color
+        )
+        text_color = deduce_text_color(line_color)
 
-                cv2.line(
-                    image,
-                    line_start,
-                    line_end,
-                    line_color,
-                    result.overlay_line_width,
+        margin = 3
+        img_center = (image.shape[1] // 2, image.shape[0] // 2)
+
+        for line_count, line in zip(result.line_counts, self._lines):
+            line_start = line[:2]
+            line_end = line[2:]
+
+            cv2.line(
+                image,
+                line_start,
+                line_end,
+                line_color,
+                result.overlay_line_width,
+            )
+
+            mostly_horizontal = abs(line_start[0] - line_end[0]) > abs(
+                line_start[1] - line_end[1]
+            )
+
+            # compute coordinate where to put text
+            if mostly_horizontal:
+                cx = line_start[0] + margin
+                if line_start[1] <= img_center[1]:
+                    cy = line_start[1] + margin
+                    corner = CornerPosition.TOP_LEFT
+                elif line_start[1] > img_center[1]:
+                    cy = line_start[1] - margin
+                    corner = CornerPosition.BOTTOM_LEFT
+            else:
+                cy = line_start[1] + margin
+                if line_start[0] <= img_center[0]:
+                    cx = line_start[0] + margin
+                    corner = CornerPosition.TOP_LEFT
+                elif line_start[0] > img_center[1]:
+                    cx = line_start[0] - margin
+                    corner = CornerPosition.TOP_RIGHT
+
+            def line_count_str(lc: SingleLineCounts, prefix: str = "") -> str:
+                return f"{prefix}^({lc.top}) v({lc.bottom}) <({lc.left}) >({lc.right})"
+
+            if self._per_class_display:
+                capt = "\n".join(
+                    [
+                        line_count_str(class_count, f"{class_name}: ")
+                        for class_name, class_count in line_count.for_class.items()
+                    ]
+                    + [line_count_str(line_count, "Total: ")]
                 )
+            else:
+                capt = line_count_str(line_count)
 
-                mostly_horizontal = abs(line_start[0] - line_end[0]) > abs(
-                    line_start[1] - line_end[1]
-                )
-
-                # compute coordinate where to put text
-                if mostly_horizontal:
-                    cx = min(line_start[0], line_end[0]) + margin
-                    if max(line_start[1], line_end[1]) < img_center[1]:
-                        cy = max(line_start[1], line_end[1]) + margin
-                        corner = CornerPosition.TOP_LEFT
-                    elif min(line_start[1], line_end[1]) > img_center[1]:
-                        cy = min(line_start[1], line_end[1]) - margin
-                        corner = CornerPosition.BOTTOM_LEFT
-                    else:
-                        cy = (line_start[1] + line_end[1]) // 2
-                        corner = CornerPosition.TOP_LEFT
-                else:
-                    cy = min(line_start[1], line_end[1]) + margin
-                    if max(line_start[0], line_end[0]) < img_center[0]:
-                        cx = max(line_start[0], line_end[0]) + margin
-                        corner = CornerPosition.TOP_LEFT
-                    elif min(line_start[0], line_end[0]) > img_center[1]:
-                        cx = min(line_start[0], line_end[0]) - margin
-                        corner = CornerPosition.TOP_RIGHT
-                    else:
-                        cx = (line_start[0] + line_end[0]) // 2
-                        corner = CornerPosition.TOP_LEFT
-
-                def line_count_str(lc: SingleLineCounts, prefix: str = "") -> str:
-                    return (
-                        f"{prefix}^({lc.top}) v({lc.bottom}) <({lc.left}) >({lc.right})"
-                    )
-
-                if self._per_class_display:
-                    capt = "\n".join(
-                        [
-                            line_count_str(class_count, f"{class_name}: ")
-                            for class_name, class_count in line_count.for_class.items()
-                        ]
-                        + [line_count_str(line_count, "Total: ")]
-                    )
-                else:
-                    capt = line_count_str(line_count)
-
-                put_text(
-                    image,
-                    capt,
-                    (cx, cy),
-                    corner_position=corner,
-                    font_color=text_color,
-                    bg_color=line_color,
-                    font_scale=result.overlay_font_scale,
-                )
+            put_text(
+                image,
+                capt,
+                (cx, cy),
+                corner_position=corner,
+                font_color=text_color,
+                bg_color=line_color,
+                font_scale=result.overlay_font_scale,
+            )
 
         return image
