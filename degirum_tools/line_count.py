@@ -8,7 +8,7 @@
 #
 
 import numpy as np, cv2
-from typing import Dict, Optional, Any
+from typing import List, Dict, Optional, Any
 from copy import deepcopy
 from .ui_support import put_text, color_complement, deduce_text_color, CornerPosition
 from .result_analyzer_base import ResultAnalyzerBase
@@ -24,6 +24,15 @@ class SingleLineCounts:
         self.top: int = 0
         self.bottom: int = 0
 
+    def __iadd__(self, other):
+        if not isinstance(other, SingleLineCounts):
+            return NotImplemented
+        self.left += other.left
+        self.right += other.right
+        self.top += other.top
+        self.bottom += other.bottom
+        return self
+
 
 class LineCounts(SingleLineCounts):
     """Class to hold total line crossing counts and counts for multiple classes"""
@@ -31,6 +40,15 @@ class LineCounts(SingleLineCounts):
     def __init__(self):
         super().__init__()
         self.for_class: Dict[str, SingleLineCounts] = {}
+
+    def __iadd__(self, other):
+        if not isinstance(other, SingleLineCounts):
+            return NotImplemented
+        self.left += other.left
+        self.right += other.right
+        self.top += other.top
+        self.bottom += other.bottom
+        return self
 
 
 class LineCounter(ResultAnalyzerBase):
@@ -54,13 +72,13 @@ class LineCounter(ResultAnalyzerBase):
 
     def __init__(
         self,
-        lines: np.ndarray,
+        lines: List[tuple],
         anchor_point: AnchorPoint = AnchorPoint.BOTTOM_CENTER,
+        *,
         whole_trail: bool = True,
         count_first_crossing: bool = True,
         absolute_directions: bool = True,
         accumulate: bool = True,
-        *,
         per_class_display: bool = False,
         show_overlay: bool = True,
         window_name: Optional[str] = None,
@@ -69,7 +87,7 @@ class LineCounter(ResultAnalyzerBase):
 
         Args:
             lines (list[tuple]): list of line coordinates;
-                each list element is 2-element tuple of tuples, each of which is an (x,y) line coordinate
+                each list element is 4-element tuple of (x1,y1,x2,y2) line coordinates
             anchor_point (AnchorPoint, optional): bbox anchor point to be used for tracing object trails
             whole_trail (bool, optional): when True, last and first points of trail are used to determine if
                 trail intersects a line; when False, last and second-to-last points of trail are used
@@ -113,7 +131,7 @@ class LineCounter(ResultAnalyzerBase):
 
         Adds `line_counts` list of dataclasses to the `result` object - one element per crossing line.
         Each dataclass contains four attributes: `left`, `right`, `top`, and `bottom`. Each attribute
-        value is the number of occurrences of a trail crossing the corresponding line from the
+        value is the number of occurrences of a trail crossing the corresponding line to the
         corresponding direction. For each trail crossing, two directions are updated:
         `left` vs `right`, and `top` vs `bottom`.
 
@@ -137,9 +155,8 @@ class LineCounter(ResultAnalyzerBase):
         if self._count_first_crossing:
             new_trails = new_trails - self._counted_trails
 
-        def count_increment(
-            counts, trail_vector, line_vector, cross_product, trail_onto_line_projection
-        ):
+        def count_increment(trail_vector, line_vector):
+            counts = SingleLineCounts()
             if self._absolute_directions:
                 if trail_vector[0] < 0:
                     counts.left += 1
@@ -150,6 +167,7 @@ class LineCounter(ResultAnalyzerBase):
                 else:
                     counts.bottom += 1
             else:
+                cross_product = np.cross(trail_vector, line_vector)
                 if cross_product > 0:
                     counts.left += 1
                 elif cross_product < 0:
@@ -160,6 +178,7 @@ class LineCounter(ResultAnalyzerBase):
                     else:
                         counts.right += 1
 
+                trail_onto_line_projection = self._projection(line_vector, trail_vector)
                 trail_onto_line_projection_sign = np.sign(trail_onto_line_projection)
                 if np.all(trail_onto_line_projection_sign == np.sign(line_vector)):
                     counts.top += 1
@@ -171,6 +190,7 @@ class LineCounter(ResultAnalyzerBase):
                             counts.top += 1
                     else:
                         counts.bottom += 1
+            return counts
 
         if not self._accumulate:
             self._line_counts = [LineCounts() for _ in self._lines]
@@ -182,36 +202,23 @@ class LineCounter(ResultAnalyzerBase):
             if len(trail) > 1:
                 trail_start = trail[0] if self._whole_trail else trail[-2]
                 trail_end = trail[-1]
+                trail_vector = self._line_to_vector(
+                    trail_start.tolist() + trail_end.tolist()
+                )
 
                 for total_count, line, line_vector in zip(
                     self._line_counts, self._lines, self._line_vectors
                 ):
-                    if intersect(line[0], line[1], trail_start, trail_end):
+                    if intersect(line[:2], line[2:], trail_start, trail_end):
                         if self._count_first_crossing:
                             self._counted_trails.add(tid)
-                        trail_vector = self._line_to_vector((trail_start, trail_end))
-                        cross_product = np.cross(trail_vector, line_vector)
-                        trail_onto_line_projection = self._projection(
-                            line_vector, trail_vector
-                        )
-                        count_increment(
-                            total_count,
-                            trail_vector,
-                            line_vector,
-                            cross_product,
-                            trail_onto_line_projection,
-                        )
+                        increment = count_increment(trail_vector, line_vector)
+                        total_count += increment
                         if self._per_class_display:
                             class_count = total_count.for_class.setdefault(
                                 result.trail_classes[tid], SingleLineCounts()
                             )
-                            count_increment(
-                                class_count,
-                                trail_vector,
-                                line_vector,
-                                cross_product,
-                                trail_onto_line_projection,
-                            )
+                            class_count += increment
 
         result.line_counts = deepcopy(self._line_counts)
 
@@ -234,8 +241,8 @@ class LineCounter(ResultAnalyzerBase):
             img_center = (image.shape[1] // 2, image.shape[0] // 2)
 
             for line_count, line in zip(result.line_counts, self._lines):
-                line_start = line[0]
-                line_end = line[1]
+                line_start = line[:2]
+                line_end = line[2:]
 
                 cv2.line(
                     image,
@@ -323,7 +330,7 @@ class LineCounter(ResultAnalyzerBase):
         """
         Return vector defined by line segment.
         """
-        return line[1] - line[0]
+        return np.array([line[2] - line[0], line[3] - line[1]])
 
     def _projection(self, a: np.ndarray, b: np.ndarray):
         """
@@ -344,7 +351,7 @@ class LineCounter(ResultAnalyzerBase):
 
         if event == cv2.EVENT_LBUTTONDOWN:
             for idx, line in enumerate(self._lines):
-                line_start_to_point_vector = click_point - line[0]
+                line_start_to_point_vector = click_point - line[:2]
                 line_vector = self._line_vectors[idx]
                 if (
                     np.linalg.norm(
@@ -361,7 +368,7 @@ class LineCounter(ResultAnalyzerBase):
 
         if event == cv2.EVENT_RBUTTONDOWN:
             for idx, line in enumerate(self._lines):
-                for pt in line:
+                for pt in [line[:2], line[2:]]:
                     if np.linalg.norm(pt - click_point) < 10:
                         line_update()
                         self._gui_state["dragging"] = pt
