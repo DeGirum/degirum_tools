@@ -167,6 +167,8 @@ class ZoneCounter(ResultAnalyzerBase):
         use_tracking: Optional[bool] = False,
         timeout_frames: int = 0,
         window_name: Optional[str] = None,
+        show_overlay: bool = True,
+        annotation_color: Optional[tuple] = None,
     ):
         """Constructor
 
@@ -185,6 +187,8 @@ class ZoneCounter(ResultAnalyzerBase):
                 (object tracker must precede this analyzer in the pipeline)
             timeout_frames (int, optional): number of frames to buffer when an object disappears from zone
             window_name (str, optional): optional OpenCV window name to configure for interactive zone adjustment
+            show_overlay: if True, annotate image; if False, send through original image
+            annotation_color: Color to use for annotations, None to use complement to result overlay color
         """
 
         self._wh: Optional[Tuple] = None
@@ -206,6 +210,8 @@ class ZoneCounter(ResultAnalyzerBase):
         self._polygons = [
             np.array(polygon, dtype=np.int32) for polygon in count_polygons
         ]
+        self._show_overlay = show_overlay
+        self._annotation_color = annotation_color
 
     def analyze(self, result):
         """
@@ -243,34 +249,35 @@ class ZoneCounter(ResultAnalyzerBase):
         filtered_results = [
             obj
             for obj in result.results
-            if "bbox" in obj and in_class_list(obj.get("label", None))
+            if "bbox" in obj
+            and in_class_list(obj.get("label"))
+            and (not self._use_tracking or "track_id" in obj)
         ]
 
-        if self._use_tracking:
-            filtered_results = [obj for obj in filtered_results if "track_id" in obj]
-            if hasattr(result, "trails"):
-                active_tids = [obj["track_id"] for obj in filtered_results]
-                lost_results = [
-                    {
-                        "bbox": result.trails[tid][-1],
-                        "label": result.trail_classes[tid],
-                        "track_id": tid,
-                    }
-                    for tid in set(result.trails.keys())
-                    if tid not in active_tids
-                    and in_class_list(result.trail_classes[tid])
-                ]
-                filtered_results.extend(lost_results)
+        if self._use_tracking and hasattr(result, "trails"):
+            active_tids = [obj["track_id"] for obj in filtered_results]
+            lost_results = [
+                {
+                    "bbox": result.trails[tid][-1],
+                    "label": label,
+                    "track_id": tid,
+                }
+                for tid, label in result.trail_classes.items()
+                if tid not in active_tids and in_class_list(label)
+            ]
+            filtered_results.extend(lost_results)
 
         if len(filtered_results) == 0:
             return
 
         bboxes = np.array([obj["bbox"] for obj in filtered_results])
 
+        use_trails = self._use_tracking and self._timeout_frames > 0
+
         for zi, zone in enumerate(self._zones):
-            triggers = zone.trigger(bboxes)
+            triggers = zone.trigger(bboxes)  # detect object in zones
             zone_counts = result.zone_counts[zi]
-            if self._use_tracking and self._timeout_frames > 0:
+            if use_trails:
                 all_tids_in_zone = []
 
             for obj, flag in zip(filtered_results, triggers):
@@ -282,13 +289,13 @@ class ZoneCounter(ResultAnalyzerBase):
                         else "total"
                     )
                     zone_counts[label] = zone_counts.get(label, 0) + 1
-                    if self._use_tracking and self._timeout_frames > 0:
+                    if use_trails:
                         tid = obj["track_id"]
                         zone._timeout_count_dict[tid] = zone._timeout_count_initial
                         zone._object_label_dict[tid] = obj["label"]
                         all_tids_in_zone.append(tid)
 
-            if self._use_tracking and self._timeout_frames > 0:
+            if use_trails:
                 inactive_set = set(zone._timeout_count_dict.keys())
                 if len(all_tids_in_zone) > 0:
                     inactive_set -= set(all_tids_in_zone)
@@ -320,7 +327,14 @@ class ZoneCounter(ResultAnalyzerBase):
             np.ndarray: annotated image
         """
 
-        line_color = color_complement(result.overlay_color)
+        if not self._show_overlay:
+            return image
+
+        line_color = (
+            color_complement(result.overlay_color)
+            if self._annotation_color is None
+            else self._annotation_color
+        )
         text_color = deduce_text_color(line_color)
 
         # draw annotations

@@ -113,6 +113,11 @@ def _create_analyzing_postprocessor_class(
         def __getattr__(self, attr):
             return getattr(self._result, attr)
 
+        def __dir__(self):
+            return self._result.__dir__() + [
+                d for d in self._result.__dict__ if not d.startswith("_")
+            ]
+
         # store analyzers
         _analyzers = (
             analyzers
