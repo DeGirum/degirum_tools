@@ -256,7 +256,7 @@ class VideoWriter:
 
         if self._writer is None:
             return
-        
+
         process_to_wait = None
         if self._use_ffmpeg:
             import psutil
