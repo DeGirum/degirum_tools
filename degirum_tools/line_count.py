@@ -59,6 +59,7 @@ class LineCounter(ResultAnalyzerBase):
         lines: List[tuple],
         anchor_point: AnchorPoint = AnchorPoint.BOTTOM_CENTER,
         *,
+        accumulate: bool = True,
         per_class_display: bool = False,
         show_overlay: bool = True,
         annotation_color: Optional[tuple] = None,
@@ -71,6 +72,7 @@ class LineCounter(ResultAnalyzerBase):
             anchor_point (AnchorPoint, optional): bbox anchor point to be used for tracing object trails
             per_class_display (bool, optional): when True, display counts per class,
                 otherwise display total counts
+            accumulate (bool, optional): when True, accumulate line counts; when False, store line counts only for current
             show_overlay: if True, annotate image; if False, send through original image
             annotation_color: Color to use for annotations, None to use complement to result overlay color
         """
@@ -78,6 +80,7 @@ class LineCounter(ResultAnalyzerBase):
         self._lines = lines
         self._anchor_point = anchor_point
         self._per_class_display = per_class_display
+        self._accumulate = accumulate
         self._show_overlay = show_overlay
         self._annotation_color = annotation_color
         self.reset()
@@ -123,6 +126,9 @@ class LineCounter(ResultAnalyzerBase):
                 counts.top += 1
             else:
                 counts.bottom += 1
+
+        if not self._accumulate:
+            self._line_counts = [LineCounts() for _ in self._lines]
 
         for tid in new_trails:
             trail = get_anchor_coordinates(
