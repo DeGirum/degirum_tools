@@ -28,39 +28,35 @@ def test_event_detector():
         # ----------------------------------------------------------------
         # Basic tests
         # ----------------------------------------------------------------
-        # syntax error in params
         {
+            "case": "basic: syntax error in params",
             "params": "Some incorrect text",
         },
-        # params schema incomplete
         {
+            "case": "basic: params schema incomplete",
             "params": """
                 Trigger: MyEvent
-                When: ObjectCount
-            """
+                when: ObjectCount
+            """,
         },
-        # no objects
         {
+            "case": "basic: no objects",
             "params": """
                 Trigger: MyEvent
-                When: ObjectCount
-                Is:
-                    Always: Greater
-                    Than: 0
-                For: [1, frames]
+                when: ObjectCount
+                is greater than: 0
+                during: [1, frame]
             """,
             "inp": [{"results": []}],
             "res": [set()],
         },
-        # some objects
         {
+            "case": "basic: some objects",
             "params": """
                 Trigger: MyEvent
-                When: ObjectCount
-                Is:
-                    Always: Equal
-                    To: 2
-                For: [1, frames]
+                when: ObjectCount
+                is equal to: 2
+                during: [1, frame]
             """,
             "inp": [
                 {
@@ -75,80 +71,69 @@ def test_event_detector():
         # ----------------------------------------------------------------
         # Tests for conditions (Equal, Greater, etc.)
         # ----------------------------------------------------------------
-        # Equal To: 0
         {
+            "case": "conditions: is equal to: 0",
             "params": """
                 Trigger: MyEvent
-                When: ObjectCount
-                Is:
-                    Always: Equal
-                    To: 0
-                For: [1, frames]
+                when: ObjectCount
+                is equal to: 0
+                during: [1, frame]
             """,
             "inp": [{"results": []}],
             "res": [{"MyEvent"}],
         },
-        # Op_NotEqual To: 0
         {
+            "case": "conditions: is not equal to: 0",
             "params": """
                 Trigger: MyEvent
-                When: ObjectCount
-                Is:
-                    Always: NotEqual
-                    To: 0
-                For: [1, frames]
+                when: ObjectCount
+                is not equal to: 0
+                during: [1, frame]
             """,
             "inp": [{"results": [{"label": "person", "score": 0.5}]}],
             "res": [{"MyEvent"}],
         },
         # Greater Than: 0
         {
+            "case": "conditions: greater than: 0",
             "params": """
                 Trigger: MyEvent
-                When: ObjectCount
-                Is:
-                    Always: Greater
-                    To: 0
-                For: [1, frames]
+                when: ObjectCount
+                is greater than: 0
+                during: [1, frame]
             """,
             "inp": [{"results": [{"label": "person", "score": 0.5}]}],
             "res": [{"MyEvent"}],
         },
-        # GreaterOrEqual Than: 1
         {
+            "case": "conditions: greater than or equal to : 1",
             "params": """
                 Trigger: MyEvent
-                When: ObjectCount
-                Is:
-                    Always: GreaterOrEqual
-                    To: 1
-                For: [1, frames]
+                when: ObjectCount
+                is greater than or equal to: 1
+                during: [1, frame]
             """,
             "inp": [{"results": [{"label": "person", "score": 0.5}]}],
             "res": [{"MyEvent"}],
         },
-        # Less Than: 1
         {
+            "case": "conditions: less than: 1",
             "params": """
                 Trigger: MyEvent
-                When: ObjectCount
-                Is:
-                    Always: Less
-                    Than: 1
-                For: [1, frames]
+                when: ObjectCount
+                is less than: 1
+                during: [1, frame]
             """,
             "inp": [{"results": []}],
             "res": [{"MyEvent"}],
         },
-        # LessOrEqual Than: 2
         {
+            "case": "conditions: less than or equal to: 1",
             "params": """
                 Trigger: MyEvent
-                When: ObjectCount
-                Is:
-                    Always: LessOrEqual
-                    Than: 1
-                For: [1, frames]
+                when: ObjectCount
+                is less than or equal to: 1
+                during: [1, frame]
             """,
             "inp": [{"results": [{"label": "person", "score": 0.5}]}],
             "res": [{"MyEvent"}],
@@ -156,15 +141,13 @@ def test_event_detector():
         # ----------------------------------------------------------------
         # Tests for quantifiers (Always, Sometimes, etc.)
         # ----------------------------------------------------------------
-        # Always
         {
+            "case": "quantifiers: default case (always)",
             "params": """
                 Trigger: MyEvent
-                When: ObjectCount
-                Is:
-                    Always: Equal
-                    To: 1
-                For: [3, frames]
+                when: ObjectCount
+                is equal to: 1
+                during: [3, frames]
             """,
             "inp": [
                 {"results": []},
@@ -175,34 +158,14 @@ def test_event_detector():
             ],
             "res": [set(), set(), set(), set(), {"MyEvent"}],
         },
-        # Sometimes
         {
+            "case": "quantifiers: for at least 2 frames",
             "params": """
                 Trigger: MyEvent
-                When: ObjectCount
-                Is:
-                    Sometimes: Equal
-                    To: 1
-                For: [3, frames]
-            """,
-            "inp": [
-                {"results": []},
-                {"results": []},
-                {"results": [{"label": "person", "score": 0.5}]},
-                {"results": [{"label": "person", "score": 0.5}]},
-                {"results": [{"label": "person", "score": 0.5}]},
-            ],
-            "res": [set(), set(), {"MyEvent"}, {"MyEvent"}, {"MyEvent"}],
-        },
-        # Mostly
-        {
-            "params": """
-                Trigger: MyEvent
-                When: ObjectCount
-                Is:
-                    Mostly: Equal
-                    To: 1
-                For: [3, frames]
+                when: ObjectCount
+                is equal to: 1
+                during: [3, frames]
+                for at least: [2, frames]
             """,
             "inp": [
                 {"results": []},
@@ -213,15 +176,14 @@ def test_event_detector():
             ],
             "res": [set(), set(), set(), {"MyEvent"}, {"MyEvent"}],
         },
-        # Rarely
         {
+            "case": "quantifiers: for at least 50 percent",
             "params": """
                 Trigger: MyEvent
-                When: ObjectCount
-                Is:
-                    Rarely: Equal
-                    To: 1
-                For: [3, frames]
+                when: ObjectCount
+                is equal to: 1
+                during: [3, frames]
+                for at least: [50, percent]
             """,
             "inp": [
                 {"results": []},
@@ -230,31 +192,63 @@ def test_event_detector():
                 {"results": [{"label": "person", "score": 0.5}]},
                 {"results": [{"label": "person", "score": 0.5}]},
             ],
-            "res": [set(), set(), {"MyEvent"}, set(), set()],
+            "res": [set(), set(), set(), {"MyEvent"}, {"MyEvent"}],
+        },
+        {
+            "case": "quantifiers: for at most 2 frames",
+            "params": """
+                Trigger: MyEvent
+                when: ObjectCount
+                is equal to: 1
+                during: [3, frames]
+                for at most: [2, frames]
+            """,
+            "inp": [
+                {"results": []},
+                {"results": []},
+                {"results": [{"label": "person", "score": 0.5}]},
+                {"results": [{"label": "person", "score": 0.5}]},
+                {"results": [{"label": "person", "score": 0.5}]},
+            ],
+            "res": [{"MyEvent"}, {"MyEvent"}, {"MyEvent"}, {"MyEvent"}, set()],
+        },
+        {
+            "case": "quantifiers: for at most 50 percent",
+            "params": """
+                Trigger: MyEvent
+                when: ObjectCount
+                is equal to: 1
+                during: [3, frames]
+                for at most: [50, percent]
+            """,
+            "inp": [
+                {"results": []},
+                {"results": []},
+                {"results": [{"label": "person", "score": 0.5}]},
+                {"results": [{"label": "person", "score": 0.5}]},
+                {"results": [{"label": "person", "score": 0.5}]},
+            ],
+            "res": [{"MyEvent"}, {"MyEvent"}, {"MyEvent"}, set(), set()],
         },
         # ----------------------------------------------------------------
         # Tests for duration (frames, seconds)
         # ----------------------------------------------------------------
-        # 0 frames: expect to fail
         {
+            "case": "duration: 0 frames: expect to fail",
             "params": """
                 Trigger: MyEvent
-                When: ObjectCount
-                Is:
-                    Always: Equal
-                    To: 1
-                For: [0, frames]
+                when: ObjectCount
+                is equal to: 1
+                during: [0, frames]
             """,
         },
-        # 1 frame
         {
+            "case": "duration: 1 frame",
             "params": """
                 Trigger: MyEvent
-                When: ObjectCount
-                Is:
-                    Always: Equal
-                    To: 1
-                For: [1, frames]
+                when: ObjectCount
+                is equal to: 1
+                during: [1, frame]
             """,
             "inp": [
                 {"results": []},
@@ -266,15 +260,13 @@ def test_event_detector():
             ],
             "res": [set(), set(), {"MyEvent"}, {"MyEvent"}, {"MyEvent"}, set()],
         },
-        # 2 frames
         {
+            "case": "duration: 2 frames",
             "params": """
                 Trigger: MyEvent
-                When: ObjectCount
-                Is:
-                    Always: Equal
-                    To: 1
-                For: [2, frames]
+                when: ObjectCount
+                is equal to: 1
+                during: [2, frames]
             """,
             "inp": [
                 {"results": []},
@@ -286,15 +278,13 @@ def test_event_detector():
             ],
             "res": [set(), set(), set(), {"MyEvent"}, {"MyEvent"}, set()],
         },
-        # 4 frames (never satisfied)
         {
+            "case": "duration: 4 frames (never satisfied)",
             "params": """
                 Trigger: MyEvent
-                When: ObjectCount
-                Is:
-                    Always: Equal
-                    To: 1
-                For: [4, frames]
+                when: ObjectCount
+                is equal to: 1
+                during: [4, frames]
             """,
             "inp": [
                 {"results": []},
@@ -306,15 +296,13 @@ def test_event_detector():
             ],
             "res": [set(), set(), set(), set(), set(), set()],
         },
-        # seconds: always satisfied
         {
+            "case": "duration: seconds: always satisfied",
             "params": """
                 Trigger: MyEvent
-                When: ObjectCount
-                Is:
-                    Always: Equal
-                    To: 1
-                For: [2, seconds]
+                when: ObjectCount
+                is equal to: 1
+                during: [2, seconds]
             """,
             "inp": [
                 {"results": [{"label": "person", "score": 0.5}]},
@@ -323,15 +311,13 @@ def test_event_detector():
             ],
             "res": [{"MyEvent"}, {"MyEvent"}, {"MyEvent"}],
         },
-        # seconds: not always satisfied -> no events detected
         {
+            "case": "duration: seconds: not always satisfied -> no events detected",
             "params": """
                 Trigger: MyEvent
-                When: ObjectCount
-                Is:
-                    Always: Equal
-                    To: 1
-                For: [2, seconds]
+                when: ObjectCount
+                is equal to: 1
+                during: [2, seconds]
             """,
             "inp": [
                 {"results": []},
@@ -343,17 +329,15 @@ def test_event_detector():
         # ----------------------------------------------------------------
         # Tests for ObjectCount metric
         # ----------------------------------------------------------------
-        # score filter
         {
+            "case": "ObjectCount: score filter",
             "params": """
                 Trigger: MyEvent
-                When: ObjectCount
-                With:
-                    MinScore: 0.5
-                Is:
-                    Always: Equal
-                    To: 1
-                For: [1, frames]
+                when: ObjectCount
+                with:
+                    min score: 0.5
+                is equal to: 1
+                during: [1, frame]
             """,
             "inp": [
                 {
@@ -365,17 +349,15 @@ def test_event_detector():
             ],
             "res": [{"MyEvent"}],
         },
-        # class filter
         {
+            "case": "ObjectCount: class filter",
             "params": """
                 Trigger: MyEvent
-                When: ObjectCount
-                With:
-                    Classes: ["cat"]
-                Is:
-                    Always: Equal
-                    To: 1
-                For: [1, frames]
+                when: ObjectCount
+                with:
+                    classes: ["cat"]
+                is equal to: 1
+                during: [1, frame]
             """,
             "inp": [
                 {
@@ -387,18 +369,16 @@ def test_event_detector():
             ],
             "res": [{"MyEvent"}],
         },
-        # class and score filter
         {
+            "case": "ObjectCount: class and score filter",
             "params": """
                 Trigger: MyEvent
-                When: ObjectCount
-                With:
-                    MinScore: 0.5
-                    Classes: ["cat"]
-                Is:
-                    Always: Equal
-                    To: 1
-                For: [1, frames]
+                when: ObjectCount
+                with:
+                    min score: 0.5
+                    classes: ["cat"]
+                is equal to: 1
+                during: [1, frame]
             """,
             "inp": [
                 {
@@ -414,99 +394,85 @@ def test_event_detector():
         # ----------------------------------------------------------------
         # Tests for ZoneCount metric
         # ----------------------------------------------------------------
-        # Missing zone counts: expect to fail
         {
+            "case": "ZoneCount: missing zone counts: expect to fail",
             "params": """
                 Trigger: MyEvent
-                When: ZoneCount
-                Is:
-                    Always: Equal
-                    To: 1
-                For: [1, frames]
+                when: ZoneCount
+                is equal to: 1
+                during: [1, frame]
             """,
             "inp": [{}],
             "res": None,
         },
-        # No zone counts
         {
+            "case": "ZoneCount: no zone counts",
             "params": """
                 Trigger: MyEvent
-                When: ZoneCount
-                Is:
-                    Always: Equal
-                    To: 0
-                For: [1, frames]
+                when: ZoneCount
+                is equal to: 0
+                during: [1, frame]
             """,
             "inp": [{"zone_counts": []}],
             "res": [{"MyEvent"}],
         },
-        # One zone, one count, no parameters
         {
+            "case": "ZoneCount: one zone, one count, no parameters",
             "params": """
                 Trigger: MyEvent
-                When: ZoneCount
-                Is:
-                    Always: Equal
-                    To: 1
-                For: [1, frames]
+                when: ZoneCount
+                is equal to: 1
+                during: [1, frame]
             """,
             "inp": [{"zone_counts": [{"total": 1}]}],
             "res": [{"MyEvent"}],
         },
-        # Multiple zones, no parameters
         {
+            "case": "ZoneCount: multiple zones, no parameters",
             "params": """
                 Trigger: MyEvent
-                When: ZoneCount
-                Is:
-                    Always: Equal
-                    To: 6
-                For: [1, frames]
+                when: ZoneCount
+                is equal to: 6
+                during: [1, frame]
             """,
             "inp": [{"zone_counts": [{"total": 1}, {"total": 2}, {"total": 3}]}],
             "res": [{"MyEvent"}],
         },
-        # Multiple zones, zone filter out of range
         {
+            "case": "ZoneCount: multiple zones, zone filter out of range",
             "params": """
                 Trigger: MyEvent
-                When: ZoneCount
-                With:
-                    Index: 3
-                Is:
-                    Always: Equal
-                    To: 3
-                For: [1, frames]
+                when: ZoneCount
+                with:
+                    index: 3
+                is equal to: 3
+                during: [1, frame]
             """,
             "inp": [{"zone_counts": [{"total": 1}, {"total": 2}, {"total": 3}]}],
             "res": None,
         },
-        # Multiple zones, zone filter
         {
+            "case": "ZoneCount: multiple zones, zone filter",
             "params": """
                 Trigger: MyEvent
-                When: ZoneCount
-                With:
-                    Index: 2
-                Is:
-                    Always: Equal
-                    To: 3
-                For: [1, frames]
+                when: ZoneCount
+                with:
+                    index: 2
+                is equal to: 3
+                during: [1, frame]
             """,
             "inp": [{"zone_counts": [{"total": 1}, {"total": 2}, {"total": 3}]}],
             "res": [{"MyEvent"}],
         },
-        # Multiple zones, class filter
         {
+            "case": "ZoneCount: multiple zones, class filter",
             "params": """
                 Trigger: MyEvent
-                When: ZoneCount
-                With:
-                    Classes: ["cat", "dog"]
-                Is:
-                    Always: Equal
-                    To: 10
-                For: [1, frames]
+                when: ZoneCount
+                with:
+                    classes: ["cat", "dog"]
+                is equal to: 10
+                during: [1, frame]
             """,
             "inp": [
                 {
@@ -520,79 +486,69 @@ def test_event_detector():
             ],
             "res": [{"MyEvent"}],
         },
-        # Aggregation in multiple zones: max
         {
+            "case": "ZoneCount: multiple zones, aggregation max",
             "params": """
                 Trigger: MyEvent
-                When: ZoneCount
-                With:
-                    Aggregation: max
-                Is:
-                    Always: Equal
-                    To: 3
-                For: [1, frames]
+                when: ZoneCount
+                with:
+                    aggregation: max
+                is equal to: 3
+                during: [1, frame]
             """,
             "inp": [{"zone_counts": [{"total": 1}, {"total": 2}, {"total": 3}]}],
             "res": [{"MyEvent"}],
         },
-        # Aggregation in multiple zones: min
         {
+            "case": "ZoneCount: multiple zones, aggregation min",
             "params": """
                 Trigger: MyEvent
-                When: ZoneCount
-                With:
-                    Aggregation: min
-                Is:
-                    Always: Equal
-                    To: 1
-                For: [1, frames]
+                when: ZoneCount
+                with:
+                    aggregation: min
+                is equal to: 1
+                during: [1, frame]
             """,
             "inp": [{"zone_counts": [{"total": 1}, {"total": 2}, {"total": 3}]}],
             "res": [{"MyEvent"}],
         },
-        # Aggregation in multiple zones: mean
         {
+            "case": "ZoneCount: multiple zones, aggregation mean",
             "params": """
                 Trigger: MyEvent
-                When: ZoneCount
-                With:
-                    Aggregation: mean
-                Is:
-                    Always: Equal
-                    To: 1.5
-                For: [1, frames]
+                when: ZoneCount
+                with:
+                    aggregation: mean
+                is equal to: 1.5
+                during: [1, frame]
             """,
             "inp": [{"zone_counts": [{"total": 1}, {"total": 2}]}],
             "res": [{"MyEvent"}],
         },
-        # Aggregation in multiple zones: std
         {
+            "case": "ZoneCount: multiple zones, aggregation std",
             "params": """
                 Trigger: MyEvent
-                When: ZoneCount
-                With:
-                    Aggregation: std
-                Is:
-                    Always: Equal
-                    To: 0
-                For: [1, frames]
+                when: ZoneCount
+                with:
+                    aggregation: std
+                is equal to: 0
+                during: [1, frame]
             """,
             "inp": [{"zone_counts": [{"total": 1}, {"total": 1}, {"total": 1}]}],
             "res": [{"MyEvent"}],
         },
-        # Multiple zones, zone and class filters, aggregation sum
         {
+            "case": "ZoneCount: multiple zones, zone and class filters, aggregation sum",
             "params": """
                 Trigger: MyEvent
-                When: ZoneCount
-                With:
-                    Classes: ["cat", "dog"]
-                    Index: 0
-                    Aggregation: sum
-                Is:
-                    Always: Equal
-                    To: 2
-                For: [1, frames]
+                when: ZoneCount
+                with:
+                    classes: ["cat", "dog"]
+                    index: 0
+                    aggregation: sum
+                is equal to: 2
+                during: [1, frame]
             """,
             "inp": [
                 {
@@ -609,54 +565,46 @@ def test_event_detector():
         # ----------------------------------------------------------------
         # Tests for LineCount metric
         # ----------------------------------------------------------------
-        # Missing line counts: expect to fail
         {
+            "case": "LineCount: missing line counts: expect to fail",
             "params": """
                 Trigger: MyEvent
-                When: LineCount
-                Is:
-                    Always: Equal
-                    To: 1
-                For: [1, frames]
+                when: LineCount
+                is equal to: 1
+                during: [1, frame]
             """,
             "inp": [{}],
             "res": None,
         },
-        # No line counts
         {
+            "case": "LineCount: no line counts",
             "params": """
                 Trigger: MyEvent
-                When: LineCount
-                Is:
-                    Always: Equal
-                    To: 0
-                For: [1, frames]
+                when: LineCount
+                is equal to: 0
+                during: [1, frame]
             """,
             "inp": [{"line_counts": []}],
             "res": [{"MyEvent"}],
         },
-        # One line, zero counts
         {
+            "case": "LineCount: one line, zero counts",
             "params": """
                 Trigger: MyEvent
-                When: LineCount
-                Is:
-                    Always: Equal
-                    To: 0
-                For: [1, frames]
+                when: LineCount
+                is equal to: 0
+                during: [1, frame]
             """,
             "inp": [{"line_counts": [degirum_tools.LineCounts()]}],
             "res": [{"MyEvent"}],
         },
-        # Multiple line, some counts, no filters
         {
+            "case": "LineCount: multiple lines, some counts, no filters",
             "params": """
                 Trigger: MyEvent
-                When: LineCount
-                Is:
-                    Always: Equal
-                    To: 110
-                For: [1, frames]
+                when: LineCount
+                is equal to: 110
+                during: [1, frame]
             """,
             "inp": [
                 {
@@ -668,17 +616,15 @@ def test_event_detector():
             ],
             "res": [{"MyEvent"}],
         },
-        # Multiple line, some counts, line filter
         {
+            "case": "LineCount: multiple lines, some counts, line filter",
             "params": """
                 Trigger: MyEvent
-                When: LineCount
-                With:
-                    Index: 1
-                Is:
-                    Always: Equal
-                    To: 100
-                For: [1, frames]
+                when: LineCount
+                with:
+                    index: 1
+                is equal to: 100
+                during: [1, frame]
             """,
             "inp": [
                 {
@@ -690,17 +636,15 @@ def test_event_detector():
             ],
             "res": [{"MyEvent"}],
         },
-        # Multiple line, some counts, direction filter
         {
+            "case": "LineCount: multiple lines, some counts, direction filter",
             "params": """
                 Trigger: MyEvent
-                When: LineCount
-                With:
-                    Directions: [left, right]
-                Is:
-                    Always: Equal
-                    To: 33
-                For: [1, frames]
+                when: LineCount
+                with:
+                    directions: [left, right]
+                is equal to: 33
+                during: [1, frame]
             """,
             "inp": [
                 {
@@ -712,17 +656,15 @@ def test_event_detector():
             ],
             "res": [{"MyEvent"}],
         },
-        # Multiple line, some counts, class filter
         {
+            "case": "LineCount: multiple lines, some counts, class filter",
             "params": """
                 Trigger: MyEvent
-                When: LineCount
-                With:
-                    Classes: ["cat", "dog"]
-                Is:
-                    Always: Equal
-                    To: 200
-                For: [1, frames]
+                when: LineCount
+                with:
+                    classes: ["cat", "dog"]
+                is equal to: 200
+                during: [1, frame]
             """,
             "inp": [
                 {
@@ -754,19 +696,17 @@ def test_event_detector():
             ],
             "res": [{"MyEvent"}],
         },
-        # Multiple line, some counts, all filters
         {
+            "case": "LineCount: multiple lines, some counts, all filters",
             "params": """
                 Trigger: MyEvent
-                When: LineCount
-                With:
-                    Index: 1
-                    Classes: ["cat", "dog"]
-                    Directions: [top, bottom]
-                Is:
-                    Always: Equal
-                    To: 70
-                For: [1, frames]
+                when: LineCount
+                with:
+                    index: 1
+                    classes: ["cat", "dog"]
+                    directions: [top, bottom]
+                is equal to: 70
+                during: [1, frame]
             """,
             "inp": [
                 {
@@ -807,7 +747,12 @@ def test_event_detector():
                 event_detector = degirum_tools.EventDetector(case["params"])
             continue
 
-        event_detector = degirum_tools.EventDetector(case["params"])
+        try:
+            event_detector = degirum_tools.EventDetector(case["params"])
+        except Exception as e:
+            raise Exception(
+                f"Case `{case['case']}` failed: {e}\nConfig: {case['params']}"
+            )
 
         for i, input in enumerate(case["inp"]):
             result = D2C(**input)
@@ -820,7 +765,7 @@ def test_event_detector():
                 assert (
                     result.events_detected == case["res"][i]  # type: ignore[attr-defined]
                 ), (
-                    f"Case {ci} failed at step {i}: "
+                    f"Case `{case['case']}` failed at step {i}: "
                     + f"detected events `{result.events_detected}` "  # type: ignore[attr-defined]
                     + f"do not match expected `{case['res'][i]}`."
                     + f"\nConfig: {case['params']}"
