@@ -538,12 +538,20 @@ class Display:
                 cv2.imshow(self._capt, img)
                 self._window_created = True
                 key = cv2.waitKey(waitkey_delay) & 0xFF
+                # process pause
+                if key == ord(" "):
+                    while True:
+                        key = cv2.waitKey(waitkey_delay) & 0xFF
+                        if key == ord(" ") or key == ord("x") or key == ord("q"):
+                            break
+                # process exit keys
                 if key == ord("x") or key == ord("q"):
                     if self._fps:
                         self._fps.reset()
                     raise KeyboardInterrupt
+                # process resize keys
                 elif key == 43 or key == 45:  # +/-
-                    _, _, w, h = cv2.getWindowImageRect(self._capt)
+                    _, _, w, _ = cv2.getWindowImageRect(self._capt)
                     factor = 1.25 if key == 43 else 0.75
                     new_w = max(100, int(w * factor))
                     new_h = int(new_w * img.shape[0] / img.shape[1])
