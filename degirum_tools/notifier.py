@@ -210,7 +210,9 @@ class EventNotifier(ResultAnalyzerBase):
             return image
 
         if hasattr(result, "notifications") and result.notifications:
-            self._last_notifications = result.notifications
+            self._last_notifications = {
+                k: v for k, v in result.notifications.items() if self._name == k
+            }
             self._last_display_time = time.time()
         else:
             if (

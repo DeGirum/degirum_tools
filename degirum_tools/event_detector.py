@@ -469,6 +469,7 @@ class EventDetector(ResultAnalyzerBase):
             not self._show_overlay
             or not hasattr(result, "events_detected")
             or not result.events_detected
+            or self._event_name not in result.events_detected
         ):
             return image
 
@@ -488,7 +489,7 @@ class EventDetector(ResultAnalyzerBase):
 
         return put_text(
             image,
-            "\n".join(result.events_detected),
+            self._event_name,
             pos,
             font_color=text_color,
             bg_color=bg_color,
