@@ -41,15 +41,6 @@ class LineCounts(SingleLineCounts):
         super().__init__()
         self.for_class: Dict[str, SingleLineCounts] = {}
 
-    def __iadd__(self, other):
-        if not isinstance(other, SingleLineCounts):
-            return NotImplemented
-        self.left += other.left
-        self.right += other.right
-        self.top += other.top
-        self.bottom += other.bottom
-        return self
-
 
 class LineCounter(ResultAnalyzerBase):
     """
@@ -148,16 +139,12 @@ class LineCounter(ResultAnalyzerBase):
         if not hasattr(result, "trails") or len(result.trails) == 0:
             return
 
-        active_trails = set(result.trails.keys())
-
-        # remove old trails, which are not active anymore (if self._count_first_crossing = True)
+        new_trails = set(result.trails.keys())
         if self._count_first_crossing:
-            self._counted_trails = self._counted_trails & active_trails
-
-        # obtain a set of new trails, which were not counted yet (if self._count_first_crossing = True)
-        new_trails = active_trails
-        if self._count_first_crossing:
-            new_trails = new_trails - self._counted_trails
+            # remove old trails, which are not active anymore
+            self._counted_trails = self._counted_trails & new_trails
+            # obtain a set of new trails, which were not counted yet
+            new_trails -= self._counted_trails
 
         def count_increment(trail_vector, line_vector):
             counts = SingleLineCounts()
