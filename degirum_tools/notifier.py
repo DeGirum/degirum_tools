@@ -37,7 +37,7 @@ class NotificationServer:
         # create message queues and start child process
         self._in_queue: multiprocessing.Queue = multiprocessing.Queue()
         self._out_queue: multiprocessing.Queue = multiprocessing.Queue()
-        self._process = multiprocessing.Process(
+        self._process: Optional[multiprocessing.Process] = multiprocessing.Process(
             target=NotificationServer._process_commands,
             args=(self._in_queue, self._out_queue, title, config, tags),
         )
