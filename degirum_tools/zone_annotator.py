@@ -5,7 +5,7 @@ from tkinter import filedialog, messagebox, OptionMenu
 
 from PIL import Image, ImageTk
 from copy import deepcopy
-from typing import List
+from typing import List, Optional
 
 
 def _zone_annotator_run(results_file_name):
@@ -115,12 +115,12 @@ class ZoneAnnotator:
         self.regions_drop.grid(row=2, column=1)
 
         # Initialize properties
-        self.image_path = ""
-        self.image = None
-        self.canvas_image = None
+        self.image_path: Optional[str] = None
+        self.image: Optional[Image.Image] = None
+        self.canvas_image: Optional[ImageTk.PhotoImage] = None
         self.regions_json: List[dict] = []
-        self.img_width = 0
-        self.img_height = 0
+        self.img_width: int = 0
+        self.img_height: int = 0
         self.regions = [_Region()]
         self.results_file_name = results_file_name
 
