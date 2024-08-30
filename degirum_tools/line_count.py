@@ -24,6 +24,16 @@ class SingleLineCounts:
         self.top: int = 0
         self.bottom: int = 0
 
+    def __eq__(self, other):
+        if not isinstance(other, SingleLineCounts):
+            return NotImplemented
+        return (
+            self.left == other.left
+            and self.right == other.right
+            and self.top == other.top
+            and self.bottom == other.bottom
+        )
+
     def __iadd__(self, other):
         if not isinstance(other, SingleLineCounts):
             return NotImplemented
