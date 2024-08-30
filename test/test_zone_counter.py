@@ -35,7 +35,7 @@ def test_zone_counter():
         {
             "params": {
                 "count_polygons": zones,
-                "triggering_positions": [AnchorPoint.TOP_RIGHT],
+                "triggering_position": AnchorPoint.TOP_RIGHT,
                 "use_tracking": False,
             },
             "inp": [[]],
@@ -45,7 +45,7 @@ def test_zone_counter():
         {
             "params": {
                 "count_polygons": zones,
-                "triggering_positions": [AnchorPoint.TOP_RIGHT],
+                "triggering_position": AnchorPoint.TOP_RIGHT,
                 "use_tracking": False,
             },
             "inp": [
@@ -70,7 +70,7 @@ def test_zone_counter():
         {
             "params": {
                 "count_polygons": zones,
-                "triggering_positions": [AnchorPoint.TOP_RIGHT, AnchorPoint.TOP_LEFT],
+                "triggering_position": [AnchorPoint.TOP_RIGHT, AnchorPoint.TOP_LEFT],
                 "use_tracking": False,
             },
             "inp": [
@@ -96,7 +96,7 @@ def test_zone_counter():
             "params": {
                 "class_list": ["label1"],
                 "count_polygons": zones,
-                "triggering_positions": [AnchorPoint.TOP_RIGHT, AnchorPoint.TOP_LEFT],
+                "triggering_position": [AnchorPoint.TOP_RIGHT, AnchorPoint.TOP_LEFT],
                 "use_tracking": False,
             },
             "inp": [
@@ -121,7 +121,7 @@ def test_zone_counter():
         {
             "params": {
                 "count_polygons": zones,
-                "triggering_positions": [AnchorPoint.TOP_RIGHT],
+                "triggering_position": AnchorPoint.TOP_RIGHT,
                 "bounding_box_scale": 0.5,
                 "use_tracking": False,
             },
@@ -147,7 +147,7 @@ def test_zone_counter():
         {
             "params": {
                 "count_polygons": zones,
-                "triggering_positions": None,
+                "triggering_position": None,
                 "iopa_threshold": 0.2,
                 "use_tracking": False,
             },
@@ -173,7 +173,7 @@ def test_zone_counter():
         {
             "params": {
                 "count_polygons": zones,
-                "triggering_positions": None,
+                "triggering_position": None,
                 "bounding_box_scale": 0.5,
                 "iopa_threshold": 0.2,
                 "use_tracking": False,
@@ -203,7 +203,7 @@ def test_zone_counter():
         {
             "params": {
                 "count_polygons": zones,
-                "triggering_positions": [AnchorPoint.TOP_RIGHT],
+                "triggering_position": AnchorPoint.TOP_RIGHT,
                 "use_tracking": True,
             },
             "inp": [[[]]],
@@ -213,7 +213,7 @@ def test_zone_counter():
         {
             "params": {
                 "count_polygons": zones,
-                "triggering_positions": [AnchorPoint.TOP_RIGHT],
+                "triggering_position": AnchorPoint.TOP_RIGHT,
                 "use_tracking": True,
             },
             "inp": [
@@ -240,7 +240,7 @@ def test_zone_counter():
         {
             "params": {
                 "count_polygons": zones,
-                "triggering_positions": [AnchorPoint.TOP_RIGHT],
+                "triggering_position": AnchorPoint.TOP_RIGHT,
                 "use_tracking": True,
             },
             "inp": [
@@ -346,7 +346,7 @@ def test_zone_counter():
         {
             "params": {
                 "count_polygons": zones,
-                "triggering_positions": [AnchorPoint.TOP_RIGHT],
+                "triggering_position": AnchorPoint.TOP_RIGHT,
                 "use_tracking": True,
                 "timeout_frames": 1,
             },
@@ -467,7 +467,7 @@ def test_zone_counter():
         {
             "params": {
                 "count_polygons": zones,
-                "triggering_positions": [AnchorPoint.TOP_RIGHT],
+                "triggering_position": AnchorPoint.TOP_RIGHT,
                 "use_tracking": True,
                 "timeout_frames": 1,
             },
