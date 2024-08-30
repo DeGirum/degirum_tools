@@ -9,6 +9,7 @@
 
 from typing import List
 import pytest
+import logging
 
 
 def test_notifier():
@@ -176,23 +177,16 @@ def test_notifier():
             "params": {
                 "name": "test",
                 "condition": "a",
-                "message": "OK",
-                "holdoff": [10.0, "seconds"],
-                "tags": "Test, Tg",
-                "token": "json://unittest",
+                "message": "{result.msg}",
+                "notification_tags": "Test, Tg",
+                "notification_config": "json://unittest",
             },
             "inp": [
-                {"events_detected": {}},
-                {"events_detected": {"a"}},
-                {"events_detected": {"a"}},
-                {"events_detected": {"a"}},
-                {"events_detected": {}},
-                {"events_detected": {}},
-                {"events_detected": {"a"}},
-                {"events_detected": {}},
-                {"events_detected": {"a"}},
+                {"events_detected": {"a"}, "msg": "e1"},
+                {"events_detected": {""}},
+                {"events_detected": {"a"}, "msg": "e2"},
             ],
-            "res": [{}, {"test": "OK"}, {}, {}, {}, {}, {}, {}, {}],
+            "res": [{"test": "e1"}, {}, {"test": "e2"}],
         },
     ]
 

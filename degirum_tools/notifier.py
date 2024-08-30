@@ -12,11 +12,11 @@ import numpy as np
 import multiprocessing
 import time
 import os
+import queue
 from typing import Tuple, Union, Optional
 from .result_analyzer_base import ResultAnalyzerBase
 from .ui_support import put_text, color_complement, deduce_text_color, CornerPosition
 from .math_support import AnchorPoint, get_image_anchor_point
-from apprise import Apprise, AppriseConfig
 
 
 class NotificationServer:
@@ -32,12 +32,25 @@ class NotificationServer:
             config: path to the apprise configuration file or notification server URL in apprise format
             tags: tags to use for cloud notifications
         """
-        self._queue: multiprocessing.Queue = multiprocessing.Queue()
+        import atexit
+
+        # create message queues and start child process
+        self._in_queue: multiprocessing.Queue = multiprocessing.Queue()
+        self._out_queue: multiprocessing.Queue = multiprocessing.Queue()
         self._process = multiprocessing.Process(
             target=NotificationServer._process_commands,
-            args=(self._queue, title, config, tags),
+            args=(self._in_queue, self._out_queue, title, config, tags),
         )
         self._process.start()
+
+        response = self._out_queue.get()  # wait for the child process to be ready
+        if isinstance(response, Exception):
+            raise response
+        if not isinstance(response, bool) or not response:
+            raise RuntimeError("Failed to initialize notification server")
+
+        # register atexit handler to send the poison pill
+        atexit.register(self._send_poison)
 
     def send_notification(self, message: str):
         """
@@ -46,44 +59,72 @@ class NotificationServer:
         Args:
             message: notification message
         """
-        self._queue.put(message)
+        self._in_queue.put(message)
+        try:
+            exc = self._out_queue.get_nowait()
+            if isinstance(exc, Exception):
+                raise exc
+        except queue.Empty:
+            pass
 
     @staticmethod
-    def _process_commands(q: multiprocessing.Queue, title: str, config: str, tags: str):
+    def _process_commands(
+        in_queue: multiprocessing.Queue,
+        out_queue: multiprocessing.Queue,
+        title: str,
+        config: str,
+        tags: str,
+    ):
         """
         Process commands from the queue. Runs in separate process.
         """
+        from apprise import Apprise, AppriseConfig
 
-        # initialize Apprise object
-        apprise_obj = Apprise()
-        if os.path.isfile(config):
-            # treat config as a path to the configuration file
-            conf = AppriseConfig()
-            if not conf.add(config):
-                raise ValueError(f"Invalid configuration file: {config}")
-            apprise_obj.add(conf)
-        else:
-            # treat config as a single server URL
-            if not apprise_obj.add(config):
-                raise ValueError(f"Invalid configuration URL: {config}")
+        try:
+            # initialize Apprise object
+            apprise_obj = Apprise()
+            if os.path.isfile(config):
+                # treat config as a path to the configuration file
+                conf = AppriseConfig()
+                if not conf.add(config):
+                    raise ValueError(f"Invalid configuration file: {config}")
+                apprise_obj.add(conf)
+            else:
+                # treat config as a single server URL
+                if not apprise_obj.add(config):
+                    raise ValueError(f"Invalid configuration URL: {config}")
+        except Exception as e:
+            out_queue.put(e)
+            return
+
+        out_queue.put(True)  # to indicate that the child process is ready
 
         # process messages from the queue
         while True:
-            message = q.get()
+            message = in_queue.get()
             if message is None:
                 # poison pill received, exit the loop
                 break
 
-            if "unittest" in config:  # special case for unit tests
-                continue
+            try:
+                if "unittest" in config:  # special case for unit tests
+                    continue
 
-            if not apprise_obj.notify(body=message, title=title, tag=tags):
-                raise Exception(f"Notification failed: {title} - {message}")
+                if not apprise_obj.notify(body=message, title=title, tag=tags):
+                    raise Exception(f"Notification failed: {title} - {message}")
+            except Exception as e:
+                out_queue.put(e)
+
+    def _send_poison(self):
+        """Send the poison pill to stop the child process"""
+        if self._process is not None:
+            self._in_queue.put(None)
+            self._process.join()
+            self._process = None
 
     def __del__(self):
         # Send the poison pill to stop the child process
-        self._queue.put(None)
-        self._process.join()
+        self._send_poison()
 
 
 class EventNotifier(ResultAnalyzerBase):
@@ -102,7 +143,7 @@ class EventNotifier(ResultAnalyzerBase):
         condition: str,
         *,
         message: str = "",
-        holdoff: Union[Tuple[float, str], int, float] = 0.0,
+        holdoff: Union[Tuple[float, str], int, float] = 0,
         notification_config: Union[str, NotificationServer, None] = None,
         notification_tags: Optional[str] = None,
         show_overlay: bool = True,
@@ -187,11 +228,6 @@ class EventNotifier(ResultAnalyzerBase):
         self._prev_time = -1_000_000_000.0
         self._last_notifications: dict = {}
         self._last_display_time = -1_000_000_000.0
-
-    def __del__(self):
-        if self.notification_server is not None:
-            # explicitly delete notification server to break circular dependency
-            del self.notification_server
 
     def analyze(self, result):
         """
