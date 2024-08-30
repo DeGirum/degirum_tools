@@ -8,8 +8,8 @@ from copy import deepcopy
 from typing import List, Optional
 
 
-def _zone_annotator_run(results_file_name):
-    ZoneAnnotator(results_file_name=results_file_name)
+def _zone_annotator_run(args):
+    ZoneAnnotator(results_file_name=args.save_path)
 
 
 def _zone_annotator_args(parser):
