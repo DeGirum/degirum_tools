@@ -13,6 +13,7 @@ from typing import List, Optional
 from dataclasses import dataclass
 from .result_analyzer_base import ResultAnalyzerBase
 from .math_support import area
+from .ui_support import color_complement
 
 
 class ObjectSelectionStrategies(Enum):
@@ -55,6 +56,7 @@ class ObjectSelector(ResultAnalyzerBase):
         selection_strategy: ObjectSelectionStrategies = ObjectSelectionStrategies.HIGHEST_SCORE,
         use_tracking: bool = True,
         tracking_timeout: int = 30,
+        show_overlay: bool = True,
         annotation_color: Optional[tuple] = None,
     ):
         """
@@ -66,14 +68,16 @@ class ObjectSelector(ResultAnalyzerBase):
             use_tracking: If True, use tracking information to select objects
                 (object tracker must precede this analyzer in the pipeline)
             tracking_timeout: Number of frames to wait before removing an object from selection
-            annotation_color: Color to use for annotations, None to disable annotations
+            show_overlay: if True, annotate image; if False, send through original image
+            annotation_color: Color to use for annotations, None to use complement to result overlay color
         """
         self._top_k = top_k
         self._selection_strategy = selection_strategy
         self._use_tracking = use_tracking
         self._selected_objects: List[ObjectSelector._SelectedObject] = []
         self._tracking_timeout = tracking_timeout
-        self._annotation_color = annotation_color[::-1] if annotation_color else None
+        self._show_overlay = show_overlay
+        self._annotation_color = annotation_color
 
     def analyze(self, result):
         """
@@ -148,15 +152,23 @@ class ObjectSelector(ResultAnalyzerBase):
             np.ndarray: annotated image
         """
 
-        if self._annotation_color is not None:
-            for obj in result._inference_results:
-                bbox = tuple(map(int, obj["bbox"]))
+        if not self._show_overlay:
+            return image
 
-                cv2.rectangle(
-                    image,
-                    bbox[:2],
-                    bbox[2:],
-                    self._annotation_color,
-                    2,
-                )
+        color = (
+            color_complement(result.overlay_color)
+            if self._annotation_color is None
+            else self._annotation_color
+        )
+
+        for obj in result._inference_results:
+            bbox = tuple(map(int, obj["bbox"]))
+
+            cv2.rectangle(
+                image,
+                bbox[:2],
+                bbox[2:],
+                color,
+                2,
+            )
         return image

@@ -173,7 +173,29 @@ class Gizmo(ABC):
 
     @abstractmethod
     def run(self):
-        """Run gizmo"""
+        """Run gizmo: get data from input(s), if any, process it,
+        and send results to outputs (if any).
+
+        The properly-behaving implementation should check for `self._abort` flag
+        and exit `run()` when `self._abort` is set.
+
+        Also, in case when retrieving data from input streams by `get()` or `get_nowait()`
+        (as opposed to using input stream as iterator), the received value(s) should be
+        compared with `Stream._poison`, and if poison pill is detected, need to exit `run()`
+        as well.
+
+        Typical single-input loop should look like this:
+
+        ```
+        for data in self.get_input(0):
+            if self._abort:
+                break
+            result = self.process(data)
+            self.send_result(result)
+        ```
+
+        No need to send poison pill to outputs: `Composition` class will do it automatically.
+        """
 
     def abort(self, abort: bool = True):
         """Set abort flag"""
@@ -234,7 +256,7 @@ class Composition:
                 gizmo.send_result(Stream._poison)
             except Exception as e:
                 gizmo.error = e
-                gizmo.composition.stop()
+                gizmo.composition.request_stop()
 
         for gizmo in self._gizmos:
             gizmo.abort(False)
@@ -246,7 +268,7 @@ class Composition:
             t.start()
 
         if wait or get_test_mode():
-            self.stop(force_stop=False)
+            self.wait()
 
     def get_bottlenecks(self) -> List[dict]:
         """Return a list of gizmos, which experienced bottlenecks during last run.
@@ -274,27 +296,33 @@ class Composition:
             ret.append({gizmo.name: qsizes})
         return ret
 
-    def stop(self, force_stop: bool = True):
-        """Signal abort to all registered gizmos and wait until all threads stopped"""
+    def request_stop(self):
+        """Signal abort to all registered gizmos"""
+
+        # first signal abort to all gizmos
+        for gizmo in self._gizmos:
+            gizmo.abort()
+
+        # then empty all streams to speedup completion
+        for gizmo in self._gizmos:
+            for i in gizmo._inputs:
+                while not i.empty():
+                    try:
+                        i.get_nowait()
+                    except queue.Empty:
+                        break
+
+        # finally, send poison pills from all gizmos to unblock all gets()
+        for gizmo in self._gizmos:
+            gizmo.send_result(Stream._poison)
+
+    def wait(self):
+        """Wait until all threads stopped"""
 
         if len(self._threads) == 0:
             raise Exception("Composition not started")
 
-        if force_stop:
-            # first signal abort to all gizmos
-            for gizmo in self._gizmos:
-                gizmo.abort()
-
-            # then empty all streams
-            for gizmo in self._gizmos:
-                for i in gizmo._inputs:
-                    while not i.empty():
-                        try:
-                            i.get_nowait()
-                        except queue.Empty:
-                            break
-
-        # finally wait for completion of all threads
+        # wait for completion of all threads
         for t in self._threads:
             if t.name != threading.current_thread().name:
                 t.join()
@@ -308,6 +336,12 @@ class Composition:
                 errors += f"Error detected during execution of {gizmo.name}:\n  {type(gizmo.error)}: {str(gizmo.error)}\n\n"
         if errors:
             raise Exception(errors)
+
+    def stop(self):
+        """Signal abort to all registered gizmos and wait until all threads stopped"""
+
+        self.request_stop()
+        self.wait()
 
 
 class VideoSourceGizmo(Gizmo):
@@ -489,7 +523,7 @@ class ResizingGizmo(Gizmo):
         - allow_drop: allow dropping frames from input stream on overflow
         """
         super().__init__([(stream_depth, allow_drop)])
-        self._h = w
+        self._h = h
         self._w = w
         self._pad_method = pad_method
         self._resize_method = resize_method

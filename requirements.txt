@@ -19,3 +19,5 @@ pycocotools
 pyyaml
 ffmpegcv;platform_system!='Windows'
 typing-extensions
+jsonschema
+apprise
