@@ -54,9 +54,9 @@ class EventNotifier(ResultAnalyzerBase):
             holdoff: holdoff time to suppress repeated notifications; it is either integer holdoff value in frames,
                 floating-point holdoff value in seconds, or a tuple in a form (holdoff, unit), where unit is either
                 "seconds" or "frames".
-            message: message to display in the notification; may be valid Python f-string, in which you can use
-                `{result}` placeholder with any valid derivatives to access current inference result.
-                For example: "Total {len(result.results)} objects detected"
+            message: message to display in the notification; may be valid Python format string, in which you can use
+                `{result}` placeholder with any valid derivatives to access current inference result and its attributes.
+                For example: "Objects detected: {result.results}"
             token: optional cloud API access token to use for cloud notifications;
                 if not specified, the notification is not sent to cloud
             tags: optional tags to use for cloud notifications
