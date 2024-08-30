@@ -25,6 +25,13 @@ def test_line_counter():
             for key, value in kwargs.items():
                 setattr(self, key, value)
 
+    # SingleLineCounts wrapper class for result comparisons
+    class ResSingleLineCounts(degirum_tools.SingleLineCounts):
+        def __init__(self, **kwargs):
+            super().__init__()
+            for key, value in kwargs.items():
+                setattr(self, key, value)
+
     lines = [(40, 50, 110, 140)]
 
     test_cases: List[dict] = [
@@ -485,13 +492,7 @@ def test_line_counter():
                     result, "line_counts"
                 ), f"Case {ci} failed at step {i}: result has line_counts field."
             else:
-                line_count_fields = case["res"][i][0]
-                res = degirum_tools.LineCounts()
-                res.bottom = line_count_fields["bottom"]
-                res.for_class = line_count_fields["for_class"]
-                res.left = line_count_fields["left"]
-                res.right = line_count_fields["right"]
-                res.top = line_count_fields["top"]
+                res = ResSingleLineCounts(**case["res"][i][0])
                 assert result.line_counts[0] == res, (  # type: ignore[attr-defined]
                     f"Case `{case['case']}` failed at step {i}: "
                     + f"line counts `{result.line_counts}` "  # type: ignore[attr-defined]
