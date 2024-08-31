@@ -32,7 +32,7 @@
 
 
 import numpy as np, cv2
-from typing import Tuple, Optional, Dict, List, Any
+from typing import Tuple, Optional, Dict, List, Union, Any
 from .ui_support import put_text, color_complement, deduce_text_color
 from .result_analyzer_base import ResultAnalyzerBase
 from .math_support import (
@@ -52,12 +52,12 @@ class _PolygonZone:
         polygon (np.ndarray): A polygon represented by a numpy array of shape
             `(N, 2)`, containing the `x`, `y` coordinates of the points.
         frame_resolution_wh (Tuple[int, int]): The frame resolution (width, height)
-        triggering_positions (List[AnchorPoint], optional): the position(s) within the bounding box that trigger(s) the zone;
-            if None, iopa_threshold is used and must be specified
+        triggering_position (Union[List[AnchorPoint], AnchorPoint], optional): the position(s) within the bounding box
+            that trigger(s) the zone; if None, iopa_threshold is used and must be specified
         bounding_box_scale (float, optional): scale factor used to downsize detection result bounding boxes before zone
             triggering is performed, no matter whether triggering positions or IoPA is used; useful when only a portion
             of a detected object (a "critical mass") inside a bounding box should trigger the zone
-        iopa_threshold (float, optional): intersection over polygon area (IoPA) threshold; if triggering_positions is None,
+        iopa_threshold (float, optional): intersection over polygon area (IoPA) threshold; if triggering_position is None,
             IoPA of bounding boxes greater than this threshold triggers the zone, otherwise this method is not used
         timeout_frames (int, optional): number of frames to buffer when an object disappears from zone
         current_count (int): The current count of detected objects within the zone
@@ -68,13 +68,17 @@ class _PolygonZone:
         self,
         polygon: np.ndarray,
         frame_resolution_wh: Tuple[int, int],
-        triggering_positions: Optional[List[AnchorPoint]],
+        triggering_position: Optional[Union[List[AnchorPoint], AnchorPoint]],
         bounding_box_scale: float = 1.0,
         iopa_threshold: float = 0.0,
         timeout_frames: int = 0,
     ):
         self.frame_resolution_wh = frame_resolution_wh
-        self.triggering_positions = triggering_positions
+        self.triggering_position = (
+            triggering_position
+            if triggering_position is None or isinstance(triggering_position, list)
+            else [triggering_position]
+        )
         self.bounding_box_scale = bounding_box_scale
         self.iopa_threshold = iopa_threshold
         self._timeout_count_dict: Dict[int, int] = {}
@@ -109,7 +113,7 @@ class _PolygonZone:
             bboxes_xywh[:, [2, 3]] *= self.bounding_box_scale
             bboxes = xywh2xyxy(bboxes_xywh)
 
-        if self.triggering_positions is None:
+        if self.triggering_position is None:
             # trigger zones based on IoPA
             iopa = np.zeros((bboxes.shape[0]), dtype=float)
             bboxes_corners = tlbr2allcorners(bboxes).astype(np.float32)
@@ -126,7 +130,7 @@ class _PolygonZone:
                     np.ceil(get_anchor_coordinates(xyxy=bboxes, anchor=anchor)).astype(
                         int
                     )
-                    for anchor in self.triggering_positions
+                    for anchor in self.triggering_position
                 ]
             )
             is_in_zone = np.logical_or.reduce(
@@ -161,7 +165,9 @@ class ZoneCounter(ResultAnalyzerBase):
         *,
         class_list: Optional[List] = None,
         per_class_display: Optional[bool] = False,
-        triggering_positions: Optional[List[AnchorPoint]] = [AnchorPoint.BOTTOM_CENTER],
+        triggering_position: Optional[
+            Union[List[AnchorPoint], AnchorPoint]
+        ] = AnchorPoint.BOTTOM_CENTER,
         bounding_box_scale: float = 1.0,
         iopa_threshold: float = 0.0,
         use_tracking: Optional[bool] = False,
@@ -176,12 +182,12 @@ class ZoneCounter(ResultAnalyzerBase):
             count_polygons (nd.array): list of polygons to count objects in; each polygon is a list of points (x,y)
             class_list (List, optional): list of classes to count; if None, all classes are counted
             per_class_display (bool, optional): when True, display zone counts per class, otherwise display total zone counts
-            triggering_positions (List[AnchorPoint], optional): the position(s) within the bounding box that trigger(s) the zone;
-                if None, iopa_threshold is used and must be specified
+            triggering_position (Union[List[AnchorPoint], AnchorPoint], optional): the position(s) within the bounding box
+                that trigger(s) the zone; if None, iopa_threshold is used and must be specified
             bounding_box_scale (float, optional): scale factor used to downsize detection result bounding boxes before zone
                 triggering is performed, no matter whether triggering positions or IoPA is used; useful when only a portion
                 of a detected object (a "critical mass") inside a bounding box should trigger the zone
-            iopa_threshold (float, optional): intersection over polygon area (IoPA) threshold; if triggering_positions is None,
+            iopa_threshold (float, optional): intersection over polygon area (IoPA) threshold; if triggering_position is None,
                 IoPA of bounding boxes greater than this threshold triggers the zone, otherwise this method is not used
             use_tracking (bool, optional): If True, use tracking information to select objects
                 (object tracker must precede this analyzer in the pipeline)
@@ -202,7 +208,7 @@ class ZoneCounter(ResultAnalyzerBase):
                 "class_list must be specified when per_class_display is True"
             )
 
-        self._triggering_positions = triggering_positions
+        self._triggering_position = triggering_position
         self._bounding_box_scale = bounding_box_scale
         self._iopa_threshold = iopa_threshold
         self._use_tracking = use_tracking
@@ -390,7 +396,7 @@ class ZoneCounter(ResultAnalyzerBase):
                 _PolygonZone(
                     polygon,
                     self._wh,
-                    self._triggering_positions,
+                    self._triggering_position,
                     self._bounding_box_scale,
                     self._iopa_threshold,
                     self._timeout_frames,
@@ -412,7 +418,7 @@ class ZoneCounter(ResultAnalyzerBase):
                 self._zones[idx] = _PolygonZone(
                     self._polygons[idx],
                     self._wh,
-                    self._triggering_positions,
+                    self._triggering_position,
                     self._bounding_box_scale,
                     self._iopa_threshold,
                     self._timeout_frames,
