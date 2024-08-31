@@ -383,8 +383,7 @@ class ZoneCounter(ResultAnalyzerBase):
         self._mouse_callback_installed = False
 
     def _lazy_init(self, result):
-        """
-        Complete deferred initialization steps
+        """Complete deferred initialization steps
             - initialize polygon zones from model result object
             - install mouse callback
 

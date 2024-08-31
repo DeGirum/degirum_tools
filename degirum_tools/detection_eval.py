@@ -67,7 +67,8 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
             ground_truth_annotations_path (str): Path to the ground truth JSON annotations file (COCO format)
             max_images (int): max number of images used for evaluation. 0: all images in `image_folder_path` are used.
 
-        Returns the mAP statistics: [bbox_stats, kp_stats] for pose detection models and [bbox_stats] for non-pose models.
+        Returns:
+            the mAP statistics: [bbox_stats, kp_stats] for pose detection models and [bbox_stats] for non-pose models.
         """
 
         jdict: List[dict] = []
@@ -214,14 +215,16 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
     def _evaluate_coco(
         anno: COCO, pred: COCO, mAP_type: str = "bbox", img_id_list: List[str] = []
     ):
-        """Evaluation process based on the ground truth COCO object and the prediction object
+        """
+        Evaluation process based on the ground truth COCO object and the prediction object
 
-            Args:
-                anno (COCO): COCO ground truth annotation object
-                pred (COCO): COCO prediction object
-                img_id_list (List): List of the image ids to evaluate on.
+        Args:
+            anno (COCO): COCO ground truth annotation object
+            pred (COCO): COCO prediction object
+            img_id_list (List): List of the image ids to evaluate on.
 
-        Returns the mAP statistics.
+        Returns:
+            the mAP statistics.
         """
         eval_obj = COCOeval(anno, pred, mAP_type)
         if img_id_list:
