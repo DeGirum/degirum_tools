@@ -25,6 +25,7 @@ from .object_tracker import *
 from .regression_eval import *
 from .ui_support import *
 from .video_support import *
+from .figure_annotator import *
 from .zone_count import *
 
 # aliases for backward compatibility
@@ -34,8 +35,9 @@ from .environment import (
     get_test_mode as _get_test_mode,
 )
 
+
 def _command_entrypoint(arg_str=None):
-    from .zone_annotator import _zone_annotator_args
+    from .figure_annotator import _figure_annotator_args
 
     parser = argparse.ArgumentParser(description="DeGirum tools")
 
@@ -45,12 +47,12 @@ def _command_entrypoint(arg_str=None):
 
     # zone_annotator subcommand
     subparser = subparsers.add_parser(
-        "zone_annotator",
-        description="Launch interactive utility for zone annotation in images",
-        help="launch interactive utility for zone annotation in images",
+        "figure_annotator",
+        description="Launch interactive utility for geometric figure annotation in images",
+        help="launch interactive utility for geometric figure annotation in images",
     )
-    _zone_annotator_args(subparser)
-    
+    _figure_annotator_args(subparser)
+
     # parse args
     args = parser.parse_args(arg_str.split() if arg_str else None)
 

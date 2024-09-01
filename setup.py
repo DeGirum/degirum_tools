@@ -36,8 +36,8 @@ setup(
         "License :: OSI Approved :: MIT License",
     ],
     entry_points={
-        'console_scripts': [
-            'degirum_tools = degirum_tools:_command_entrypoint',
+        "console_scripts": [
+            "degirum_tools = degirum_tools:_command_entrypoint",
         ]
     },
     install_requires=[
