@@ -56,7 +56,7 @@ class FigureAnnotatorType(Enum):
     QUADRILATERAL = 4
 
 
-class _PointSelState(Enum):
+class PointSelState(Enum):
     """Point selection states for a region in automatic mode"""
 
     RightAnchors = 1  # Right anchor points are being selected
@@ -64,7 +64,7 @@ class _PointSelState(Enum):
     IntermediateAnchors = 3  # Intermediate anchor points are being selected
 
 
-class _Region:
+class Region:
     """
     A class for defining a region of figures.
 
@@ -81,7 +81,7 @@ class _Region:
             `auto_mode` is True
         intermediate_points (List[List[tuple]]): list of lists of point (x,y) tuples -
             intermediate anchor points; only present when `auto_mode` is True
-        point_selection_state (_PointSelState): annotation state of region when
+        point_selection_state (PointSelState): annotation state of region when
             `auto_mode` is True
         figures (List[List[tuple]]): list of lists, where each list represents a figure,
             containing n point (x,y) tuples
@@ -93,7 +93,7 @@ class _Region:
         if auto_mode:
             self.anchor_points: List[List[tuple]] = []
             self.intermediate_points: List[List[tuple]] = []
-            self.point_selection_state = _PointSelState.RightAnchors
+            self.point_selection_state = PointSelState.RightAnchors
         else:
             self.figures: List[List[tuple]] = []
 
@@ -103,7 +103,12 @@ class _Region:
 
 
 class FigureAnnotator:
-    def __init__(self, num_vertices: int = 4, results_file_name: str = "zones.json"):
+    def __init__(
+        self,
+        num_vertices: int = 4,
+        results_file_name: str = "zones.json",
+        debug: bool = False,
+    ):
         """Class to initialize and drive the UI for selecting geometric figures in a tkinter window.
 
         Attributes:
@@ -117,100 +122,103 @@ class FigureAnnotator:
         self.regions_json: List[Dict[str, List[Dict[str, List[tuple]]]]] = []
         self.img_width: int = 0
         self.img_height: int = 0
-        self.regions = [_Region()]
+        self.regions = [Region()]
         self.results_file_name = results_file_name
         self.num_vertices = num_vertices
         self.figure_type = (
             "line" if num_vertices == FigureAnnotatorType.LINE.value else "zone"
         )
 
-        # Setup master window
-        import tkinter as tk
+        if not debug:
+            # Setup master window
+            import tkinter as tk
 
-        self._tk = tk
-        self._master = tk.Tk()
-        self._master.title(f"{self.figure_type.capitalize()} Selection")
+            self._tk = tk
+            self._master = tk.Tk()
+            self._master.title(f"{self.figure_type.capitalize()} Selection")
 
-        # Disable window resizing
-        self._master.resizable(False, False)
+            # Disable window resizing
+            self._master.resizable(False, False)
 
-        # Setup canvas for image display
-        self._canvas = self._tk.Canvas(self._master, bg="white")
+            # Setup canvas for image display
+            self._canvas = self._tk.Canvas(self._master, bg="white")
 
-        # Define variables for entries
-        self._offset_var = self._tk.IntVar(value=1)
-        self._spacer_var = self._tk.IntVar(value=1)
-        self._num_zones_between_barriers = self._tk.StringVar(value="1")
-        self._num_zones_between_barriers_options = ["1", "2"]
-        self._current_region_idx = self._tk.StringVar(value="0")
-        self._current_region_idx_options = ["0"]
-        self._save_format = self._tk.StringVar(value="DeGirum-compatible")
-        self._save_format_options = ["DeGirum-compatible", "Ultralytics-compatible"]
+            # Define variables for entries
+            self._offset_var = self._tk.IntVar(value=1)
+            self._spacer_var = self._tk.IntVar(value=1)
+            self._num_zones_between_barriers = self._tk.StringVar(value="1")
+            self._num_zones_between_barriers_options = ["1", "2"]
+            self._current_region_idx = self._tk.StringVar(value="0")
+            self._current_region_idx_options = ["0"]
+            self._save_format = self._tk.StringVar(value="DeGirum-compatible")
+            self._save_format_options = ["DeGirum-compatible", "Ultralytics-compatible"]
 
-        # Setup buttons
-        _button_frame = self._tk.Frame(self._master)
-        _button_frame.pack(side=self._tk.TOP)
+            # Setup buttons
+            _button_frame = self._tk.Frame(self._master)
+            _button_frame.pack(side=self._tk.TOP)
 
-        self._tk.Button(
-            _button_frame, text="Load Image", command=self._load_image
-        ).grid(row=0, column=0)
-        self._tk.Button(
-            _button_frame,
-            text="Remove Last Selection",
-            command=self._remove_last_selection,
-        ).grid(row=0, column=1)
-        self._tk.Button(
-            _button_frame, text="Compute", command=self._compute_and_draw_figures
-        ).grid(row=0, column=2)
-        self._tk.Button(
-            _button_frame, text="Add Region", command=self._add_region
-        ).grid(row=0, column=3)
-        self._tk.Button(_button_frame, text="Save", command=self._save_to_json).grid(
-            row=0, column=4
-        )
-        self._tk.Label(_button_frame, text="Format").grid(row=0, column=5)
-        self._save_format_drop = OptionMenu(
-            _button_frame,
-            self._save_format,
-            *self._save_format_options,
-        )
-        self._save_format_drop.grid(row=0, column=6)
-
-        if num_vertices == FigureAnnotatorType.QUADRILATERAL.value:
-            self._tk.Label(_button_frame, text="Number of zones between barriers").grid(
-                row=1, column=0
-            )
-            self._num_zones_between_barriers_drop = OptionMenu(
+            self._tk.Button(
+                _button_frame, text="Load Image", command=self._load_image
+            ).grid(row=0, column=0)
+            self._tk.Button(
                 _button_frame,
-                self._num_zones_between_barriers,
-                *self._num_zones_between_barriers_options,
+                text="Remove Last Selection",
+                command=self._remove_last_selection,
+            ).grid(row=0, column=1)
+            self._tk.Button(
+                _button_frame, text="Compute", command=self._compute_and_draw_figures
+            ).grid(row=0, column=2)
+            self._tk.Button(
+                _button_frame, text="Add Region", command=self._add_region
+            ).grid(row=0, column=3)
+            self._tk.Button(
+                _button_frame, text="Save", command=self._save_to_json
+            ).grid(row=0, column=4)
+            self._tk.Label(_button_frame, text="Format").grid(row=0, column=5)
+            self._save_format_drop = OptionMenu(
+                _button_frame,
+                self._save_format,
+                *self._save_format_options,
             )
-            self._num_zones_between_barriers_drop.grid(row=1, column=1)
-            self._tk.Label(_button_frame, text="Offset from boundary point").grid(
-                row=1, column=2
-            )
-            self._tk.Entry(_button_frame, textvariable=self._offset_var).grid(
-                row=1, column=3
-            )
-            self._tk.Label(_button_frame, text="Spacer between bounded zones").grid(
-                row=1, column=4
-            )
-            self._tk.Entry(_button_frame, textvariable=self._spacer_var).grid(
-                row=1, column=5
-            )
+            self._save_format_drop.grid(row=0, column=6)
 
-        region_sel_row_ind = (
-            2 if num_vertices == FigureAnnotatorType.QUADRILATERAL.value else 1
-        )
-        self._tk.Label(_button_frame, text="Current Region").grid(
-            row=region_sel_row_ind, column=0
-        )
-        self._regions_drop = OptionMenu(
-            _button_frame, self._current_region_idx, *self._current_region_idx_options
-        )
-        self._regions_drop.grid(row=region_sel_row_ind, column=1)
+            if num_vertices == FigureAnnotatorType.QUADRILATERAL.value:
+                self._tk.Label(
+                    _button_frame, text="Number of zones between barriers"
+                ).grid(row=1, column=0)
+                self._num_zones_between_barriers_drop = OptionMenu(
+                    _button_frame,
+                    self._num_zones_between_barriers,
+                    *self._num_zones_between_barriers_options,
+                )
+                self._num_zones_between_barriers_drop.grid(row=1, column=1)
+                self._tk.Label(_button_frame, text="Offset from boundary point").grid(
+                    row=1, column=2
+                )
+                self._tk.Entry(_button_frame, textvariable=self._offset_var).grid(
+                    row=1, column=3
+                )
+                self._tk.Label(_button_frame, text="Spacer between bounded zones").grid(
+                    row=1, column=4
+                )
+                self._tk.Entry(_button_frame, textvariable=self._spacer_var).grid(
+                    row=1, column=5
+                )
 
-        self._master.mainloop()
+            region_sel_row_ind = (
+                2 if num_vertices == FigureAnnotatorType.QUADRILATERAL.value else 1
+            )
+            self._tk.Label(_button_frame, text="Current Region").grid(
+                row=region_sel_row_ind, column=0
+            )
+            self._regions_drop = OptionMenu(
+                _button_frame,
+                self._current_region_idx,
+                *self._current_region_idx_options,
+            )
+            self._regions_drop.grid(row=region_sel_row_ind, column=1)
+
+            self._master.mainloop()
 
     def _load_image(self):
         """
@@ -248,7 +256,7 @@ class FigureAnnotator:
             if self.num_vertices == FigureAnnotatorType.QUADRILATERAL.value
             else False
         )
-        self.regions = [_Region(auto_mode)]
+        self.regions = [Region(auto_mode)]
         self._update_region_menu()
         self.regions_json = []
 
@@ -295,7 +303,7 @@ class FigureAnnotator:
                 if self.num_vertices == FigureAnnotatorType.QUADRILATERAL.value
                 else False
             )
-            self.regions.append(_Region(auto_mode))
+            self.regions.append(Region(auto_mode))
             self._update_region_menu()
             if auto_mode:
                 message = (
@@ -317,12 +325,12 @@ class FigureAnnotator:
         x1, y1 = point[0] + 3, point[1] + 3
         self._canvas.create_oval(x0, y0, x1, y1, fill="red")
 
-    def _process_point_addition(self, current_region: _Region) -> Tuple[str, str]:
+    def _process_point_addition(self, current_region: Region) -> Tuple[str, str]:
         """
         Add user-selected point to appropriate region field.
 
         Args:
-            current_region (_Region): _Region object to which the point was added
+            current_region (Region): Region object to which the point was added
 
         Returns:
             Tuple[str, str]: title and message for dialog message box,
@@ -331,35 +339,35 @@ class FigureAnnotator:
         title = ""
         message = ""
         if current_region.auto_mode:
-            if current_region.point_selection_state == _PointSelState.RightAnchors:
+            if current_region.point_selection_state == PointSelState.RightAnchors:
                 if len(current_region.current_selection) == 2:
                     current_region.anchor_points.append(
                         current_region.current_selection
                     )
                     current_region.current_selection = []
-                    current_region.point_selection_state = _PointSelState.LeftAnchors
+                    current_region.point_selection_state = PointSelState.LeftAnchors
                     title = "Info"
                     message = "Please select two left anchor points."
                 elif (
-                    len(current_region.anchor_points) > 0
+                    len(current_region.anchor_points) == 1
                     and len(current_region.current_selection) == 1
                 ):
                     current_region.anchor_points[0].append(
                         current_region.current_selection[0]
                     )
                     current_region.current_selection = []
-                    current_region.point_selection_state = _PointSelState.LeftAnchors
+                    current_region.point_selection_state = PointSelState.LeftAnchors
                     title = "Info"
                     message = "Please select two left anchor points."
 
-            elif current_region.point_selection_state == _PointSelState.LeftAnchors:
+            elif current_region.point_selection_state == PointSelState.LeftAnchors:
                 if len(current_region.current_selection) == 2:
                     current_region.anchor_points.append(
                         current_region.current_selection
                     )
                     current_region.current_selection = []
                     current_region.point_selection_state = (
-                        _PointSelState.IntermediateAnchors
+                        PointSelState.IntermediateAnchors
                     )
                     title = "Info"
                     message = "Please select intermediate boundary points, going from right to left."
@@ -372,14 +380,14 @@ class FigureAnnotator:
                     )
                     current_region.current_selection = []
                     current_region.point_selection_state = (
-                        _PointSelState.IntermediateAnchors
+                        PointSelState.IntermediateAnchors
                     )
                     title = "Info"
                     message = "Please select intermediate boundary points, going from right to left."
 
             elif (
                 current_region.point_selection_state
-                == _PointSelState.IntermediateAnchors
+                == PointSelState.IntermediateAnchors
             ):
                 if len(current_region.current_selection) == 2:
                     current_region.intermediate_points.append(
@@ -426,13 +434,13 @@ class FigureAnnotator:
         return self._save_format.get()
 
     @staticmethod
-    def region_parameters(region: _Region) -> Tuple[float, float, float, float]:
+    def region_parameters(region: Region) -> Tuple[float, float, float, float]:
         """
         Return calculated key defining parameters of region:
         the slopes and y-intercepts of the top and bottom lines of the regions.
 
         Args:
-            region (_Region): region object
+            region (Region): region object
 
         Returns:
             Tuple[float, float, float, float]: slope of top line, y-intercept of
@@ -468,22 +476,17 @@ class FigureAnnotator:
             region = self.regions[i]
             if region.auto_mode and (
                 region.is_empty()
+                or len(region.current_selection) > 0
                 or len(region.anchor_points) < 2
                 or len(region.anchor_points[1]) < 2
                 or (
                     len(region.intermediate_points) > 0
                     and len(region.intermediate_points[-1]) < 2
                 )
-                or len(region.current_selection) > 0
             ):
                 incomplete_auto_region_idx += str(i)
             elif not region.auto_mode and (
-                region.is_empty()
-                or (
-                    len(region.figures) > 0
-                    and len(region.figures[-1]) != self.num_vertices
-                )
-                or len(region.current_selection) > 0
+                region.is_empty() or len(region.current_selection) > 0
             ):
                 incomplete_manual_region_idx += str(i)
 
@@ -511,7 +514,7 @@ class FigureAnnotator:
 
     @staticmethod
     def compute_figures(
-        regions: List[_Region],
+        regions: List[Region],
         num_zones_between_barriers: int = 1,
         offset: int = 0,
         spacer: int = 0,
@@ -521,7 +524,7 @@ class FigureAnnotator:
         mode, and return a list of dictionaries, each corresponding to a region.
 
         Args:
-            regions (List[_Region]): list of region objects
+            regions (List[Region]): list of region objects
             num_zones_between_barriers (int): number of zones between two adjacent
                 boundaries, possible values are 1 and 2; used for regions in auto mode
             offset (int): distance between a boundary line and parallel zone edge near
@@ -702,7 +705,7 @@ class FigureAnnotator:
         removed_point: Optional[tuple] = None
 
         if current_region.auto_mode:
-            if current_region.point_selection_state == _PointSelState.RightAnchors:
+            if current_region.point_selection_state == PointSelState.RightAnchors:
                 if len(current_region.current_selection) > 0:
                     removed_point = current_region.current_selection.pop()
                     # messagebox.showinfo("Success", "Last right anchor point removed.")
@@ -710,7 +713,7 @@ class FigureAnnotator:
                     removed_point = current_region.anchor_points[0].pop()
                     current_region.anchor_points.pop()
                     # messagebox.showinfo("Success", "Last right anchor point removed.")
-            elif current_region.point_selection_state == _PointSelState.LeftAnchors:
+            elif current_region.point_selection_state == PointSelState.LeftAnchors:
                 if len(current_region.current_selection) > 0:
                     removed_point = current_region.current_selection.pop()
                     # message = "Last left anchor point removed."
@@ -720,7 +723,7 @@ class FigureAnnotator:
                     # message = "Last left anchor point removed."
                 else:
                     removed_point = current_region.anchor_points[0].pop()
-                    current_region.point_selection_state = _PointSelState.RightAnchors
+                    current_region.point_selection_state = PointSelState.RightAnchors
                     # message = "Last right anchor point removed."
                 # messagebox.showinfo("Success", message)
             else:
@@ -734,7 +737,7 @@ class FigureAnnotator:
                     # message = "Last intermediate anchor point removed."
                 else:
                     removed_point = current_region.anchor_points[1].pop()
-                    current_region.point_selection_state = _PointSelState.LeftAnchors
+                    current_region.point_selection_state = PointSelState.LeftAnchors
                     # message = "Last left anchor point removed."
                 # messagebox.showinfo("Success", message)
         else:

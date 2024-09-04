@@ -16,6 +16,7 @@ from .classification_eval import *
 from .detection_eval import *
 from .environment import *
 from .event_detector import *
+from .figure_annotator import *
 from .inference_support import *
 from .line_count import *
 from .math_support import *
@@ -25,7 +26,6 @@ from .object_tracker import *
 from .regression_eval import *
 from .ui_support import *
 from .video_support import *
-from .figure_annotator import *
 from .zone_count import *
 
 # aliases for backward compatibility
