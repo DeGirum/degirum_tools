@@ -45,16 +45,34 @@ def _command_entrypoint(arg_str=None):
         help="use -h flag to see help on subcommands", required=True
     )
 
-    # zone_annotator subcommand
+    # figure_annotator subcommand
     subparser = subparsers.add_parser(
         "figure_annotator",
         description="Launch interactive utility for geometric figure annotation in images",
         help="launch interactive utility for geometric figure annotation in images",
     )
     _figure_annotator_args(subparser)
+    
+    # zone_annotator subcommand
+    subparser = subparsers.add_parser(
+        "zone_annotator",
+        description="Launch interactive utility for geometric figure annotation in images",
+        help="launch interactive utility for geometric figure annotation in images",
+    )
+    _figure_annotator_args(subparser)
+    
+    # line_annotator subcommand
+    subparser = subparsers.add_parser(
+        "line_annotator",
+        description="Launch interactive utility for geometric figure annotation in images",
+        help="launch interactive utility for geometric figure annotation in images",
+    )
+    _figure_annotator_args(subparser)
+    subparser.set_defaults(num_vertices=2)
 
     # parse args
-    args = parser.parse_args(arg_str.split() if arg_str else None)
+    arg_split = arg_str.split()
+    args = parser.parse_args(arg_split if arg_split[0] not in ["zone_annotator", "line_annotator"] and arg_str else None)
 
     # execute subcommand
     args.func(args)
