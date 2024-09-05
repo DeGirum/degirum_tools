@@ -40,7 +40,6 @@ class ModelLike(ABC):
         """Perform whole inference lifecycle on a single frame.
 
         Args:
-
             data (any): Inference input data. Input data type depends on the model.
             It should be compatible to that regular PySDK model accepts.
 
@@ -55,7 +54,6 @@ class ModelLike(ABC):
         """Perform whole inference lifecycle on a single frame.
 
         Args:
-
             data (any): Inference input data. Input data type depends on the model.
             It should be compatible to that regular PySDK model accepts.
 

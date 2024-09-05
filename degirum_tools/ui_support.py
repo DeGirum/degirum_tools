@@ -481,84 +481,92 @@ class Display:
         def show_in_notebook(img):
             self._update_notebook_display(PIL.Image.fromarray(img[..., ::-1]))
 
-        if hasattr(img, "image_overlay"):
-            # special case for model results: call it recursively
-            self.show(img.image_overlay, waitkey_delay)
-            return
-
-        if isinstance(img, PIL.Image.Image):
-            # PIL image: convert to OpenCV format
-            img = np.array(img)[:, :, ::-1]
-
-        if isinstance(img, np.ndarray):
-            fps = self._fps.record()
-            if self._show_fps and fps > 0:
-                Display._display_fps(img, fps)
-
-            if in_colab():
-                # special case for Colab environment
-                if waitkey_delay == 0:
-                    # show still image in notebook
-                    show_in_notebook(img)
-                else:
-                    # save videos to file
-                    from .video_support import create_video_writer
-
-                    if self._video_writer is None:
-                        self._video_file = f"{os.getcwd()}/{Path(to_valid_filename(self._capt)).stem}.mp4"
-                        self._video_writer = create_video_writer(
-                            self._video_file, img.shape[1], img.shape[0]
-                        )
-                    self._video_writer.write(img)
-
-                    class printer(str):
-                        def __repr__(self):
-                            return self
-
-                    if self._video_writer.count % 10 == 0:
-                        self._update_notebook_display(
-                            printer(
-                                f"{self._video_file}: frame {self._video_writer.count}, {fps:.1f} FPS"
-                            )
-                        )
-
-            elif self._no_gui and in_notebook():
-                # show image in notebook when possible
+        # show image in Colab
+        def show_in_colab(img):
+            if waitkey_delay == 0:
+                # show still image in notebook
                 show_in_notebook(img)
             else:
-                # show image in OpenCV window
-                if not self._window_created:
-                    cv2.namedWindow(self._capt, cv2.WINDOW_NORMAL)
-                    cv2.setWindowProperty(self._capt, cv2.WND_PROP_TOPMOST, 1)
-                    if self._w is not None and self._h is not None:
-                        cv2.resizeWindow(self._capt, self._w, self._h)
-                    else:
-                        cv2.resizeWindow(self._capt, img.shape[1], img.shape[0])
+                # save videos to file
+                from .video_support import create_video_writer
 
-                cv2.imshow(self._capt, img)
-                self._window_created = True
-                key = cv2.waitKey(waitkey_delay) & 0xFF
-                # process pause
-                if key == ord(" "):
-                    while True:
-                        key = cv2.waitKey(waitkey_delay) & 0xFF
-                        if key == ord(" ") or key == ord("x") or key == ord("q"):
-                            break
-                # process exit keys
-                if key == ord("x") or key == ord("q"):
-                    if self._fps:
-                        self._fps.reset()
-                    raise KeyboardInterrupt
-                # process resize keys
-                elif key == 43 or key == 45:  # +/-
-                    _, _, w, _ = cv2.getWindowImageRect(self._capt)
-                    factor = 1.25 if key == 43 else 0.75
-                    new_w = max(100, int(w * factor))
-                    new_h = int(new_w * img.shape[0] / img.shape[1])
-                    cv2.resizeWindow(self._capt, new_w, new_h)
+                if self._video_writer is None:
+                    self._video_file = (
+                        f"{os.getcwd()}/{Path(to_valid_filename(self._capt)).stem}.mp4"
+                    )
+                    self._video_writer = create_video_writer(
+                        self._video_file, img.shape[1], img.shape[0]
+                    )
+                self._video_writer.write(img)
 
+                class printer(str):
+                    def __repr__(self):
+                        return self
+
+                if self._video_writer.count % 10 == 0:
+                    self._update_notebook_display(
+                        printer(
+                            f"{self._video_file}: frame {self._video_writer.count}, {fps:.1f} FPS"
+                        )
+                    )
+
+        def preprocess_img(img):
+            if hasattr(img, "image_overlay"):
+                # special case for model results: call it recursively
+                img = img.image_overlay
+            if isinstance(img, PIL.Image.Image):
+                # PIL image: convert to OpenCV format
+                img = np.array(img)[:, :, ::-1]
+            if not isinstance(img, np.ndarray):
+                raise Exception("Unsupported image type")
+            return img
+
+        orig_img = img
+        img = preprocess_img(orig_img)
+
+        fps = self._fps.record()
+        if self._show_fps and fps > 0:
+            Display._display_fps(img, fps)
+
+        if in_colab():
+            # special case for Colab environment
+            show_in_colab(img)
+        elif self._no_gui and in_notebook():
+            # show image in notebook when possible
+            show_in_notebook(img)
         else:
-            raise Exception("Unsupported image type")
+            # show image in OpenCV window
+            if not self._window_created:
+                cv2.namedWindow(self._capt, cv2.WINDOW_NORMAL)
+                cv2.setWindowProperty(self._capt, cv2.WND_PROP_TOPMOST, 1)
+                if self._w is not None and self._h is not None:
+                    cv2.resizeWindow(self._capt, self._w, self._h)
+                else:
+                    cv2.resizeWindow(self._capt, img.shape[1], img.shape[0])
+
+            cv2.imshow(self._capt, img)
+            self._window_created = True
+            key = cv2.waitKey(waitkey_delay) & 0xFF
+            # process pause
+            if key == ord(" "):
+                while True:
+                    img = preprocess_img(orig_img)
+                    cv2.imshow(self._capt, img)
+                    key = cv2.waitKey(waitkey_delay) & 0xFF
+                    if key == ord(" ") or key == ord("x") or key == ord("q"):
+                        break
+            # process exit keys
+            if key == ord("x") or key == ord("q"):
+                if self._fps:
+                    self._fps.reset()
+                raise KeyboardInterrupt
+            # process resize keys
+            elif key == 43 or key == 45:  # +/-
+                _, _, w, _ = cv2.getWindowImageRect(self._capt)
+                factor = 1.25 if key == 43 else 0.75
+                new_w = max(100, int(w * factor))
+                new_h = int(new_w * img.shape[0] / img.shape[1])
+                cv2.resizeWindow(self._capt, new_w, new_h)
 
     def show_image(self, img: Any):
         """Show still image or model result
