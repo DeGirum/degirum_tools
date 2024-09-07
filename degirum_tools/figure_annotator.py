@@ -27,6 +27,26 @@ def _figure_annotator_run(args):
     FigureAnnotator(num_vertices=args.num_vertices, results_file_name=args.save_path)
 
 
+def _zone_annotator_run(args):
+    """
+    Launch interactive utility for 4-sided zone annotation in images.
+
+    Args:
+        args: argparse command line arguments
+    """
+    FigureAnnotator(results_file_name=args.save_path)
+
+
+def _line_annotator_run(args):
+    """
+    Launch interactive utility for line annotation in images.
+
+    Args:
+        args: argparse command line arguments
+    """
+    FigureAnnotator(num_vertices=2, results_file_name=args.save_path)
+
+
 def _figure_annotator_args(parser):
     """
     Define figure_annotator subcommand arguments
@@ -47,6 +67,38 @@ def _figure_annotator_args(parser):
         help="JSON file path to save figures",
     )
     parser.set_defaults(func=_figure_annotator_run)
+
+
+def _zone_annotator_args(parser):
+    """
+    Define zone_annotator subcommand arguments
+
+    Args:
+        parser: argparse parser object to be stuffed with args
+    """
+    parser.add_argument(
+        "--save-path",
+        type=str,
+        default="zones.json",
+        help="JSON file path to save zones",
+    )
+    parser.set_defaults(func=_zone_annotator_run)
+
+
+def _line_annotator_args(parser):
+    """
+    Define line_annotator subcommand arguments
+
+    Args:
+        parser: argparse parser object to be stuffed with args
+    """
+    parser.add_argument(
+        "--save-path",
+        type=str,
+        default="lines.json",
+        help="JSON file path to save lines",
+    )
+    parser.set_defaults(func=_line_annotator_run)
 
 
 class FigureAnnotatorType(Enum):

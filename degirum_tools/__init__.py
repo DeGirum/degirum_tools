@@ -37,7 +37,11 @@ from .environment import (
 
 
 def _command_entrypoint(arg_str=None):
-    from .figure_annotator import _figure_annotator_args
+    from .figure_annotator import (
+        _figure_annotator_args,
+        _zone_annotator_args,
+        _line_annotator_args,
+    )
 
     parser = argparse.ArgumentParser(description="DeGirum tools")
 
@@ -56,19 +60,18 @@ def _command_entrypoint(arg_str=None):
     # zone_annotator subcommand
     subparser = subparsers.add_parser(
         "zone_annotator",
-        description="Launch interactive utility for geometric figure annotation in images",
-        help="launch interactive utility for geometric figure annotation in images",
+        description="Launch interactive utility for 4-sided zone annotation in images",
+        help="launch interactive utility for 4-sided zone annotation in images",
     )
-    _figure_annotator_args(subparser)
+    _zone_annotator_args(subparser)
 
     # line_annotator subcommand
     subparser = subparsers.add_parser(
         "line_annotator",
-        description="Launch interactive utility for geometric figure annotation in images",
-        help="launch interactive utility for geometric figure annotation in images",
+        description="Launch interactive utility for line annotation in images",
+        help="launch interactive utility for line annotation in images",
     )
-    _figure_annotator_args(subparser)
-    subparser.set_defaults(num_vertices=2)
+    _line_annotator_args(subparser)
 
     # parse args
     args = parser.parse_args(arg_str.split() if arg_str else None)
