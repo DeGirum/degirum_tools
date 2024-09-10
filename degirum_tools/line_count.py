@@ -101,6 +101,8 @@ class LineCounter(ResultAnalyzerBase):
             absolute_directions (bool, optional): when True, direction of trail is calculated relative to coordinate
                 system of image; when False, direction of trail is calculated relative to coordinate system defined
                 by line that it intersects
+            two_directions (bool, optional): when True, only two directions, "right" and "left" are computed; when False,
+                all four directions are computed; applied only when absolute_directions is False
             accumulate (bool, optional): when True, accumulate line counts; when False, store line counts only for current
                 frame
             per_class_display (bool, optional): when True, display counts per class,
