@@ -80,7 +80,8 @@ class LineCounter(ResultAnalyzerBase):
         *,
         whole_trail: bool = True,
         count_first_crossing: bool = True,
-        absolute_directions: bool = True,
+        absolute_directions: bool = False,
+        two_directions: bool = True,
         accumulate: bool = True,
         per_class_display: bool = False,
         show_overlay: bool = True,
@@ -115,6 +116,7 @@ class LineCounter(ResultAnalyzerBase):
         self._whole_trail = whole_trail
         self._count_first_crossing = count_first_crossing
         self._absolute_directions = absolute_directions
+        self._two_directions = two_directions
         self._accumulate = accumulate
         self._mouse_callback_installed = False
         self._per_class_display = per_class_display
@@ -179,18 +181,23 @@ class LineCounter(ResultAnalyzerBase):
                     else:
                         counts.right += 1
 
-                trail_onto_line_projection = self._projection(line_vector, trail_vector)
-                trail_onto_line_projection_sign = np.sign(trail_onto_line_projection)
-                if np.all(trail_onto_line_projection_sign == np.sign(line_vector)):
-                    counts.top += 1
-                else:
-                    if not np.any(trail_onto_line_projection_sign):
-                        if cross_product > 0:
-                            counts.bottom += 1
-                        else:
-                            counts.top += 1
+                if not self._two_directions:
+                    trail_onto_line_projection = self._projection(
+                        line_vector, trail_vector
+                    )
+                    trail_onto_line_projection_sign = np.sign(
+                        trail_onto_line_projection
+                    )
+                    if np.all(trail_onto_line_projection_sign == np.sign(line_vector)):
+                        counts.top += 1
                     else:
-                        counts.bottom += 1
+                        if not np.any(trail_onto_line_projection_sign):
+                            if cross_product > 0:
+                                counts.bottom += 1
+                            else:
+                                counts.top += 1
+                        else:
+                            counts.bottom += 1
             return counts
 
         if not self._accumulate:
@@ -282,19 +289,26 @@ class LineCounter(ResultAnalyzerBase):
                     cx = line_start[0] - margin
                     corner = CornerPosition.TOP_RIGHT
 
-            def line_count_str(lc: SingleLineCounts, prefix: str = "") -> str:
-                return f"{prefix}^({lc.top}) v({lc.bottom}) <({lc.left}) >({lc.right})"
+            def line_count_str(
+                lc: SingleLineCounts, prefix: str = "", two_directions: bool = False
+            ) -> str:
+                return (
+                    f"{prefix}<({lc.left}) >({lc.right})"
+                    if two_directions
+                    else f"{prefix}^({lc.top}) v({lc.bottom}) <({lc.left}) >({lc.right})"
+                )
 
+            two_directions = not self._absolute_directions and self._two_directions
             if self._per_class_display:
                 capt = "\n".join(
                     [
-                        line_count_str(class_count, f"{class_name}: ")
+                        line_count_str(class_count, f"{class_name}: ", two_directions)
                         for class_name, class_count in line_count.for_class.items()
                     ]
-                    + [line_count_str(line_count, "Total: ")]
+                    + [line_count_str(line_count, "Total: ", two_directions)]
                 )
             else:
-                capt = line_count_str(line_count)
+                capt = line_count_str(line_count, two_directions=two_directions)
 
             put_text(
                 image,
