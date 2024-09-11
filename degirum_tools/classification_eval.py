@@ -70,7 +70,8 @@ class ImageClassificationModelEvaluator(ModelEvaluatorBase):
             ground_truth_annotations_path (str): not used
             max_images (int): not used
 
-        Returns 2-element list: Top-k accuracy and per-class accuracy statistics.
+        Returns:
+            2-element list: Top-k accuracy and per-class accuracy statistics.
         """
 
         #
