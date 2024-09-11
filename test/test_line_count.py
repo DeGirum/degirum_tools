@@ -262,7 +262,7 @@ def test_line_counter():
         },
         {
             "case": "Two trails, count all four directions",
-            "params": {"lines": lines, "two_directions": False},
+            "params": {"lines": lines, "count_only_left_and_right": False},
             "inp": [
                 {
                     "trails": {
@@ -303,7 +303,7 @@ def test_line_counter():
             "params": {
                 "lines": lines,
                 "absolute_directions": True,
-                "two_directions": False,
+                "count_only_left_and_right": False,
             },
             "inp": [
                 {
