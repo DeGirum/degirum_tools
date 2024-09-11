@@ -9,14 +9,122 @@
 #
 
 import numpy as np
+import multiprocessing
+import time
+import os
+import queue
+from typing import Tuple, Union, Optional
 from .result_analyzer_base import ResultAnalyzerBase
 from .ui_support import put_text, color_complement, deduce_text_color, CornerPosition
 from .math_support import AnchorPoint, get_image_anchor_point
-from typing import Tuple, Union, Optional
-import time
-from apprise import Apprise
-from apprise import AppriseConfig
-import os
+
+
+class NotificationServer:
+    """
+    Notification server class to asynchronously send notifications via apprise
+    """
+
+    def __init__(self, title: str, config: str, tags: Optional[str]):
+        """
+        Constructor
+
+        Args:
+            config: path to the apprise configuration file or notification server URL in apprise format
+            tags: tags to use for cloud notifications
+        """
+        import atexit
+
+        # create message queues and start child process
+        self._in_queue: multiprocessing.Queue = multiprocessing.Queue()
+        self._out_queue: multiprocessing.Queue = multiprocessing.Queue()
+        self._process: Optional[multiprocessing.Process] = multiprocessing.Process(
+            target=NotificationServer._process_commands,
+            args=(self._in_queue, self._out_queue, title, config, tags),
+        )
+        self._process.start()
+
+        response = self._out_queue.get()  # wait for the child process to be ready
+        if isinstance(response, Exception):
+            raise response
+        if not isinstance(response, bool) or not response:
+            raise RuntimeError("Failed to initialize notification server")
+
+        # register atexit handler to send the poison pill
+        atexit.register(self._send_poison)
+
+    def send_notification(self, message: str):
+        """
+        Send notification to cloud service
+
+        Args:
+            message: notification message
+        """
+        self._in_queue.put(message)
+        try:
+            exc = self._out_queue.get_nowait()
+            if isinstance(exc, Exception):
+                raise exc
+        except queue.Empty:
+            pass
+
+    @staticmethod
+    def _process_commands(
+        in_queue: multiprocessing.Queue,
+        out_queue: multiprocessing.Queue,
+        title: str,
+        config: str,
+        tags: str,
+    ):
+        """
+        Process commands from the queue. Runs in separate process.
+        """
+        from apprise import Apprise, AppriseConfig
+
+        try:
+            # initialize Apprise object
+            apprise_obj = Apprise()
+            if os.path.isfile(config):
+                # treat config as a path to the configuration file
+                conf = AppriseConfig()
+                if not conf.add(config):
+                    raise ValueError(f"Invalid configuration file: {config}")
+                apprise_obj.add(conf)
+            else:
+                # treat config as a single server URL
+                if not apprise_obj.add(config):
+                    raise ValueError(f"Invalid configuration URL: {config}")
+        except Exception as e:
+            out_queue.put(e)
+            return
+
+        out_queue.put(True)  # to indicate that the child process is ready
+
+        # process messages from the queue
+        while True:
+            message = in_queue.get()
+            if message is None:
+                # poison pill received, exit the loop
+                break
+
+            try:
+                if "unittest" in config:  # special case for unit tests
+                    continue
+
+                if not apprise_obj.notify(body=message, title=title, tag=tags):
+                    raise Exception(f"Notification failed: {title} - {message}")
+            except Exception as e:
+                out_queue.put(e)
+
+    def _send_poison(self):
+        """Send the poison pill to stop the child process"""
+        if self._process is not None:
+            self._in_queue.put(None)
+            self._process.join()
+            self._process = None
+
+    def __del__(self):
+        # Send the poison pill to stop the child process
+        self._send_poison()
 
 
 class EventNotifier(ResultAnalyzerBase):
@@ -35,9 +143,9 @@ class EventNotifier(ResultAnalyzerBase):
         condition: str,
         *,
         message: str = "",
-        holdoff: Union[Tuple[float, str], int, float] = 0.0,
-        token: Optional[str] = None,
-        tags: Optional[str] = None,
+        holdoff: Union[Tuple[float, str], int, float] = 0,
+        notification_config: Union[str, NotificationServer, None] = None,
+        notification_tags: Optional[str] = None,
         show_overlay: bool = True,
         annotation_color: Optional[tuple] = None,
         annotation_font_scale: Optional[float] = None,
@@ -54,12 +162,13 @@ class EventNotifier(ResultAnalyzerBase):
             holdoff: holdoff time to suppress repeated notifications; it is either integer holdoff value in frames,
                 floating-point holdoff value in seconds, or a tuple in a form (holdoff, unit), where unit is either
                 "seconds" or "frames".
-            message: message to display in the notification; may be valid Python f-string, in which you can use
-                `{result}` placeholder with any valid derivatives to access current inference result.
-                For example: "Total {len(result.results)} objects detected"
-            token: optional cloud API access token to use for cloud notifications;
-                if not specified, the notification is not sent to cloud
-            tags: optional tags to use for cloud notifications
+            message: message to display in the notification; may be valid Python format string, in which you can use
+                `{result}` placeholder with any valid derivatives to access current inference result and its attributes.
+                For example: "Objects detected: {result.results}"
+            notification_config: optional configuration of cloud notification service:
+                it can be already constructed notification server object (taken from another notifier);
+                or path to the configuration file for notification service; or single notification service URL
+            notification_tags: optional tags to use for cloud notifications
                 Tags can be separated by "and" (or commas) and "or" (or spaces).
                 For example:
                 "Tag1, Tag2" (equivalent to "Tag1 and Tag2"
@@ -75,28 +184,21 @@ class EventNotifier(ResultAnalyzerBase):
 
         self._name = name
         self._message = message if message else f"Notification triggered: {name}"
-        self._token = token
         self._show_overlay = show_overlay
         self._annotation_color = annotation_color
         self._annotation_font_scale = annotation_font_scale
         self._annotation_pos = annotation_pos
         self._annotation_cool_down = annotation_cool_down
-        self._tags = tags
 
-        # Setting up apprise object and config if the user provides a path to a config file or server URL
-        self._apprise_obj = None
-        if self._token:
-            self._apprise_obj = Apprise()
-            if os.path.isfile(self._token):
-                # treat token as a path to the configuration file
-                conf = AppriseConfig()
-                if not conf.add(self._token):
-                    raise ValueError(f"Invalid configuration file: {self._token}")
-                self._apprise_obj.add(conf)
-            else:
-                # treat token as a single server URL
-                if not self._apprise_obj.add(self._token):
-                    raise ValueError(f"Invalid configuration: {self._token}")
+        # setting up notification server
+        self.notification_server: Optional[NotificationServer] = None
+        if isinstance(notification_config, NotificationServer):
+            # externally provided notification server
+            self.notification_server = notification_config
+        elif isinstance(notification_config, str) and notification_config:
+            self.notification_server = NotificationServer(
+                self._name, notification_config, notification_tags
+            )
 
         # compile condition to evaluate it later
         self._condition = compile(condition, "<string>", "eval")
@@ -173,18 +275,11 @@ class EventNotifier(ResultAnalyzerBase):
             ):
                 result.notifications[self._name] = self._message.format(result=result)
 
-                if self._token is not None and self._apprise_obj is not None:
-                    # TODO: send notification to cloud
-
-                    # For now, assuming a hardcoded message
-                    if "unittest" not in self._token:
-                        for title, body in result.notifications.items():
-                            if not self._apprise_obj.notify(
-                                body=body, title=title, tag=self._tags
-                            ):
-                                raise Exception(
-                                    f"Notification failed: {title} - {body}"
-                                )
+                # send notifications to cloud service
+                if self.notification_server is not None:
+                    self.notification_server.send_notification(
+                        result.notifications[self._name]
+                    )
 
         # update holdoff timestamp and frame number if condition is met
         if cond:
