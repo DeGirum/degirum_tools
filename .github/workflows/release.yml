@@ -9,22 +9,33 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Abort if not running on tag
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
-        run: exit 1
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: 3.9
+
       - name: Install Python build requirements
         run: pip install -e '.[build]'
+
       - name: Run build
         run: python3 -m build .
-      - name: Release python wheels from Framework
+
+      - name: Extract package version and create git tag
+        id: extract_package_version
+        run: |
+          wheel_file=$(find ${{ github.workspace }}/dist -name "*.whl" -print -quit)
+          package_version=${{ github.ref_name }}-v$(basename $wheel_file | sed 's/^[^-]*-\([^ -]*\).*/\1/')
+          echo "Package version tag: $package_version"
+          git tag $package_version
+          git push origin $package_version
+          echo "package_version=$package_version" >> "$GITHUB_OUTPUT"
+
+      - name: Release python wheel to GitHub
         uses: softprops/action-gh-release@v2
         with:
           fail_on_unmatched_files: true
-          files: |
-            ${{ github.workspace }}/dist/*.whl
+          files: ${{ github.workspace }}/dist/*.whl
+          tag_name: ${{ steps.extract_package_version.outputs.package_version }}
