@@ -262,8 +262,8 @@ class FigureAnnotator:
         self.canvas.pack(fill=tk.BOTH, expand=True)
 
         self.image_path: str = ""
-        self.original_image = None  # Store the original image
-        self.image_tk = None
+        self.original_image: Optional[Image.Image] = None  # Store the original image
+        self.image_tk: Optional[ImageTk.PhotoImage] = None
         self.points: List[Tuple] = []  # Points relative to the original image
         self.displayed_points: List[Tuple] = []  # Points relative to the resized image
         self.polygon_ids: List[int] = []  # Store polygon IDs for undo
@@ -325,7 +325,7 @@ class FigureAnnotator:
             self.grids.clear()
 
         # Load the original image and store it
-        self.original_image = Image.open(self.image_path)   # type: ignore[attr-defined]
+        self.original_image = Image.open(self.image_path)
         self.original_width, self.original_height = (
             self.original_image.size
         )  # Store original dimensions
@@ -341,7 +341,7 @@ class FigureAnnotator:
     def update_image(self, image):
         """Helper function to update the image on the canvas."""
         self.current_width, self.current_height = image.size
-        self.image_tk = ImageTk.PhotoImage(image)   # type: ignore[attr-defined]
+        self.image_tk = ImageTk.PhotoImage(image)
         self.canvas.config(width=self.current_width, height=self.current_height)
         self.canvas.create_image(0, 0, anchor=tk.NW, image=self.image_tk)
 
