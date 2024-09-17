@@ -12,7 +12,7 @@ import queue
 import copy
 import time
 from abc import ABC, abstractmethod
-from typing import Optional, Any, List, Union
+from typing import Optional, Any, List, Dict, Union
 from contextlib import ExitStack
 from .environment import get_test_mode
 from .video_support import open_video_stream, open_video_writer
@@ -23,17 +23,94 @@ import numpy
 
 import degirum as dg
 
+#
+# predefined meta tags
+#
+tag_video = "video"  # tag for video source data
+tag_resize = "resize"  # tag for resizer result
+tag_inference = "inference"  # tag for inference result
+tag_preprocess = "preprocess"  # tag for preprocessor result
+tag_crop = "crop"  # tag for cropping result
+
+
+class StreamMeta:
+    """Stream metainfo class
+
+    Keeps a list of metainfo objects, which are produced by Gizmos in the pipeline.
+    A gizmo appends its own metainfo to the end of the list tagging it with a set of tags.
+    Tags are used to find metainfo objects by a specific tag combination.
+
+    """
+
+    def __init__(self, meta: Optional[Any] = None, tags: Union[str, List[str]] = []):
+        """Constructor.
+
+        - meta: initial metainfo object (optional)
+        - tags: tag or list of tags associated with this metainfo object
+        """
+
+        self._meta_list: list = []
+        self._tags: Dict[str, List[int]] = {}
+        if meta is not None:
+            self.append(meta, tags)
+
+    def clone(self):
+        """Shallow clone metainfo object: clones all internal structures, but only references to
+        metainfo objects, not the objects themselves.
+        """
+        ret = StreamMeta()
+        ret._meta_list = copy.copy(self._meta_list)
+        ret._tags = copy.deepcopy(self._tags)
+        return ret
+
+    def append(self, meta: Any, tags: Union[str, List[str]] = []):
+        """Append a metainfo object to the list and tag it with a set of tags.
+
+        - meta: metainfo object
+        - tags: tag or list of tags associated with this metainfo object
+        """
+        idx = len(self._meta_list)
+        self._meta_list.append(meta)
+        for tag in tags if isinstance(tags, list) else [tags]:
+            if tag in self._tags:
+                self._tags[tag].append(idx)
+            else:
+                self._tags[tag] = [idx]
+
+    def find(self, tag: str) -> List[Any]:
+        """Find metainfo objects by a set of tags.
+
+        - tags: tag or list of tags to search for
+
+        Returns a list of metainfo objects matching this tag.
+        """
+
+        lst = []
+        tag_indexes = self._tags.get(tag)
+        if tag_indexes:
+            for idx in tag_indexes:
+                lst.append(self._meta_list[idx])
+        return lst
+
+    def get(self, idx: int) -> Any:
+        """Get metainfo object by index"""
+        return self._meta_list[idx]
+
 
 class StreamData:
     """Single data element of the streaming pipelines"""
 
-    def __init__(self, data: Any, meta: Any):
+    def __init__(self, data: Any, meta: StreamMeta = StreamMeta()):
         """Constructor.
 
         - data: data payload
         - meta: metainfo"""
         self.data = data
         self.meta = meta
+
+    def append_meta(self, meta: Any, tags: List[str] = []):
+        """Append metainfo to the existing metainfo"""
+        self.meta.append(meta, tags)
 
 
 class Stream(queue.Queue):
@@ -125,6 +202,10 @@ class Gizmo(ABC):
         self.start_time_s = time.time()  # gizmo start time
         self.elapsed_s = 0
         self.fps = 0  # achieved FPS rate
+
+    def get_tags(self) -> List[str]:
+        """Get list of tags assigned to this gizmo"""
+        return [self.name]
 
     def get_input(self, inp: int) -> Stream:
         """Get inp-th input stream"""
@@ -347,6 +428,12 @@ class Composition:
 class VideoSourceGizmo(Gizmo):
     """OpenCV-based video source gizmo"""
 
+    # meta keys
+    key_frame_width = "frame_width"  # frame width
+    key_frame_height = "frame_height"  # frame height
+    key_fps = "fps"  # stream frame rate
+    key_frame_count = "frame_count"  # total stream frame count
+
     def __init__(self, video_source=None):
         """Constructor.
 
@@ -355,15 +442,29 @@ class VideoSourceGizmo(Gizmo):
         super().__init__()
         self._video_source = video_source
 
+    def get_tags(self) -> List[str]:
+        """Get list of tags assigned to this gizmo"""
+        return [self.name, tag_video]
+
     def run(self):
         """Run gizmo"""
         with open_video_stream(self._video_source) as src:
+
+            meta = {
+                self.key_frame_width: int(src.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                self.key_frame_height: int(src.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+                self.key_fps: src.get(cv2.CAP_PROP_FPS),
+                self.key_frame_count: int(src.get(cv2.CAP_PROP_FRAME_COUNT)),
+            }
+
             while not self._abort:
                 ret, data = src.read()
                 if not ret:
                     self._abort = True
                 else:
-                    self.send_result(StreamData(data, {}))
+                    self.send_result(
+                        StreamData(data, StreamMeta(meta, self.get_tags()))
+                    )
 
 
 class VideoDisplayGizmo(Gizmo):
@@ -505,6 +606,12 @@ class VideoSaverGizmo(Gizmo):
 class ResizingGizmo(Gizmo):
     """OpenCV-based image resizing/padding gizmo"""
 
+    # meta keys
+    key_frame_width = "frame_width"  # frame width
+    key_frame_height = "frame_height"  # frame height
+    key_pad_method = "pad_method"  # padding method
+    key_resize_method = "resize_method"  # resampling method
+
     def __init__(
         self,
         w: int,
@@ -527,6 +634,10 @@ class ResizingGizmo(Gizmo):
         self._w = w
         self._pad_method = pad_method
         self._resize_method = resize_method
+
+    def get_tags(self) -> List[str]:
+        """Get list of tags assigned to this gizmo"""
+        return [self.name, tag_resize]
 
     def _resize(self, image):
         dx = dy = 0  # offset of left top corner of original image in resized image
@@ -561,10 +672,18 @@ class ResizingGizmo(Gizmo):
     def run(self):
         """Run gizmo"""
 
+        meta = {
+            self.key_frame_width: self._w,
+            self.key_frame_height: self._h,
+            self.key_pad_method: self._pad_method,
+            self.key_resize_method: self._resize_method,
+        }
+
         for data in self.get_input(0):
             if self._abort:
                 break
             resized = self._resize(data.data)
+            data.meta.append(meta, self.get_tags())
             self.send_result(StreamData(resized, data.meta))
 
 
@@ -591,6 +710,10 @@ class AiGizmoBase(Gizmo):
         model.input_numpy_colorspace = "BGR"  # adjust colorspace to match OpenCV
         self.model = model
 
+    def get_tags(self) -> List[str]:
+        """Get list of tags assigned to this gizmo"""
+        return [self.name, tag_inference]
+
     def run(self):
         """Run gizmo"""
 
@@ -608,15 +731,21 @@ class AiGizmoBase(Gizmo):
                     break
 
         for result in self.model.predict_batch(source()):
+            meta = result.info
             if isinstance(result._input_image, bytes):
-                if isinstance(result.info, dict) and ("image_input" in result.info):
+                # most likely, we have preprocessing gizmo in the pipeline
+                preprocess_metas = meta.find(tag_preprocess)
+                if preprocess_metas:
+                    # indeed, we have preprocessing gizmo in the pipeline
+                    preprocess_meta = preprocess_metas[-1]
+
                     # patch raw bytes image in result when possible to provide better result visualization
-                    result._input_image = result.info["image_input"]
+                    result._input_image = preprocess_meta[
+                        AiPreprocessGizmo.key_image_input
+                    ]
 
                     # recalculate bbox coordinates to original image
-                    converter = (
-                        result.info["converter"] if "converter" in result.info else None
-                    )
+                    converter = preprocess_meta.get(AiPreprocessGizmo.key_converter)
                     if converter is not None:
                         for res in result._inference_results:
                             if "bbox" in res:
@@ -643,17 +772,23 @@ class AiSimpleGizmo(AiGizmoBase):
     """AI inference gizmo with no result processing: it passes through input frames
     attaching inference results as meta info"""
 
+    def get_tags(self) -> List[str]:
+        """Get list of tags assigned to this gizmo"""
+        return [self.name, tag_inference]
+
     def on_result(self, result):
         """Result handler to be overloaded in derived classes.
 
         - result: inference result; result.info contains reference to data frame used for inference
         """
-        self.send_result(StreamData(result.image, result))
+        meta = result.info
+        meta.append(result, self.get_tags())
+        self.send_result(StreamData(result.image, meta))
 
 
 class AiObjectDetectionCroppingGizmo(Gizmo):
-    """A gizmo, which receives images at input #0 and corresponding object detection results at input #1,
-    then for each detected object it crops input image and sends cropped result.
+    """A gizmo, which receives object detection results, then for each detected object
+    it crops input image and sends cropped result.
 
     Output image is the crop of original image.
     Output meta-info is a dictionary with the following keys:
@@ -663,6 +798,11 @@ class AiObjectDetectionCroppingGizmo(Gizmo):
     - "cropped_index": the number of that sub-result
     The last two key are present only if at least one object is detected in a frame.
     """
+
+    # meta keys
+    key_original_result = "original_result"  # original AI object detection result
+    key_cropped_result = "cropped_result"  # sub-result for particular crop
+    key_cropped_index = "cropped_index"  # the number of that sub-result
 
     def __init__(
         self,
@@ -683,41 +823,48 @@ class AiObjectDetectionCroppingGizmo(Gizmo):
 
         self._labels = labels
 
+    def get_tags(self) -> List[str]:
+        """Get list of tags assigned to this gizmo"""
+        return [self.name, tag_crop]
+
     def run(self):
         """Run gizmo"""
 
-        while True:
-            d0 = self.get_input(0).get()
-            d1 = self.get_input(1).get()
-
-            if d0 == Stream._poison or d1 == Stream._poison:
-                self._abort = True
-
+        for data in self.get_input(0):
             if self._abort:
                 break
 
-            img = d0.data
-            result = d1.meta
+            img = data.data
+            inference_metas = data.meta.find(tag_inference)
+            if not inference_metas:
+                self.send_result(data)
+                continue
+            result = inference_metas[-1]
 
             is_first = True
             for i, r in enumerate(result.results):
-                if "label" not in r or r["label"] not in self._labels:
+                bbox = r.get("bbox")
+                label = r.get("label")
+                if not bbox or not label or label not in self._labels:
                     continue
-                crop = Display.crop(result.image, r["bbox"])
-                # send all crops afterwards
-                meta = {}
+                crop = Display.crop(result.image, bbox)
+
+                crop_meta = {}
                 if is_first:
-                    # send whole result with no data first
-                    meta["original_result"] = result
+                    # send whole result first
+                    crop_meta[self.key_original_result] = result
 
-                meta["cropped_result"] = r
-                meta["cropped_index"] = i
-
+                crop_meta[self.key_cropped_result] = r
+                crop_meta[self.key_cropped_index] = i
                 is_first = False
-                self.send_result(StreamData(crop, meta))
+
+                new_meta = data.meta.clone()
+                new_meta.append(crop_meta, self.get_tags())
+                self.send_result(StreamData(crop, new_meta))
 
             if is_first:  # no objects detected: send just original result
-                self.send_result(StreamData(img, {"original_result": result}))
+                data.meta.append({self.key_original_result: result}, self.get_tags())
+                self.send_result(StreamData(img, data.meta))
 
 
 class AiResultCombiningGizmo(Gizmo):
@@ -755,15 +902,21 @@ class AiResultCombiningGizmo(Gizmo):
             if self._abort:
                 break
 
-            d0 = all_data[0]
-            for d in all_data[1:]:
-                # check that results are of the same type and from the same data
-                if hasattr(d.meta, "_inference_results") and hasattr(
-                    d0.meta, "_inference_results"
-                ):
-                    d0.meta._inference_results += d.meta._inference_results
+            base_data: Optional[StreamData] = None
+            base_result: Optional[list] = None
+            for d in all_data:
+                inference_metas = d.meta.find(tag_inference)
+                if not inference_metas:
+                    continue  # no inference results
+                sub_result = inference_metas[-1]._inference_results
 
-            self.send_result(StreamData(d0.data, d0.meta))
+                if base_data is None:
+                    base_data = d
+                    base_result = sub_result
+                else:
+                    base_result += sub_result
+
+            self.send_result(base_data)
 
 
 class AiPreprocessGizmo(Gizmo):
@@ -775,6 +928,10 @@ class AiPreprocessGizmo(Gizmo):
         "converter": coordinate conversion lambda
         "image_result": pre-processed image (optional, only when model.save_model_image is set)
     """
+
+    key_image_input = "image_input"  # reference to the input image
+    key_converter = "converter"  # coordinate conversion lambda
+    key_image_result = "image_result"  # pre-processed image
 
     def __init__(
         self,
@@ -791,6 +948,10 @@ class AiPreprocessGizmo(Gizmo):
         super().__init__([(stream_depth, allow_drop)])
         self._preprocessor = model._preprocessor
 
+    def get_tags(self) -> List[str]:
+        """Get list of tags assigned to this gizmo"""
+        return [self.name, tag_preprocess]
+
     def run(self):
         """Run gizmo"""
         for data in self.get_input(0):
@@ -798,7 +959,8 @@ class AiPreprocessGizmo(Gizmo):
                 break
 
             res = self._preprocessor.forward(data.data)
-            self.send_result(StreamData(res[0], res[1]))
+            data.meta.append(res[1], self.get_tags())
+            self.send_result(StreamData(res[0], data.meta))
 
 
 class FanoutGizmo(Gizmo):
@@ -823,4 +985,5 @@ class FanoutGizmo(Gizmo):
         for data in self.get_input(0):
             if self._abort:
                 break
-            self.send_result(data)
+            meta = data.meta.clone()
+            self.send_result(data, meta)
