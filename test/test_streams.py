@@ -9,7 +9,49 @@
 
 import time
 import pytest
+import degirum_tools
 import degirum_tools.streams as streams
+import cv2
+
+
+class VideoSink(streams.Gizmo):
+    """Video sink gizmo: counts frames and saves them"""
+
+    def __init__(self):
+        super().__init__([(0, False)])
+        self.frames = []
+        self.frames_cnt = 0
+
+    def run(self):
+        for data in self.get_input(0):
+            self.frames.append(data)
+            self.frames_cnt += 1
+
+
+def test_streams_video_source(short_video):
+
+    with degirum_tools.open_video_stream(short_video) as src:
+        frame_width = int(src.get(cv2.CAP_PROP_FRAME_WIDTH))
+        frame_height = int(src.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fps = src.get(cv2.CAP_PROP_FPS)
+        frame_count = int(src.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    source = streams.VideoSourceGizmo(short_video)
+    sink = VideoSink()
+    sink.connect_to(source)
+    streams.Composition(source, sink).start()
+
+    assert streams.tag_video in source.get_tags()
+    assert sink.frames_cnt == frame_count
+
+    for frame in sink.frames:
+        assert frame.data.shape == (frame_height, frame_width, 3)
+        video_meta = frame.meta.find(streams.tag_video)
+        assert video_meta and len(video_meta) == 1
+        assert video_meta[0][source.key_frame_width] == frame_width
+        assert video_meta[0][source.key_frame_height] == frame_height
+        assert video_meta[0][source.key_fps] == fps
+        assert video_meta[0][source.key_frame_count] == frame_count
 
 
 def test_streams_error_handling():
@@ -26,7 +68,7 @@ def test_streams_error_handling():
 
         def run(self):
             while not self._abort:
-                self.send_result(streams.StreamData(self.n, self.n))
+                self.send_result(streams.StreamData(self.n, streams.StreamMeta(self.n)))
                 self.n += 1
 
     class SinkWithException(streams.Gizmo):
@@ -74,7 +116,7 @@ def test_streams_error_handling():
         def run(self):
             n = 0
             while not self._abort:
-                self.send_result(streams.StreamData(n, n))
+                self.send_result(streams.StreamData(n, streams.StreamMeta(n)))
                 n += 1
                 if n == self.limit:
                     # wait until output queue is empty so sink will block

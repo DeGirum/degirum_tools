@@ -290,10 +290,16 @@ class Composition:
     Then you start your composition by calling start() method.
     You may stop your composition by calling stop() method."""
 
-    def __init__(self):
-        """Constructor."""
-        self._gizmos: List[Gizmo] = []
+    def __init__(self, *gizmos):
+        """Constructor.
+
+        - gizmos: optional list of gizmos to add to composition
+        """
+
         self._threads: List[threading.Thread] = []
+        self._gizmos: List[Gizmo] = list(gizmos)
+        for gizmo in self._gizmos:
+            gizmo.composition = self
 
     def add(self, gizmo: Gizmo) -> Gizmo:
         """Add a gizmo to composition
