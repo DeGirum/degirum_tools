@@ -395,6 +395,7 @@ class FigureAnnotator:
             else:
                 new_height = int(new_width / self.aspect_ratio)
 
+            # Resize the image to the new width and height
             resized_image = self.original_image.resize(
                 (new_width, new_height), Image.BILINEAR
             )
