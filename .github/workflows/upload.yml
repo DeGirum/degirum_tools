@@ -6,9 +6,9 @@ on:
         description: "Release tag containing wheels to upload"
         type: string
         required: true
-        default: "v0.x.y"
+        default: "main-v0.x.y"
 
-run-name: Release ${{ inputs.release_tag }}
+run-name: Upload ${{ inputs.release_tag }}
 
 jobs:
   release:
