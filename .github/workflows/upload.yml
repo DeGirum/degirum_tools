@@ -8,7 +8,7 @@ on:
         required: true
         default: "main-v0.x.y"
 
-run-name: Release ${{ inputs.release_tag }}
+run-name: Upload ${{ inputs.release_tag }}
 
 jobs:
   release:
