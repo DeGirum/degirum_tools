@@ -494,6 +494,7 @@ class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
             Generator object which iterates over combined inference result objects.
             This allows you directly using the result in `for` loops.
         """
+        self._current_result = None
         for result in super().predict_batch(data):
             yield result
         if self._current_result is not None:
@@ -636,6 +637,7 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
             Generator object which iterates over combined inference result objects.
             This allows you directly using the result in `for` loops.
         """
+        self._current_result = None
         for result in super().predict_batch(data):
             yield result
         if self._current_result is not None:
