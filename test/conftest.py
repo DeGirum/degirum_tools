@@ -4,8 +4,7 @@
 #
 # Contains common pytest configuration and common test fixtures
 #
-import sys, os
-import pytest
+import sys, os, tempfile, pytest, pathlib
 
 # add current directory to sys.path to debug tests locally without package installation
 sys.path.insert(0, os.getcwd())
@@ -27,3 +26,11 @@ def short_video(image_dir):
     file = os.path.join(image_dir, "TrafficHD_short.mp4")
     os.environ[degirum_tools.var_VideoSource] = file
     return file
+
+
+@pytest.fixture
+def temp_dir():
+    """Temporary directory fixture with cleanup"""
+    with tempfile.TemporaryDirectory() as directory:
+        yield pathlib.Path(directory)
+        # cleanup happens automatically when the block exits

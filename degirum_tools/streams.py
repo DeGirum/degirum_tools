@@ -11,17 +11,15 @@ import threading
 import queue
 import copy
 import time
+import cv2
+import numpy
+
 from abc import ABC, abstractmethod
 from typing import Optional, Any, List, Dict, Union
 from contextlib import ExitStack
 from .environment import get_test_mode
 from .video_support import open_video_stream, open_video_writer
 from .ui_support import Display
-
-import cv2
-import numpy
-
-import degirum as dg
 
 #
 # predefined meta tags
@@ -515,7 +513,7 @@ class VideoDisplayGizmo(Gizmo):
         self._show_fps = show_fps
         self._show_ai_overlay = show_ai_overlay
         self._multiplex = multiplex
-        self._frames = []  # saved frames for tests
+        self._frames: list = []  # saved frames for tests
 
     def run(self):
         """Run gizmo"""

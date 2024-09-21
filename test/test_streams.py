@@ -46,12 +46,12 @@ def test_streams_video_source(short_video):
 
     for frame in sink.frames:
         assert frame.data.shape == (frame_height, frame_width, 3)
-        video_meta = frame.meta.find(streams.tag_video)
-        assert video_meta and len(video_meta) == 1
-        assert video_meta[0][source.key_frame_width] == frame_width
-        assert video_meta[0][source.key_frame_height] == frame_height
-        assert video_meta[0][source.key_fps] == fps
-        assert video_meta[0][source.key_frame_count] == frame_count
+        video_meta = frame.meta.find_last(streams.tag_video)
+        assert video_meta is not None
+        assert video_meta[source.key_frame_width] == frame_width
+        assert video_meta[source.key_frame_height] == frame_height
+        assert video_meta[source.key_fps] == fps
+        assert video_meta[source.key_frame_count] == frame_count
 
 
 def test_streams_video_display(short_video):
@@ -63,6 +63,30 @@ def test_streams_video_display(short_video):
     sink.connect_to(source)
     streams.Composition(source, display, sink).start()
     assert display._frames == sink.frames
+
+
+def test_streams_video_saver(short_video, temp_dir):
+
+    result_path = temp_dir / "test.mp4"
+    source = streams.VideoSourceGizmo(short_video)
+    saver = streams.VideoSaverGizmo(result_path)
+    sink = VideoSink()
+    saver.connect_to(source)
+    sink.connect_to(source)
+    streams.Composition(source, saver, sink).start()
+
+    meta = sink.frames[0].meta.find_last(streams.tag_video)
+    assert meta is not None
+    result = cv2.VideoCapture(result_path)
+    try:
+        assert meta[source.key_frame_width] == int(result.get(cv2.CAP_PROP_FRAME_WIDTH))
+        assert meta[source.key_frame_height] == int(
+            result.get(cv2.CAP_PROP_FRAME_HEIGHT)
+        )
+        assert meta[source.key_fps] == result.get(cv2.CAP_PROP_FPS)
+        assert meta[source.key_frame_count] == int(result.get(cv2.CAP_PROP_FRAME_COUNT))
+    finally:
+        result.release()
 
 
 def test_streams_error_handling():
