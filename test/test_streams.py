@@ -54,6 +54,17 @@ def test_streams_video_source(short_video):
         assert video_meta[0][source.key_frame_count] == frame_count
 
 
+def test_streams_video_display(short_video):
+
+    source = streams.VideoSourceGizmo(short_video)
+    display = streams.VideoDisplayGizmo()
+    sink = VideoSink()
+    display.connect_to(source)
+    sink.connect_to(source)
+    streams.Composition(source, display, sink).start()
+    assert display._frames == sink.frames
+
+
 def test_streams_error_handling():
     """Test for error handling in streams"""
 

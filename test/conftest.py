@@ -10,6 +10,10 @@ import pytest
 # add current directory to sys.path to debug tests locally without package installation
 sys.path.insert(0, os.getcwd())
 
+import degirum_tools
+
+os.environ[degirum_tools.var_TestMode] = "1"  # enable test mode
+
 
 @pytest.fixture(scope="session")
 def image_dir():
@@ -20,4 +24,6 @@ def image_dir():
 @pytest.fixture(scope="session")
 def short_video(image_dir):
     """Path to test short video"""
-    return os.path.join(image_dir, "TrafficHD_short.mp4")
+    file = os.path.join(image_dir, "TrafficHD_short.mp4")
+    os.environ[degirum_tools.var_VideoSource] = file
+    return file

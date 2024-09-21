@@ -531,9 +531,10 @@ class Display:
         if in_colab():
             # special case for Colab environment
             show_in_colab(img)
-        elif self._no_gui and in_notebook():
-            # show image in notebook when possible
-            show_in_notebook(img)
+        elif self._no_gui:
+            if in_notebook():
+                # show image in notebook when possible
+                show_in_notebook(img)
         else:
             # show image in OpenCV window
             if not self._window_created:

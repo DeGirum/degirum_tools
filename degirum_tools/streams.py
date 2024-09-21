@@ -82,15 +82,22 @@ class StreamMeta:
 
         - tags: tag or list of tags to search for
 
-        Returns a list of metainfo objects matching this tag.
+        Returns a list of metainfo objects matching this tag(s).
         """
 
-        lst = []
         tag_indexes = self._tags.get(tag)
-        if tag_indexes:
-            for idx in tag_indexes:
-                lst.append(self._meta_list[idx])
-        return lst
+        return [self._meta_list[idx] for idx in tag_indexes] if tag_indexes else []
+
+    def find_last(self, tag: str):
+        """Find metainfo objects by a set of tags.
+
+        - tags: tag or list of tags to search for
+
+        Returns last metainfo object matching this tag(s) or None.
+        """
+
+        tag_indexes = self._tags.get(tag)
+        return self._meta_list[tag_indexes[-1]] if tag_indexes else None
 
     def get(self, idx: int) -> Any:
         """Get metainfo object by index"""
@@ -508,6 +515,7 @@ class VideoDisplayGizmo(Gizmo):
         self._show_fps = show_fps
         self._show_ai_overlay = show_ai_overlay
         self._multiplex = multiplex
+        self._frames = []  # saved frames for tests
 
     def run(self):
         """Run gizmo"""
@@ -516,6 +524,7 @@ class VideoDisplayGizmo(Gizmo):
             ndisplays = len(self._window_titles)
             ninputs = len(self.get_inputs())
 
+            test_mode = get_test_mode()
             displays = [
                 stack.enter_context(Display(w, self._show_fps))
                 for w in self._window_titles
@@ -530,7 +539,7 @@ class VideoDisplayGizmo(Gizmo):
 
                     for ii, input in enumerate(self.get_inputs()):  # ii is input index
                         try:
-                            if ninputs > 1 and not get_test_mode():
+                            if ninputs > 1 and not test_mode:
                                 # non-multiplexing multi-input case (do not use it in test mode to avoid race conditions)
                                 data = input.get_nowait()
                             else:
@@ -547,13 +556,16 @@ class VideoDisplayGizmo(Gizmo):
                             self._abort = True
                             break
 
-                        if self._show_ai_overlay and isinstance(
-                            data.meta, dg.postprocessor.InferenceResults
-                        ):
-                            # show AI inference overlay if possible
-                            displays[di].show(data.meta.image_overlay)
-                        else:
-                            displays[di].show(data.data)
+                        img = data.data
+                        if self._show_ai_overlay:
+                            inference_meta = data.meta.find_last(tag_inference)
+                            if inference_meta:
+                                # show AI inference overlay if possible
+                                img = inference_meta.image_overlay
+
+                        displays[di].show(img)
+                        if test_mode:
+                            self._frames.append(data)
 
                         if first_run[di] and not displays[di]._no_gui:
                             cv2.setWindowProperty(
@@ -592,12 +604,11 @@ class VideoSaverGizmo(Gizmo):
         """Run gizmo"""
 
         def get_img(data):
-            return (
-                data.meta.image_overlay
-                if self._show_ai_overlay
-                and isinstance(data.meta, dg.postprocessor.InferenceResults)
-                else data.data
-            )
+            if self._show_ai_overlay:
+                inference_meta = data.meta.find_last(tag_inference)
+                if inference_meta:
+                    return inference_meta.image_overlay
+            return data.data
 
         img = get_img(self.get_input(0).get())
         with open_video_writer(self._filename, img.shape[1], img.shape[0]) as writer:
@@ -740,10 +751,9 @@ class AiGizmoBase(Gizmo):
             meta = result.info
             if isinstance(result._input_image, bytes):
                 # most likely, we have preprocessing gizmo in the pipeline
-                preprocess_metas = meta.find(tag_preprocess)
-                if preprocess_metas:
+                preprocess_meta = meta.find_last(tag_preprocess)
+                if preprocess_meta:
                     # indeed, we have preprocessing gizmo in the pipeline
-                    preprocess_meta = preprocess_metas[-1]
 
                     # patch raw bytes image in result when possible to provide better result visualization
                     result._input_image = preprocess_meta[
@@ -841,11 +851,10 @@ class AiObjectDetectionCroppingGizmo(Gizmo):
                 break
 
             img = data.data
-            inference_metas = data.meta.find(tag_inference)
-            if not inference_metas:
+            result = data.meta.find_last(tag_inference)
+            if result is None:
                 self.send_result(data)
                 continue
-            result = inference_metas[-1]
 
             is_first = True
             for i, r in enumerate(result.results):
@@ -911,10 +920,10 @@ class AiResultCombiningGizmo(Gizmo):
             base_data: Optional[StreamData] = None
             base_result: Optional[list] = None
             for d in all_data:
-                inference_metas = d.meta.find(tag_inference)
-                if not inference_metas:
+                inference_meta = d.meta.find_last(tag_inference)
+                if inference_meta is None:
                     continue  # no inference results
-                sub_result = inference_metas[-1]._inference_results
+                sub_result = inference_meta._inference_results
 
                 if base_data is None:
                     base_data = d
