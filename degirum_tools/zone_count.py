@@ -201,7 +201,7 @@ class ZoneCounter(ResultAnalyzerBase):
         self._zones: Optional[List] = None
         self._win_name = window_name
         self._mouse_callback_installed = False
-        self._class_list = class_list
+        self._class_list = [] if class_list is None else class_list
         self._per_class_display = per_class_display
         if class_list is None and per_class_display:
             raise ValueError(
@@ -238,7 +238,13 @@ class ZoneCounter(ResultAnalyzerBase):
             result: PySDK model result object
         """
 
-        result.zone_counts = [{} for _ in self._polygons]
+        result.zone_counts = [
+            dict.fromkeys(
+                self._class_list + ["total"] if self._per_class_display else ["total"],
+                0,
+            )
+            for _ in self._polygons
+        ]
 
         self._lazy_init(result)
 
@@ -276,6 +282,9 @@ class ZoneCounter(ResultAnalyzerBase):
         if len(filtered_results) == 0:
             return
 
+        for obj in filtered_results:
+            obj["in_zone"] = [False for _ in self._zones]
+
         bboxes = np.array([obj["bbox"] for obj in filtered_results])
 
         use_trails = self._use_tracking and self._timeout_frames > 0
@@ -288,13 +297,10 @@ class ZoneCounter(ResultAnalyzerBase):
 
             for obj, flag in zip(filtered_results, triggers):
                 if flag:
-                    obj["in_zone"] = zi
-                    label = (
-                        obj["label"]
-                        if self._per_class_display and "label" in obj
-                        else "total"
-                    )
-                    zone_counts[label] = zone_counts.get(label, 0) + 1
+                    obj["in_zone"][zi] = True
+                    zone_counts["total"] += 1
+                    if self._per_class_display and "label" in obj:
+                        zone_counts[obj["label"]] += 1
                     if use_trails:
                         tid = obj["track_id"]
                         zone._timeout_count_dict[tid] = zone._timeout_count_initial
