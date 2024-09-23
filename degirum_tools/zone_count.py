@@ -254,7 +254,7 @@ class ZoneCounter(ResultAnalyzerBase):
         def in_class_list(label):
             return (
                 True
-                if self._class_list is None
+                if not self._class_list
                 else False if label is None else label in self._class_list
             )
 
