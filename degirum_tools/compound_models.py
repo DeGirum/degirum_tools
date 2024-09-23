@@ -40,7 +40,6 @@ class ModelLike(ABC):
         """Perform whole inference lifecycle on a single frame.
 
         Args:
-
             data (any): Inference input data. Input data type depends on the model.
             It should be compatible to that regular PySDK model accepts.
 
@@ -55,7 +54,6 @@ class ModelLike(ABC):
         """Perform whole inference lifecycle on a single frame.
 
         Args:
-
             data (any): Inference input data. Input data type depends on the model.
             It should be compatible to that regular PySDK model accepts.
 
@@ -496,6 +494,7 @@ class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
             Generator object which iterates over combined inference result objects.
             This allows you directly using the result in `for` loops.
         """
+        self._current_result = None
         for result in super().predict_batch(data):
             yield result
         if self._current_result is not None:
@@ -638,6 +637,7 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
             Generator object which iterates over combined inference result objects.
             This allows you directly using the result in `for` loops.
         """
+        self._current_result = None
         for result in super().predict_batch(data):
             yield result
         if self._current_result is not None:

@@ -80,7 +80,8 @@ class LineCounter(ResultAnalyzerBase):
         *,
         whole_trail: bool = True,
         count_first_crossing: bool = True,
-        absolute_directions: bool = True,
+        absolute_directions: bool = False,
+        count_only_left_and_right: bool = True,
         accumulate: bool = True,
         per_class_display: bool = False,
         show_overlay: bool = True,
@@ -100,6 +101,8 @@ class LineCounter(ResultAnalyzerBase):
             absolute_directions (bool, optional): when True, direction of trail is calculated relative to coordinate
                 system of image; when False, direction of trail is calculated relative to coordinate system defined
                 by line that it intersects
+            count_only_left_and_right (bool, optional): when True, only two directions, "right" and "left" are computed; when False,
+                all four directions are computed; applied only when absolute_directions is False
             accumulate (bool, optional): when True, accumulate line counts; when False, store line counts only for current
                 frame
             per_class_display (bool, optional): when True, display counts per class,
@@ -115,6 +118,7 @@ class LineCounter(ResultAnalyzerBase):
         self._whole_trail = whole_trail
         self._count_first_crossing = count_first_crossing
         self._absolute_directions = absolute_directions
+        self._count_only_left_and_right = count_only_left_and_right
         self._accumulate = accumulate
         self._mouse_callback_installed = False
         self._per_class_display = per_class_display
@@ -179,18 +183,23 @@ class LineCounter(ResultAnalyzerBase):
                     else:
                         counts.right += 1
 
-                trail_onto_line_projection = self._projection(line_vector, trail_vector)
-                trail_onto_line_projection_sign = np.sign(trail_onto_line_projection)
-                if np.all(trail_onto_line_projection_sign == np.sign(line_vector)):
-                    counts.top += 1
-                else:
-                    if not np.any(trail_onto_line_projection_sign):
-                        if cross_product > 0:
-                            counts.bottom += 1
-                        else:
-                            counts.top += 1
+                if not self._count_only_left_and_right:
+                    trail_onto_line_projection = self._projection(
+                        line_vector, trail_vector
+                    )
+                    trail_onto_line_projection_sign = np.sign(
+                        trail_onto_line_projection
+                    )
+                    if np.all(trail_onto_line_projection_sign == np.sign(line_vector)):
+                        counts.top += 1
                     else:
-                        counts.bottom += 1
+                        if not np.any(trail_onto_line_projection_sign):
+                            if cross_product > 0:
+                                counts.bottom += 1
+                            else:
+                                counts.top += 1
+                        else:
+                            counts.bottom += 1
             return counts
 
         if not self._accumulate:
@@ -282,19 +291,34 @@ class LineCounter(ResultAnalyzerBase):
                     cx = line_start[0] - margin
                     corner = CornerPosition.TOP_RIGHT
 
-            def line_count_str(lc: SingleLineCounts, prefix: str = "") -> str:
-                return f"{prefix}^({lc.top}) v({lc.bottom}) <({lc.left}) >({lc.right})"
+            def line_count_str(
+                lc: SingleLineCounts,
+                prefix: str = "",
+                count_only_left_and_right: bool = False,
+            ) -> str:
+                return (
+                    f"{prefix}<({lc.left}) >({lc.right})"
+                    if count_only_left_and_right
+                    else f"{prefix}^({lc.top}) v({lc.bottom}) <({lc.left}) >({lc.right})"
+                )
 
+            count_only_left_and_right = (
+                not self._absolute_directions and self._count_only_left_and_right
+            )
             if self._per_class_display:
                 capt = "\n".join(
                     [
-                        line_count_str(class_count, f"{class_name}: ")
+                        line_count_str(
+                            class_count, f"{class_name}: ", count_only_left_and_right
+                        )
                         for class_name, class_count in line_count.for_class.items()
                     ]
-                    + [line_count_str(line_count, "Total: ")]
+                    + [line_count_str(line_count, "Total: ", count_only_left_and_right)]
                 )
             else:
-                capt = line_count_str(line_count)
+                capt = line_count_str(
+                    line_count, count_only_left_and_right=count_only_left_and_right
+                )
 
             put_text(
                 image,
