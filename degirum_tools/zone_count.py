@@ -175,6 +175,7 @@ class ZoneCounter(ResultAnalyzerBase):
         window_name: Optional[str] = None,
         show_overlay: bool = True,
         annotation_color: Optional[tuple] = None,
+        annotation_line_width: Optional[int] = None,
     ):
         """Constructor
 
@@ -194,7 +195,8 @@ class ZoneCounter(ResultAnalyzerBase):
             timeout_frames (int, optional): number of frames to buffer when an object disappears from zone
             window_name (str, optional): optional OpenCV window name to configure for interactive zone adjustment
             show_overlay: if True, annotate image; if False, send through original image
-            annotation_color: Color to use for annotations, None to use complement to result overlay color
+            annotation_color (tuple, optional): Color to use for annotations, None to use complement to result overlay color
+            annotation_line_width (int, optional): Line width to use for annotations, None to use result overlay line width
         """
 
         self._wh: Optional[Tuple] = None
@@ -218,6 +220,7 @@ class ZoneCounter(ResultAnalyzerBase):
         ]
         self._show_overlay = show_overlay
         self._annotation_color = annotation_color
+        self._annotation_line_width = annotation_line_width
 
     def analyze(self, result):
         """
@@ -349,6 +352,12 @@ class ZoneCounter(ResultAnalyzerBase):
         )
         text_color = deduce_text_color(line_color)
 
+        line_width = (
+            result.overlay_line_width
+            if self._annotation_line_width is None
+            else self._annotation_line_width
+        )
+
         # draw annotations
         for zi in range(len(self._polygons)):
             cv2.polylines(
@@ -356,7 +365,7 @@ class ZoneCounter(ResultAnalyzerBase):
                 [cv2.Mat(self._polygons[zi])],
                 True,
                 line_color,
-                result.overlay_line_width,
+                line_width,
             )
 
             if self._per_class_display and self._class_list is not None:
@@ -371,7 +380,7 @@ class ZoneCounter(ResultAnalyzerBase):
             put_text(
                 image,
                 text,
-                tuple(x + result.overlay_line_width for x in self._polygons[zi][0]),
+                tuple(x + line_width for x in self._polygons[zi][0]),
                 font_color=text_color,
                 bg_color=line_color,
                 font_scale=result.overlay_font_scale,
