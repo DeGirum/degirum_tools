@@ -53,7 +53,12 @@ class LineCounts(SingleLineCounts):
 
 
 class SingleVectorCounts:
-    """Class to hold vector crossing counts"""
+    """
+    Class to hold vector crossing counts.
+
+    In relation to a vector, "in_direction" specifies points to the right of the vector,
+    and "out_direction" specifies points to the left of the vector.
+    """
 
     def __init__(self):
         self.in_direction: int = 0
@@ -90,15 +95,19 @@ class LineCounter(ResultAnalyzerBase):
     Analyzes the object detection `result` object passed to `analyze` method and, for each object trail
     in the `result.trails` dictionary, checks if this trail crosses any lines specified by the `lines`
     constructor parameter. If the trail crosses the line, the corresponding object is counted in
-    two out of four directions: left-to-right vs right-to-left, and top-to-bottom vs bottom-to-top.
+    two out of four directions (left-to-right vs right-to-left, and top-to-bottom vs bottom-to-top) if
+    `absolute_directions` is set to True, and in one out of two directions relative to the line (in and out)
+    if `absolute_directions` is set to False.
 
-    Adds `line_counts` list of `LineCounts` objects to the `result` object - one objects per crossing line.
-    Each object contains four attributes: `left`, `right`, `top`, and `bottom`. Each attribute
-    value is the number of occurrences of a trail crossing the corresponding line from the
-    corresponding direction. For each trail crossing, two directions are updated:
-    `left` vs `right`, and `top` vs `bottom`.
-    Additionally, if `per_class_display` constructor parameter is set to True, the pre-class counts are
-    stored in the `for_class` dictionary of the `LineCounts` object.
+    Adds `line_counts` list of either `LineCounts` or `VectorCounts` objects to the `result` object -
+    one object per crossing line. The object contains the following attributes: `left`, `right`, `top`,
+    and `bottom` in a `LineCounts` object, `in_direction` and `out_direction` in a `VectorCounts` object.
+    Each attribute value is the number of occurrences of a trail crossing the corresponding line to the
+    corresponding direction. For each trail crossing, the following directions are updated:
+        `left` vs `right`, and `top` vs `bottom` - for `LineCounts`
+        `in_direction` (right side of vector) vs `out_direction` (left side of vector) - for `VectorCounts`
+    Additionally, if `per_class_display` constructor parameter is set to True, the per-class counts are
+    stored in the `for_class` dictionary of the `LineCounts` or `VectorCounts` object.
 
     This class works in conjunction with `ObjectTracker` class that should be used to track object trails.
 
@@ -174,10 +183,14 @@ class LineCounter(ResultAnalyzerBase):
         Detect trails crossing the line.
 
         Adds `line_counts` list of dataclasses to the `result` object - one element per crossing line.
-        Each dataclass contains four attributes: `left`, `right`, `top`, and `bottom`. Each attribute
-        value is the number of occurrences of a trail crossing the corresponding line to the
-        corresponding direction. For each trail crossing, two directions are updated:
-        `left` vs `right`, and `top` vs `bottom`.
+        The dataclass contains the following attributes:
+            `left`, `right`, `top`, and `bottom` in a `LineCounts` object
+            `in_direction` and `out_direction` in a `VectorCounts` object
+
+        Each attribute value is the number of occurrences of a trail crossing the corresponding line to the
+        corresponding direction. For each trail crossing, the following directions are updated:
+            `left` vs `right`, and `top` vs `bottom` - for `LineCounts`
+            `in_direction` (right side of vector) vs `out_direction` (left side of vector) - for `VectorCounts`
 
         Args:
             result: PySDK model result object, containing `trails` dictionary from ObjectTracker
@@ -200,8 +213,11 @@ class LineCounter(ResultAnalyzerBase):
                 new_trails_list[i] = new_trails_list[i] - self._counted_trails_list[i]
 
         def count_increment(trail_vector, line_vector):
-            increment_counts = self._count_type.__bases__[0]()
+            increment_counts: Optional[Union[SingleLineCounts, SingleVectorCounts]] = (
+                None
+            )
             if self._absolute_directions:
+                increment_counts = SingleLineCounts()
                 if trail_vector[0] < 0:
                     increment_counts.left += 1
                 else:
@@ -211,6 +227,7 @@ class LineCounter(ResultAnalyzerBase):
                 else:
                     increment_counts.bottom += 1
             else:
+                increment_counts = SingleVectorCounts()
                 cross_product = np.cross(trail_vector, line_vector)
                 if cross_product > 0:
                     increment_counts.out_direction += 1
@@ -221,7 +238,6 @@ class LineCounter(ResultAnalyzerBase):
                         increment_counts.out_direction += 1
                     else:
                         increment_counts.in_direction += 1
-
             return increment_counts
 
         if not self._accumulate:
@@ -250,10 +266,17 @@ class LineCounter(ResultAnalyzerBase):
                         increment = count_increment(trail_vector, line_vector)
                         total_count += increment
                         if self._per_class_display:
-                            class_count = total_count.for_class.setdefault(
-                                result.trail_classes[tid],
-                                self._count_type.__bases__[0](),
-                            )
+                            class_count: Optional[
+                                Union[SingleLineCounts, SingleVectorCounts]
+                            ] = None
+                            if isinstance(total_count, LineCounts):
+                                class_count = total_count.for_class.setdefault(
+                                    result.trail_classes[tid], SingleLineCounts()
+                                )
+                            elif isinstance(total_count, VectorCounts):
+                                class_count = total_count.for_class.setdefault(
+                                    result.trail_classes[tid], SingleVectorCounts()
+                                )
                             class_count += increment
 
         result.line_counts = deepcopy(self._line_counts)
