@@ -89,6 +89,34 @@ def test_streams_video_saver(short_video, temp_dir):
         result.release()
 
 
+def test_streams_resizer(short_video):
+
+    w = 320
+    h = 240
+    pad_method = "stretch"
+    resize_method = cv2.INTER_NEAREST
+    source = streams.VideoSourceGizmo(short_video)
+    resizer = streams.ResizingGizmo(
+        w, h, pad_method=pad_method, resize_method=resize_method
+    )
+    sink = VideoSink()
+    sink.connect_to(resizer.connect_to(source))
+    streams.Composition(source, resizer, sink).start()
+
+    video_meta = sink.frames[0].meta.find_last(streams.tag_video)
+    assert video_meta is not None
+    assert video_meta[source.key_frame_count] == sink.frames_cnt
+
+    for frame in sink.frames:
+        resize_meta = frame.meta.find_last(streams.tag_resize)
+        assert resize_meta is not None
+        assert resize_meta[resizer.key_frame_width] == w
+        assert resize_meta[resizer.key_frame_height] == h
+        assert resize_meta[resizer.key_pad_method] == pad_method
+        assert resize_meta[resizer.key_resize_method] == resize_method
+        assert frame.data.shape == (h, w, 3)
+
+
 def test_streams_error_handling():
     """Test for error handling in streams"""
 

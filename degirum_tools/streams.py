@@ -227,8 +227,11 @@ class Gizmo(ABC):
 
         - other_gizmo: gizmo to connect to
         - inp: input index to use for connection
+
+        Returns self
         """
         other_gizmo._output_refs.append(self.get_input(inp))
+        return self
 
     def __lshift__(self, other_gizmo):
         """Operator synonym for connect_to(): connects self to other_gizmo
