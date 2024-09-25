@@ -175,6 +175,7 @@ class ZoneCounter(ResultAnalyzerBase):
         window_name: Optional[str] = None,
         show_overlay: bool = True,
         annotation_color: Optional[tuple] = None,
+        annotation_line_width: Optional[int] = None,
     ):
         """Constructor
 
@@ -194,14 +195,15 @@ class ZoneCounter(ResultAnalyzerBase):
             timeout_frames (int, optional): number of frames to buffer when an object disappears from zone
             window_name (str, optional): optional OpenCV window name to configure for interactive zone adjustment
             show_overlay: if True, annotate image; if False, send through original image
-            annotation_color: Color to use for annotations, None to use complement to result overlay color
+            annotation_color (tuple, optional): Color to use for annotations, None to use complement to result overlay color
+            annotation_line_width (int, optional): Line width to use for annotations, None to use result overlay line width
         """
 
         self._wh: Optional[Tuple] = None
         self._zones: Optional[List] = None
         self._win_name = window_name
         self._mouse_callback_installed = False
-        self._class_list = class_list
+        self._class_list = [] if class_list is None else class_list
         self._per_class_display = per_class_display
         if class_list is None and per_class_display:
             raise ValueError(
@@ -218,6 +220,7 @@ class ZoneCounter(ResultAnalyzerBase):
         ]
         self._show_overlay = show_overlay
         self._annotation_color = annotation_color
+        self._annotation_line_width = annotation_line_width
 
     def analyze(self, result):
         """
@@ -238,7 +241,13 @@ class ZoneCounter(ResultAnalyzerBase):
             result: PySDK model result object
         """
 
-        result.zone_counts = [{} for _ in self._polygons]
+        result.zone_counts = [
+            dict.fromkeys(
+                self._class_list + ["total"] if self._per_class_display else ["total"],
+                0,
+            )
+            for _ in self._polygons
+        ]
 
         self._lazy_init(result)
 
@@ -248,7 +257,7 @@ class ZoneCounter(ResultAnalyzerBase):
         def in_class_list(label):
             return (
                 True
-                if self._class_list is None
+                if not self._class_list
                 else False if label is None else label in self._class_list
             )
 
@@ -276,6 +285,9 @@ class ZoneCounter(ResultAnalyzerBase):
         if len(filtered_results) == 0:
             return
 
+        for obj in filtered_results:
+            obj["in_zone"] = [False for _ in self._zones]
+
         bboxes = np.array([obj["bbox"] for obj in filtered_results])
 
         use_trails = self._use_tracking and self._timeout_frames > 0
@@ -288,13 +300,10 @@ class ZoneCounter(ResultAnalyzerBase):
 
             for obj, flag in zip(filtered_results, triggers):
                 if flag:
-                    obj["in_zone"] = zi
-                    label = (
-                        obj["label"]
-                        if self._per_class_display and "label" in obj
-                        else "total"
-                    )
-                    zone_counts[label] = zone_counts.get(label, 0) + 1
+                    obj["in_zone"][zi] = True
+                    zone_counts["total"] += 1
+                    if self._per_class_display and "label" in obj:
+                        zone_counts[obj["label"]] += 1
                     if use_trails:
                         tid = obj["track_id"]
                         zone._timeout_count_dict[tid] = zone._timeout_count_initial
@@ -343,6 +352,12 @@ class ZoneCounter(ResultAnalyzerBase):
         )
         text_color = deduce_text_color(line_color)
 
+        line_width = (
+            result.overlay_line_width
+            if self._annotation_line_width is None
+            else self._annotation_line_width
+        )
+
         # draw annotations
         for zi in range(len(self._polygons)):
             cv2.polylines(
@@ -350,7 +365,7 @@ class ZoneCounter(ResultAnalyzerBase):
                 [cv2.Mat(self._polygons[zi])],
                 True,
                 line_color,
-                result.overlay_line_width,
+                line_width,
             )
 
             if self._per_class_display and self._class_list is not None:
@@ -365,7 +380,7 @@ class ZoneCounter(ResultAnalyzerBase):
             put_text(
                 image,
                 text,
-                tuple(x + result.overlay_line_width for x in self._polygons[zi][0]),
+                tuple(x + line_width for x in self._polygons[zi][0]),
                 font_color=text_color,
                 bg_color=line_color,
                 font_scale=result.overlay_font_scale,
