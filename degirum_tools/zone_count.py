@@ -382,7 +382,7 @@ class ZoneCounter(ResultAnalyzerBase):
                 text,
                 tuple(x + line_width for x in self._polygons[zi][0]),
                 font_color=text_color,
-                bg_color=line_color,
+                bg_color=line_color[::-1],
                 font_scale=result.overlay_font_scale,
             )
         return image

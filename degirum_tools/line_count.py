@@ -56,27 +56,24 @@ class SingleVectorCounts:
     """
     Class to hold vector crossing counts.
 
-    In relation to a vector, "in_direction" specifies points to the right of the vector,
-    and "out_direction" specifies points to the left of the vector.
+    In relation to a vector, "right" specifies points to the right of the vector,
+    and "left" specifies points to the left of the vector.
     """
 
     def __init__(self):
-        self.in_direction: int = 0
-        self.out_direction: int = 0
+        self.right: int = 0
+        self.left: int = 0
 
     def __eq__(self, other):
         if not isinstance(other, SingleVectorCounts):
             return NotImplemented
-        return (
-            self.in_direction == other.in_direction
-            and self.out_direction == other.out_direction
-        )
+        return self.right == other.right and self.left == other.left
 
     def __iadd__(self, other):
         if not isinstance(other, SingleVectorCounts):
             return NotImplemented
-        self.in_direction += other.in_direction
-        self.out_direction += other.out_direction
+        self.right += other.right
+        self.left += other.left
         return self
 
 
@@ -96,16 +93,16 @@ class LineCounter(ResultAnalyzerBase):
     in the `result.trails` dictionary, checks if this trail crosses any lines specified by the `lines`
     constructor parameter. If the trail crosses the line, the corresponding object is counted in
     two out of four directions (left-to-right vs right-to-left, and top-to-bottom vs bottom-to-top) if
-    `absolute_directions` is set to True, and in one out of two directions relative to the line (in and out)
-    if `absolute_directions` is set to False.
+    `absolute_directions` is set to True, and in one out of two directions relative to the line
+    (left-to-right vs right-to-left) if `absolute_directions` is set to False.
 
     Adds `line_counts` list of either `LineCounts` or `VectorCounts` objects to the `result` object -
     one object per crossing line. The object contains the following attributes: `left`, `right`, `top`,
-    and `bottom` in a `LineCounts` object, `in_direction` and `out_direction` in a `VectorCounts` object.
+    and `bottom` in a `LineCounts` object, `left` and `right` in a `VectorCounts` object.
     Each attribute value is the number of occurrences of a trail crossing the corresponding line to the
     corresponding direction. For each trail crossing, the following directions are updated:
         `left` vs `right`, and `top` vs `bottom` - for `LineCounts`
-        `in_direction` (right side of vector) vs `out_direction` (left side of vector) - for `VectorCounts`
+        `left` (left side of vector) vs `right` (right side of vector) - for `VectorCounts`
     Additionally, if `per_class_display` constructor parameter is set to True, the per-class counts are
     stored in the `for_class` dictionary of the `LineCounts` or `VectorCounts` object.
 
@@ -185,12 +182,12 @@ class LineCounter(ResultAnalyzerBase):
         Adds `line_counts` list of dataclasses to the `result` object - one element per crossing line.
         The dataclass contains the following attributes:
             `left`, `right`, `top`, and `bottom` in a `LineCounts` object
-            `in_direction` and `out_direction` in a `VectorCounts` object
+            `left` and `right` in a `VectorCounts` object
 
         Each attribute value is the number of occurrences of a trail crossing the corresponding line to the
         corresponding direction. For each trail crossing, the following directions are updated:
             `left` vs `right`, and `top` vs `bottom` - for `LineCounts`
-            `in_direction` (right side of vector) vs `out_direction` (left side of vector) - for `VectorCounts`
+            `left` (left side of vector) vs `right` (right side of vector) - for `VectorCounts`
 
         Args:
             result: PySDK model result object, containing `trails` dictionary from ObjectTracker
@@ -230,14 +227,14 @@ class LineCounter(ResultAnalyzerBase):
                 increment_counts = SingleVectorCounts()
                 cross_product = np.cross(trail_vector, line_vector)
                 if cross_product > 0:
-                    increment_counts.out_direction += 1
+                    increment_counts.left += 1
                 elif cross_product < 0:
-                    increment_counts.in_direction += 1
+                    increment_counts.right += 1
                 else:
                     if np.sign(trail_vector) == np.sign(line_vector):
-                        increment_counts.out_direction += 1
+                        increment_counts.left += 1
                     else:
-                        increment_counts.in_direction += 1
+                        increment_counts.right += 1
             return increment_counts
 
         if not self._accumulate:
@@ -311,7 +308,9 @@ class LineCounter(ResultAnalyzerBase):
         margin = 3
         img_center = (image.shape[1] // 2, image.shape[0] // 2)
 
-        for line_count, line in zip(result.line_counts, self._lines):
+        for line_count, line, line_vector in zip(
+            result.line_counts, self._lines, self._line_vectors
+        ):
             line_start = line[:2]
             line_end = line[2:]
 
@@ -371,105 +370,141 @@ class LineCounter(ResultAnalyzerBase):
                     (cx, cy),
                     corner_position=corner,
                     font_color=text_color,
-                    bg_color=line_color,
+                    bg_color=line_color[::-1],
                     font_scale=result.overlay_font_scale,
                 )
             else:
+                triangle_scale = 4.5 * line_width
+                triangle_height_vector = (
+                    line_vector
+                    / np.sqrt(line_vector[0] ** 2 + line_vector[1] ** 2)
+                    * 2
+                    * triangle_scale
+                )
+                triangle_base_unit_vector = (-line_vector[1], line_vector[0]) / np.sqrt(
+                    line_vector[0] ** 2 + line_vector[1] ** 2
+                )
+                triangle_half_base_vector = (
+                    int(triangle_base_unit_vector[0] * triangle_scale),
+                    int(triangle_base_unit_vector[1] * triangle_scale),
+                )
+                arrow_head_vertices = np.array(
+                    [
+                        [
+                            line_end[0]
+                            + triangle_half_base_vector[0]
+                            - triangle_height_vector[0],
+                            line_end[1]
+                            + triangle_half_base_vector[1]
+                            - triangle_height_vector[1],
+                        ],
+                        [
+                            line_end[0]
+                            - triangle_half_base_vector[0]
+                            - triangle_height_vector[0],
+                            line_end[1]
+                            - triangle_half_base_vector[1]
+                            - triangle_height_vector[1],
+                        ],
+                        [line_end[0], line_end[1]],
+                    ]
+                ).astype(np.int32)
+                cv2.fillPoly(image, [arrow_head_vertices], line_color)
                 if mostly_horizontal:
-                    cx_out = cx_in = line_start[0] + margin
+                    cx_left = cx_right = line_start[0] + margin
                     if line_start[0] <= line_end[0]:
-                        cy_in = line_start[1] + margin
-                        cy_out = line_start[1] - margin
+                        cy_right = line_start[1] + margin
+                        cy_left = line_start[1] - margin
                         if line_start[1] < line_end[1]:
-                            corner_in = CornerPosition.TOP_RIGHT
-                            corner_out = CornerPosition.BOTTOM_LEFT
+                            corner_right = CornerPosition.TOP_RIGHT
+                            corner_left = CornerPosition.BOTTOM_LEFT
                         elif line_start[1] > line_end[1]:
-                            corner_in = CornerPosition.TOP_LEFT
-                            corner_out = CornerPosition.BOTTOM_RIGHT
+                            corner_right = CornerPosition.TOP_LEFT
+                            corner_left = CornerPosition.BOTTOM_RIGHT
                         else:
-                            corner_in = CornerPosition.TOP_LEFT
-                            corner_out = CornerPosition.BOTTOM_LEFT
+                            corner_right = CornerPosition.TOP_LEFT
+                            corner_left = CornerPosition.BOTTOM_LEFT
                     elif line_start[0] > line_end[0]:
-                        cy_in = line_start[1] - margin
-                        cy_out = line_start[1] + margin
+                        cy_right = line_start[1] - margin
+                        cy_left = line_start[1] + margin
                         if line_start[1] < line_end[1]:
-                            corner_in = CornerPosition.BOTTOM_RIGHT
-                            corner_out = CornerPosition.TOP_LEFT
+                            corner_right = CornerPosition.BOTTOM_RIGHT
+                            corner_left = CornerPosition.TOP_LEFT
                         elif line_start[1] > line_end[1]:
-                            corner_in = CornerPosition.BOTTOM_LEFT
-                            corner_out = CornerPosition.TOP_RIGHT
+                            corner_right = CornerPosition.BOTTOM_LEFT
+                            corner_left = CornerPosition.TOP_RIGHT
                         else:
-                            corner_in = CornerPosition.BOTTOM_LEFT
-                            corner_out = CornerPosition.TOP_LEFT
+                            corner_right = CornerPosition.BOTTOM_LEFT
+                            corner_left = CornerPosition.TOP_LEFT
                 else:
-                    cy_out = cy_in = line_start[1] + margin
+                    cy_left = cy_right = line_start[1] + margin
                     if line_start[1] <= line_end[1]:
-                        cx_in = line_start[0] - margin
-                        cx_out = line_start[0] + margin
+                        cx_right = line_start[0] - margin
+                        cx_left = line_start[0] + margin
                         if line_start[0] < line_end[0]:
-                            corner_in = CornerPosition.TOP_RIGHT
-                            corner_out = CornerPosition.BOTTOM_LEFT
+                            corner_right = CornerPosition.TOP_RIGHT
+                            corner_left = CornerPosition.BOTTOM_LEFT
                         elif line_start[0] > line_end[0]:
-                            corner_in = CornerPosition.BOTTOM_RIGHT
-                            corner_out = CornerPosition.TOP_LEFT
+                            corner_right = CornerPosition.BOTTOM_RIGHT
+                            corner_left = CornerPosition.TOP_LEFT
                         else:
-                            corner_in = CornerPosition.TOP_RIGHT
-                            corner_out = CornerPosition.TOP_LEFT
+                            corner_right = CornerPosition.TOP_RIGHT
+                            corner_left = CornerPosition.TOP_LEFT
                     elif line_start[1] > line_end[1]:
-                        cx_in = line_start[0] + margin
-                        cx_out = line_start[0] - margin
+                        cx_right = line_start[0] + margin
+                        cx_left = line_start[0] - margin
                         if line_start[0] < line_end[0]:
-                            corner_in = CornerPosition.TOP_LEFT
-                            corner_out = CornerPosition.BOTTOM_RIGHT
+                            corner_right = CornerPosition.TOP_LEFT
+                            corner_left = CornerPosition.BOTTOM_RIGHT
                         elif line_start[0] > line_end[0]:
-                            corner_in = CornerPosition.BOTTOM_LEFT
-                            corner_out = CornerPosition.TOP_RIGHT
+                            corner_right = CornerPosition.BOTTOM_LEFT
+                            corner_left = CornerPosition.TOP_RIGHT
                         else:
-                            corner_in = CornerPosition.BOTTOM_LEFT
-                            corner_out = CornerPosition.BOTTOM_RIGHT
+                            corner_right = CornerPosition.BOTTOM_LEFT
+                            corner_left = CornerPosition.BOTTOM_RIGHT
 
                 def vector_count_str(
-                    lc: SingleVectorCounts, prefix: str = "", out: bool = True
+                    lc: SingleVectorCounts, prefix: str = "", right: bool = True
                 ) -> str:
-                    return f"{prefix}{lc.out_direction if out else lc.in_direction}"
+                    return f"{prefix}{lc.right if right else lc.left}"
 
-                capt_in = "in\n"
-                capt_out = "out\n"
+                capt_right = "right\n"
+                capt_left = "left\n"
                 if self._per_class_display:
-                    capt_in += "\n".join(
-                        [
-                            vector_count_str(class_count, f"{class_name}: ", False)
-                            for class_name, class_count in line_count.for_class.items()
-                        ]
-                        + [vector_count_str(line_count, "Total: ", False)]
-                    )
-                    capt_out += "\n".join(
+                    capt_right += "\n".join(
                         [
                             vector_count_str(class_count, f"{class_name}: ", True)
                             for class_name, class_count in line_count.for_class.items()
                         ]
                         + [vector_count_str(line_count, "Total: ", True)]
                     )
+                    capt_left += "\n".join(
+                        [
+                            vector_count_str(class_count, f"{class_name}: ", False)
+                            for class_name, class_count in line_count.for_class.items()
+                        ]
+                        + [vector_count_str(line_count, "Total: ", False)]
+                    )
                 else:
-                    capt_in += vector_count_str(line_count, out=False)
-                    capt_out += vector_count_str(line_count, out=True)
+                    capt_right += vector_count_str(line_count, right=True)
+                    capt_left += vector_count_str(line_count, right=False)
 
                 put_text(
                     image,
-                    capt_in,
-                    (cx_in, cy_in),
-                    corner_position=corner_in,
+                    capt_right,
+                    (cx_right, cy_right),
+                    corner_position=corner_right,
                     font_color=text_color,
-                    bg_color=line_color,
+                    bg_color=line_color[::-1],
                     font_scale=result.overlay_font_scale,
                 )
                 put_text(
                     image,
-                    capt_out,
-                    (cx_out, cy_out),
-                    corner_position=corner_out,
+                    capt_left,
+                    (cx_left, cy_left),
+                    corner_position=corner_left,
                     font_color=text_color,
-                    bg_color=line_color,
+                    bg_color=line_color[::-1],
                     font_scale=result.overlay_font_scale,
                 )
 

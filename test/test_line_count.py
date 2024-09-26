@@ -56,8 +56,8 @@ def test_line_counter():
                 [
                     {
                         "for_class": {},
-                        "in_direction": 0,
-                        "out_direction": 0,
+                        "right": 0,
+                        "left": 0,
                     }
                 ]
             ],
@@ -77,8 +77,8 @@ def test_line_counter():
                 [
                     {
                         "for_class": {},
-                        "in_direction": 0,
-                        "out_direction": 0,
+                        "right": 0,
+                        "left": 0,
                     }
                 ]
             ],
@@ -98,8 +98,8 @@ def test_line_counter():
                 [
                     {
                         "for_class": {},
-                        "in_direction": 0,
-                        "out_direction": 1,
+                        "right": 0,
+                        "left": 1,
                     }
                 ]
             ],
@@ -125,15 +125,15 @@ def test_line_counter():
                 [
                     {
                         "for_class": {},
-                        "in_direction": 0,
-                        "out_direction": 1,
+                        "right": 0,
+                        "left": 1,
                     }
                 ],
                 [
                     {
                         "for_class": {},
-                        "in_direction": 1,
-                        "out_direction": 1,
+                        "right": 1,
+                        "left": 1,
                     }
                 ],
             ],
@@ -158,21 +158,19 @@ def test_line_counter():
             "res": [
                 [
                     {
-                        "for_class": {
-                            "label1": {"in_direction": 0, "out_direction": 1}
-                        },
-                        "in_direction": 0,
-                        "out_direction": 1,
+                        "for_class": {"label1": {"right": 0, "left": 1}},
+                        "right": 0,
+                        "left": 1,
                     }
                 ],
                 [
                     {
                         "for_class": {
-                            "label1": {"in_direction": 0, "out_direction": 1},
-                            "label2": {"in_direction": 1, "out_direction": 0},
+                            "label1": {"right": 0, "left": 1},
+                            "label2": {"right": 1, "left": 0},
                         },
-                        "in_direction": 1,
-                        "out_direction": 1,
+                        "right": 1,
+                        "left": 1,
                     }
                 ],
             ],
@@ -198,15 +196,15 @@ def test_line_counter():
                 [
                     {
                         "for_class": {},
-                        "in_direction": 0,
-                        "out_direction": 1,
+                        "right": 0,
+                        "left": 1,
                     }
                 ],
                 [
                     {
                         "for_class": {},
-                        "in_direction": 1,
-                        "out_direction": 0,
+                        "right": 1,
+                        "left": 0,
                     }
                 ],
             ],
@@ -285,22 +283,22 @@ def test_line_counter():
                 [
                     {
                         "for_class": {},
-                        "in_direction": 0,
-                        "out_direction": 1,
+                        "right": 0,
+                        "left": 1,
                     }
                 ],
                 [
                     {
                         "for_class": {},
-                        "in_direction": 0,
-                        "out_direction": 1,
+                        "right": 0,
+                        "left": 1,
                     }
                 ],
                 [
                     {
                         "for_class": {},
-                        "in_direction": 0,
-                        "out_direction": 1,
+                        "right": 0,
+                        "left": 1,
                     }
                 ],
             ],
@@ -341,22 +339,22 @@ def test_line_counter():
                 [
                     {
                         "for_class": {},
-                        "in_direction": 0,
-                        "out_direction": 1,
+                        "right": 0,
+                        "left": 1,
                     }
                 ],
                 [
                     {
                         "for_class": {},
-                        "in_direction": 0,
-                        "out_direction": 1,
+                        "right": 0,
+                        "left": 1,
                     }
                 ],
                 [
                     {
                         "for_class": {},
-                        "in_direction": 0,
-                        "out_direction": 2,
+                        "right": 0,
+                        "left": 2,
                     }
                 ],
             ],
@@ -380,8 +378,8 @@ def test_line_counter():
                 [
                     {
                         "for_class": {},
-                        "in_direction": 1,
-                        "out_direction": 0,
+                        "right": 1,
+                        "left": 0,
                     }
                 ]
             ],
@@ -426,22 +424,22 @@ def test_line_counter():
                 [
                     {
                         "for_class": {},
-                        "in_direction": 0,
-                        "out_direction": 1,
+                        "right": 0,
+                        "left": 1,
                     }
                 ],
                 [
                     {
                         "for_class": {},
-                        "in_direction": 1,
-                        "out_direction": 1,
+                        "right": 1,
+                        "left": 1,
                     }
                 ],
                 [
                     {
                         "for_class": {},
-                        "in_direction": 1,
-                        "out_direction": 2,
+                        "right": 1,
+                        "left": 2,
                     }
                 ],
             ],
@@ -463,7 +461,7 @@ def test_line_counter():
             else:
                 res = (
                     ResSingleLineCounts(**case["res"][i][0])
-                    if "right" in case["res"][i][0].keys()
+                    if "top" in case["res"][i][0].keys()
                     else ResSingleVectorCounts(**case["res"][i][0])
                 )
                 assert result.line_counts[0] == res, (  # type: ignore[attr-defined]
