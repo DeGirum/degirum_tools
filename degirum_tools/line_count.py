@@ -409,7 +409,7 @@ class LineCounter(ResultAnalyzerBase):
                         [line_end[0], line_end[1]],
                     ]
                 ).astype(np.int32)
-                cv2.fillPoly(image, [arrow_head_vertices], line_color)
+                cv2.fillPoly(image, [cv2.Mat(arrow_head_vertices)], line_color)
                 if mostly_horizontal:
                     cx_left = cx_right = line_start[0] + margin
                     if line_start[0] <= line_end[0]:
