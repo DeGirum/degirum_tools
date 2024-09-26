@@ -9,7 +9,7 @@
 #
 
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 from PIL import Image, ImageTk
 import json
 import argparse
@@ -115,6 +115,12 @@ class FigureAnnotatorType(Enum):
     QUADRILATERAL = 4
 
 
+object_format_versions = {
+    "line": 1,
+    "zone": 1,
+}
+
+
 class Grid:
     def __init__(self):
         self.ids = []
@@ -133,10 +139,10 @@ class Grid:
         points_len = len(self.points)
         return points_len >= 4 and points_len % 2 == 0
 
-    def update_region_parameters(self):
+    def update_grid_parameters(self):
         """
-        Calculated key defining parameters of region:
-        the slopes and y-intercepts of the top and bottom lines of the regions.
+        Calculates key defining parameters of grid:
+        the slopes and y-intercepts of the top and bottom lines of the grid.
         """
         if len(self.points) >= 4:
             guide_top_r = self.points[-1]
@@ -165,33 +171,48 @@ class Grid:
                 )
             )
 
-    def get_temp_polygon(self) -> List[Tuple]:
-        """Returns part of latest incomplete polygon if such exists, empty list otherwise."""
+    def get_temp_polygon(self) -> Tuple[List[Tuple[float]], List[int]]:
+        """
+        Returns part of latest incomplete polygon if such exists and indices of points comprising
+        this part, empty lists otherwise.
+        """
         points_len = len(self.displayed_points)
         if points_len < 4:
-            return self.displayed_points
+            return self.displayed_points, list(range(points_len))
         elif points_len % 2 == 1:
-            return self.displayed_points[-3:-2]
+            return self.displayed_points[-3:-2], [points_len - 3]
         else:
-            return []
+            return [], []
 
-    def get_grid_polygons(self, display: bool = True) -> List[List[Tuple]]:
+    def get_grid_polygons(self, display: bool = True) -> List[List[Tuple[int]]]:
         """Returns list of polygons defined by grid."""
         points = self.displayed_points if display else self.points
         polygons = []
         if len(points) >= 4:
-            polygons.append([points[0], points[1], points[-2], points[-1]])
+            polygons.append(
+                np.array([points[0], points[1], points[-2], points[-1]])
+                .astype(int)
+                .tolist()
+            )
         if len(points) > 5:
             for i in range(0, len(points) - 2, 2):
                 if len(points[i:]) == 5:
                     break
                 if i == len(points) - 4:
                     polygons.append(
-                        [points[i], points[i + 1], points[i + 2], points[i + 3]]
+                        np.array(
+                            [points[i], points[i + 1], points[i + 2], points[i + 3]]
+                        )
+                        .astype(int)
+                        .tolist()
                     )
                 else:
                     polygons.append(
-                        [points[i], points[i + 1], points[i + 3], points[i + 2]]
+                        np.array(
+                            [points[i], points[i + 1], points[i + 3], points[i + 2]]
+                        )
+                        .astype(int)
+                        .tolist()
                     )
         return polygons
 
@@ -232,8 +253,12 @@ class FigureAnnotator:
 
         edit_menu = tk.Menu(self.menu_bar, tearoff=0)
         if self.with_grid:
-            edit_menu.add_command(label="Add grid", command=self.add_grid)
-            edit_menu.add_command(label="Remove grid", command=self.remove_grid)
+            edit_menu.add_command(
+                label="Add grid", command=self.add_grid, accelerator="Ctrl-A"
+            )
+            edit_menu.add_command(
+                label="Remove grid", command=self.remove_grid, accelerator="Ctrl-D"
+            )
         edit_menu.add_command(label="Undo", command=self.undo, accelerator="Ctrl-Z")
         self.menu_bar.add_cascade(label="Edit", menu=edit_menu)
 
@@ -242,8 +267,12 @@ class FigureAnnotator:
             self.grid_selection_frame = tk.Frame(self.main_frame)
             self.grid_selection_frame.pack(fill=tk.X, pady=5)
 
-            # Add "Current Selection" OptionMenu to the grid_selection_frame
-            self.grid_selection_default_value = "Manual"
+            # Add "Active Grid" ComboBox to the grid_selection_frame
+            self.grid_selection_menu_label = tk.Label(
+                self.grid_selection_frame, text="Active Grid"
+            )
+            self.grid_selection_menu_label.grid(row=0, column=0)
+            self.grid_selection_default_value = "Non-grid mode"
             self.added_grid_id = ""
             self.grid_selection_var = tk.StringVar(self.grid_selection_frame)
             self.grid_selection_var.set(
@@ -251,12 +280,12 @@ class FigureAnnotator:
             )  # Default value
             self.grid_selection_options = [self.grid_selection_default_value]
 
-            self.grid_selection_menu = tk.OptionMenu(
+            self.grid_selection_menu = ttk.Combobox(
                 self.grid_selection_frame,
-                self.grid_selection_var,
-                *self.grid_selection_options,
+                textvariable=self.grid_selection_var,
+                values=self.grid_selection_options,
             )
-            self.grid_selection_menu.pack(side=tk.LEFT, padx=10)
+            self.grid_selection_menu.grid(row=0, column=1, padx=10)
 
         self.canvas = tk.Canvas(self.main_frame, cursor="cross")
         self.canvas.pack(fill=tk.BOTH, expand=True)
@@ -278,14 +307,20 @@ class FigureAnnotator:
         self.aspect_ratio = 1.0  # Aspect ratio of the original image
 
         # Dragging state
-        self.dragging_polygon = None  # The polygon ID being dragged
-        self.dragging_offset: Optional[Tuple] = (
+        self.dragging_polygon_id = None  # The polygon ID being dragged
+        self.dragging_polygon_offset: Optional[Tuple] = (
             None  # The offset from the click position to the vertices
         )
-        self.dragging_index = (
+        self.dragging_polygon_offset_start: Optional[Tuple] = (
+            None  # The starting offset from the click position to the vertices
+        )
+        self.dragging_polygon_point_index = (
             None  # The index of the points in `self.points` being dragged
         )
-        self.dragging_point = None  # The index of the point being dragged
+        self.dragging_point_start = (
+            None  # The starting coordinates of the dragged point
+        )
+        self.dragging_point_idx = None  # The index of the point being dragged
 
         # Bind mouse-controlled actions
         self.canvas.bind("<Button-1>", self.on_click)
@@ -300,8 +335,11 @@ class FigureAnnotator:
 
         # Bind keyboard shortcuts
         self.root.bind_all("<Control-o>", self.open_image)
+        self.root.bind_all("<Control-a>", self.add_grid)
+        self.root.bind_all("<Control-d>", self.remove_grid)
         self.root.bind_all("<Control-s>", self.save_as_json)
         self.root.bind_all("<Control-z>", self.undo)
+        self.root.bind_all("<Escape>", self.process_esc)
 
         # Run application
         self.root.mainloop()
@@ -370,13 +408,9 @@ class FigureAnnotator:
     def update_grid_menu(self):
         """Update the dropdown menu listing all of the present grids."""
         self.grid_selection_options = [self.grid_selection_options[0]] + sorted(
-            [str(v) for v in self.grids.keys()]
+            [self.grid_idx_to_key(v) for v in self.grids.keys()]
         )
-        self.grid_selection_menu["menu"].delete(0, len(self.grid_selection_options))
-        for opt in self.grid_selection_options:
-            self.grid_selection_menu["menu"].add_command(
-                label=opt, command=tk._setit(self.grid_selection_var, opt)
-            )
+        self.grid_selection_menu["values"] = self.grid_selection_options
         if self.added_grid_id:
             self.grid_selection_var.set(self.added_grid_id)
             self.added_grid_id = ""
@@ -403,13 +437,19 @@ class FigureAnnotator:
 
     def on_click(self, event):
         """Processes point addition."""
-        if self.image_tk and not (self.dragging_polygon or self.dragging_point):
+        if (
+            self.image_tk
+            and self.dragging_polygon_id is None
+            and self.dragging_point_idx is None
+            and event.x <= self.current_width
+            and event.y <= self.current_height
+        ):
             scaled_x = int(event.x * self.original_width / self.current_width)
             scaled_y = int(event.y * self.original_height / self.current_height)
             cur_sel = self.get_cur_sel()
 
-            if cur_sel and cur_sel != self.grid_selection_default_value:
-                grid = self.grids[int(cur_sel)]
+            if cur_sel is not None:
+                grid = self.grids[cur_sel]
 
                 points_len = len(grid.points)
                 if points_len >= 4:  # Add intermediate point to grid
@@ -449,7 +489,7 @@ class FigureAnnotator:
                 if (
                     points_len == 4
                 ):  # Determine parameters of minimally-complete grid and draw on canvas
-                    grid.update_region_parameters()
+                    grid.update_grid_parameters()
                     self.draw_polygon(grid.get_grid_polygons()[-1], cur_sel)
                 if (
                     points_len > 4 and points_len % 2 == 0
@@ -469,12 +509,13 @@ class FigureAnnotator:
     def on_motion(self, event):
         """Processes actions related to mouse movement."""
         cur_sel = self.get_cur_sel()
-        grid_chosen = cur_sel and cur_sel != self.grid_selection_default_value
+        grid_chosen = cur_sel is not None
         if self.image_tk:
+            # Update incomplete polygon drawing, if applicable
             self.canvas.delete("temp_polygon")
             if grid_chosen:
-                grid = self.grids[int(cur_sel)]
-                temp_polygon = grid.get_temp_polygon() + [(event.x, event.y)]
+                grid = self.grids[cur_sel]
+                temp_polygon = grid.get_temp_polygon()[0] + [(event.x, event.y)]
                 if len(temp_polygon) > 1:
                     self.canvas.create_line(
                         temp_polygon, fill="yellow", tags="temp_polygon", width=2
@@ -488,122 +529,134 @@ class FigureAnnotator:
                         current_polygon, fill="yellow", tags="temp_polygon", width=2
                     )
 
-        if self.dragging_polygon is not None:
-            # Calculate the offset for moving the polygon
-            dx = event.x - self.dragging_offset[0]
-            dy = event.y - self.dragging_offset[1]
+        if self.dragging_polygon_id is not None:
+            # Move entire polygon
+            offset = (event.x, event.y)
+            self.update_dragging_polygon(offset, cur_sel)
+            self.dragging_polygon_offset = offset
 
-            # Move the displayed points of the selected polygon
-            if grid_chosen:
-                grid = self.grids[int(cur_sel)]
-                for i in range(len(grid.displayed_points)):
-                    grid.displayed_points[i] = (
-                        grid.displayed_points[i][0] + dx,
-                        grid.displayed_points[i][1] + dy,
-                    )
-                    grid.points[i] = (
-                        int(
-                            grid.displayed_points[i][0]
-                            * self.original_width
-                            / self.current_width
-                        ),
-                        int(
-                            grid.displayed_points[i][1]
-                            * self.original_height
-                            / self.current_height
-                        ),
-                    )
-            else:
-                for i in range(
-                    self.dragging_index, self.dragging_index + self.num_vertices
-                ):
-                    self.displayed_points[i] = (
-                        self.displayed_points[i][0] + dx,
-                        self.displayed_points[i][1] + dy,
-                    )
-                    self.points[i] = (
-                        int(
-                            self.displayed_points[i][0]
-                            * self.original_width
-                            / self.current_width
-                        ),
-                        int(
-                            self.displayed_points[i][1]
-                            * self.original_height
-                            / self.current_height
-                        ),
-                    )
-
-            # Update the polygon's position on the canvas
-            if grid_chosen:
-                for dragging_polygon, disp_polygon in zip(
-                    grid.ids, grid.get_grid_polygons()
-                ):
-                    self.canvas.coords(dragging_polygon, *sum(disp_polygon, ()))
-            else:
-                self.canvas.coords(
-                    self.dragging_polygon,
-                    *sum(
-                        self.displayed_points[
-                            self.dragging_index : self.dragging_index
-                            + self.num_vertices
-                        ],
-                        (),
-                    ),
-                )
-            self.dragging_offset = (event.x, event.y)
-
-        elif self.dragging_point is not None:
+        if self.dragging_point_idx is not None:
             # Move an individual point
             if not grid_chosen:
-                self.displayed_points[self.dragging_point] = (event.x, event.y)
-                self.points[self.dragging_point] = (
-                    int(event.x * self.original_width / self.current_width),
-                    int(event.y * self.original_height / self.current_height),
-                )
-
-            self.redraw_polygons()
+                self.update_dragging_point((event.x, event.y))
 
     def on_right_click(self, event):
         """Processes movement of selected point."""
-        if self.dragging_point is not None:
-            # Complete the drag operation
-            self.dragging_point = None
-            self.redraw_polygons()
-            return
+        if self.dragging_polygon_id is None:
+            if self.dragging_point_idx is not None:
+                # Complete the drag operation
+                self.dragging_point_idx = None
+                self.redraw_polygons()
+                return
 
-        # Right Click: Move a specific point
-        cur_sel = self.get_cur_sel()
-        if cur_sel and cur_sel != self.grid_selection_default_value:
-            clicked_point = None
-        else:
-            clicked_point, point_index = self.find_point(
-                event.x, event.y, self.displayed_points
-            )
+            # Right Click: Move a specific point
+            cur_sel = self.get_cur_sel()
+            if cur_sel is not None:
+                clicked_point = None
+            else:
+                clicked_point, point_index = self.find_point(
+                    event.x, event.y, self.displayed_points
+                )
 
-        if clicked_point is not None:
-            self.dragging_point = point_index
+            if clicked_point is not None:
+                self.dragging_point_idx = point_index
+                self.dragging_point_start = clicked_point
 
     def on_right_click_and_ctrl(self, event):
         """Processes movement of selected polygon."""
-        if self.dragging_polygon is not None:
-            # Complete the drag operation
-            self.dragging_polygon = None
-            self.redraw_polygons()
-            return
+        if self.dragging_point_idx is None:
+            if self.dragging_polygon_id is not None:
+                # Complete the drag operation
+                self.dragging_polygon_id = None
+                self.redraw_polygons()
+                return
 
-        # Ctrl + Right Click: Drag entire polygon
-        cur_sel = self.get_cur_sel()
-        ids = (
-            self.grids[int(cur_sel)].ids
-            if cur_sel and cur_sel != self.grid_selection_default_value
-            else self.polygon_ids
+            # Ctrl + Right Click: Drag entire polygon
+            cur_sel = self.get_cur_sel()
+            ids = self.grids[cur_sel].ids if cur_sel is not None else self.polygon_ids
+            clicked_polygon_id, polygon_index = self.find_polygon(event.x, event.y, ids)
+            if clicked_polygon_id is not None:
+                self.dragging_polygon_id = clicked_polygon_id
+                self.dragging_polygon_offset_start = self.dragging_polygon_offset = (
+                    event.x,
+                    event.y,
+                )
+                self.dragging_polygon_point_index = polygon_index
+
+    def update_dragging_point(self, point):
+        self.displayed_points[self.dragging_point_idx] = point
+        self.points[self.dragging_point_idx] = (
+            int(point[0] * self.original_width / self.current_width),
+            int(point[1] * self.original_height / self.current_height),
         )
-        clicked_polygon, polygon_index = self.find_polygon(event.x, event.y, ids)
-        if clicked_polygon is not None:
-            self.dragging_polygon = clicked_polygon
-            self.dragging_offset = (event.x, event.y)
-            self.dragging_index = polygon_index
+        self.redraw_polygons()
+
+    def update_dragging_polygon(self, offset, cur_sel):
+        grid_chosen = cur_sel is not None
+
+        # Calculate the offset for moving the polygon
+        dx = offset[0] - self.dragging_polygon_offset[0]
+        dy = offset[1] - self.dragging_polygon_offset[1]
+
+        # Move the displayed points of the selected polygon
+        if grid_chosen:
+            grid = self.grids[cur_sel]
+            for i in range(len(grid.displayed_points)):
+                grid.displayed_points[i] = (
+                    grid.displayed_points[i][0] + dx,
+                    grid.displayed_points[i][1] + dy,
+                )
+                grid.points[i] = (
+                    int(
+                        grid.displayed_points[i][0]
+                        * self.original_width
+                        / self.current_width
+                    ),
+                    int(
+                        grid.displayed_points[i][1]
+                        * self.original_height
+                        / self.current_height
+                    ),
+                )
+        else:
+            for i in range(
+                self.dragging_polygon_point_index,
+                self.dragging_polygon_point_index + self.num_vertices,
+            ):
+                self.displayed_points[i] = (
+                    self.displayed_points[i][0] + dx,
+                    self.displayed_points[i][1] + dy,
+                )
+                self.points[i] = (
+                    int(
+                        self.displayed_points[i][0]
+                        * self.original_width
+                        / self.current_width
+                    ),
+                    int(
+                        self.displayed_points[i][1]
+                        * self.original_height
+                        / self.current_height
+                    ),
+                )
+
+        # Update the polygon's position on the canvas
+        if grid_chosen:
+            for disp_polygon_id, disp_polygon in zip(
+                grid.ids, grid.get_grid_polygons()
+            ):
+                self.canvas.coords(disp_polygon_id, *sum(disp_polygon, []))
+        else:
+            self.canvas.coords(
+                self.dragging_polygon_id,
+                *sum(
+                    self.displayed_points[
+                        self.dragging_polygon_point_index : self.dragging_polygon_point_index
+                        + self.num_vertices
+                    ],
+                    (),
+                ),
+            )
 
     def find_polygon(self, x, y, ids):
         """Find a polygon or line near the given (x, y) position."""
@@ -645,13 +698,20 @@ class FigureAnnotator:
 
     def get_cur_sel(self):
         """Returns current selection for editing."""
-        return self.grid_selection_var.get() if self.with_grid else None
+        if self.with_grid:
+            cur_sel = self.grid_selection_var.get()
+            if cur_sel != self.grid_selection_default_value:
+                return self.grid_key_to_idx(cur_sel)
+            else:
+                return None
+        else:
+            return None
 
-    def get_tag(self, prefix="", grid_id=None):
+    def get_tag(self, prefix="", grid_idx=None):
         """Returns selection-specific tag for a given canvas element type"""
         tag = prefix
-        if grid_id and grid_id != self.grid_selection_default_value:
-            tag += f"_grid_{grid_id}"
+        if grid_idx is not None:
+            tag += f"_grid_{str(grid_idx)}"
         return tag
 
     def draw_point(self, point, grid_id=None):
@@ -676,8 +736,8 @@ class FigureAnnotator:
             width=2,
             tags=self.get_tag("polygon", grid_id),
         )
-        if grid_id and grid_id != self.grid_selection_default_value:
-            self.grids[int(grid_id)].ids.append(polygon_id)
+        if grid_id is not None:
+            self.grids[grid_id].ids.append(polygon_id)
         else:
             self.polygon_ids.append(polygon_id)
 
@@ -693,14 +753,15 @@ class FigureAnnotator:
                     self.displayed_points[i - self.num_vertices + 1 : i + 1]
                 )
         if self.with_grid:
-            for idx in self.grid_selection_options:
-                if idx == self.grid_selection_default_value:
+            for grid_id in self.grid_selection_options:
+                if grid_id == self.grid_selection_default_value:
                     continue
+                idx = self.grid_key_to_idx(grid_id)
                 self.canvas.delete(self.get_tag("polygon", idx))
                 self.canvas.delete(self.get_tag("point", idx))
-                grid = self.grids[int(idx)]
+                grid = self.grids[idx]
                 grid.ids.clear()
-                grid.update_region_parameters()
+                grid.update_grid_parameters()
                 if len(grid.displayed_points) >= 4:
                     for i in [0, 1, -2, -1]:
                         self.draw_point(grid.displayed_points[i], idx)
@@ -709,7 +770,13 @@ class FigureAnnotator:
                     for poly in grid.get_grid_polygons():
                         self.draw_polygon(poly, idx)
 
-    def add_grid(self):
+    def grid_key_to_idx(self, key: str):
+        return int(key.lstrip("Grid "))
+
+    def grid_idx_to_key(self, idx: int):
+        return "Grid " + str(idx)
+
+    def add_grid(self, event=None):
         """Add grid."""
         if self.image_tk:
             grid_ids = list(self.grids.keys())
@@ -717,88 +784,117 @@ class FigureAnnotator:
                 (i for i, num in enumerate(grid_ids) if i != num), len(grid_ids)
             )
             self.grids[new_grid_id] = Grid()
-            self.added_grid_id = str(new_grid_id)
+            self.added_grid_id = self.grid_idx_to_key(new_grid_id)
             self.update_grid_menu()
 
-    def remove_grid(self):
+    def remove_grid(self, event=None):
         """Remove grid."""
         if self.image_tk:
             cur_sel = self.get_cur_sel()
-            if cur_sel != self.grid_selection_default_value:
+            if cur_sel is not None:
                 self.canvas.delete(self.get_tag("polygon", cur_sel))
                 self.canvas.delete(self.get_tag("point", cur_sel))
-                self.grids.pop(int(cur_sel))
+                self.grids.pop(cur_sel)
                 self.update_grid_menu()
+
+    def process_esc(self, event=None):
+        cur_sel = self.get_cur_sel()
+        if self.dragging_point_idx is not None:
+            self.update_dragging_point(self.dragging_point_start)
+            self.dragging_point_idx = None
+        elif self.dragging_polygon_id is not None:
+            self.update_dragging_polygon(self.dragging_polygon_offset_start, cur_sel)
+            self.dragging_polygon_id = None
+        elif self.image_tk:
+            self.canvas.delete("temp_polygon")
+            if cur_sel is not None:
+                grid = self.grids[cur_sel]
+                temp_polygon_point_indices = grid.get_temp_polygon()[1]
+                if temp_polygon_point_indices:
+                    for idx in temp_polygon_point_indices:
+                        grid.points.pop(idx)
+                    grid.update_displayed_points(
+                        self.current_width,
+                        self.current_height,
+                        self.original_width,
+                        self.original_height,
+                    )
+            else:
+                if len(self.points) % self.num_vertices != 0:
+                    del self.points[-(len(self.points) % self.num_vertices) :]
+                    self.update_displayed_points()
+            self.redraw_polygons()
 
     def undo(self, event=None):
         """Processes point deletion."""
-        cur_sel = self.get_cur_sel()
-        if cur_sel and cur_sel != self.grid_selection_default_value:
-            grid = self.grids[int(cur_sel)]
-            points = grid.points
-            points_len = len(points)
-            if not points_len:  # If grid has no points, delete it
-                self.grids.pop(int(cur_sel))
-                self.update_grid_menu()
-            else:
-                if points_len >= 4 and points_len % 2 == 0:
-                    self.canvas.delete(
-                        grid.ids.pop()
-                    )  # Remove the last polygon of the grid from canvas
-                    if grid.ids:
+        if self.dragging_polygon_id is None and self.dragging_point_idx is None:
+            cur_sel = self.get_cur_sel()
+            if cur_sel is not None:
+                grid = self.grids[cur_sel]
+                points = grid.points
+                points_len = len(points)
+                if not points_len:  # If grid has no points, delete it
+                    self.grids.pop(cur_sel)
+                    self.update_grid_menu()
+                else:
+                    if points_len >= 4 and points_len % 2 == 0:
                         self.canvas.delete(
                             grid.ids.pop()
-                        )  # Remove second-to-last polygon if such exists
+                        )  # Remove the last polygon of the grid from canvas
+                        if grid.ids:
+                            self.canvas.delete(
+                                grid.ids.pop()
+                            )  # Remove second-to-last polygon if such exists
 
+                    self.canvas.delete(
+                        self.canvas.find_withtag(self.get_tag("point", cur_sel))[-1]
+                    )  # Remove the last point from canvas
+
+                    points.pop(-1 if points_len <= 4 else -3)
+                    grid.update_displayed_points(
+                        self.current_width,
+                        self.current_height,
+                        self.original_width,
+                        self.original_height,
+                    )
+
+                    points_len = len(points)
+                    if points_len > 4 and points_len % 2 == 0:
+                        polygons = grid.get_grid_polygons()
+                        self.draw_polygon(polygons[-1], cur_sel)
+
+                    self.canvas.delete("temp_polygon")
+                    temp_polygon = grid.get_temp_polygon()[0]
+                    if len(temp_polygon) > 1:
+                        self.canvas.create_line(
+                            temp_polygon, fill="yellow", tags="temp_polygon", width=2
+                        )
+            elif self.points:
+                if len(self.points) % self.num_vertices == 0 and self.polygon_ids:
+                    self.canvas.delete(
+                        self.polygon_ids.pop()
+                    )  # Remove the last polygon from canvas
                 self.canvas.delete(
-                    self.canvas.find_withtag(self.get_tag("point", cur_sel))[-1]
+                    self.canvas.find_withtag(self.get_tag("point"))[-1]
                 )  # Remove the last point from canvas
-
-                points.pop(-1 if points_len <= 4 else -3)
-                grid.update_displayed_points(
-                    self.current_width,
-                    self.current_height,
-                    self.original_width,
-                    self.original_height,
-                )
-
-                points_len = len(points)
-                if points_len > 4 and points_len % 2 == 0:
-                    polygons = grid.get_grid_polygons()
-                    self.draw_polygon(polygons[-1], cur_sel)
+                self.points.pop()  # Remove the last point
+                self.update_displayed_points()
 
                 self.canvas.delete("temp_polygon")
-                temp_polygon = grid.get_temp_polygon()
-                if len(temp_polygon) > 1:
-                    self.canvas.create_line(
-                        temp_polygon, fill="yellow", tags="temp_polygon", width=2
-                    )
-        elif self.points:
-            if len(self.points) % self.num_vertices == 0 and self.polygon_ids:
-                self.canvas.delete(
-                    self.polygon_ids.pop()
-                )  # Remove the last polygon from canvas
-            self.canvas.delete(
-                self.canvas.find_withtag(self.get_tag("point"))[-1]
-            )  # Remove the last point from canvas
-            self.points.pop()  # Remove the last point
-            self.update_displayed_points()
-
-            self.canvas.delete("temp_polygon")
-            if len(self.displayed_points) % self.num_vertices != 0:
-                current_polygon = self.displayed_points[
-                    -(len(self.displayed_points) % self.num_vertices) :
-                ]
-                if len(current_polygon) > 1:
-                    self.canvas.create_line(
-                        current_polygon, fill="yellow", tags="temp_polygon", width=2
-                    )
+                if len(self.displayed_points) % self.num_vertices != 0:
+                    current_polygon = self.displayed_points[
+                        -(len(self.displayed_points) % self.num_vertices) :
+                    ]
+                    if len(current_polygon) > 1:
+                        self.canvas.create_line(
+                            current_polygon, fill="yellow", tags="temp_polygon", width=2
+                        )
 
     def save_as_json(self, event=None):
         """Saves selected figures to JSON file."""
         if (
             self.points
-            and len(self.points) < self.num_vertices
+            and len(self.points) % self.num_vertices != 0
             or self.with_grid
             and (
                 not self.grids
@@ -816,17 +912,27 @@ class FigureAnnotator:
             filetypes=[("JSON files", "*.json")],
         )
         if save_path:
+            out_json = {
+                "version": object_format_versions[self.figure_type],
+                "type": self.figure_type,
+            }
             data = [
-                self.points[i : i + self.num_vertices]
+                (
+                    [*sum(self.points[i : i + self.num_vertices], ())]
+                    if self.num_vertices == FigureAnnotatorType.LINE.value
+                    else self.points[i : i + self.num_vertices]
+                )
                 for i in range(
                     0, len(self.points) - self.num_vertices + 1, self.num_vertices
                 )
             ]
             if self.with_grid:
                 for grid in self.grids.values():
-                    data.extend(grid.get_grid_polygons(display=False))
+                    polygons = grid.get_grid_polygons(display=False)
+                    data.extend(polygons[1:] if len(polygons) > 1 else polygons)
+            out_json["objects"] = data
             with open(save_path, "w") as f:
-                json.dump(data, f)
+                json.dump(out_json, f, indent=4)
 
 
 if __name__ == "__main__":
