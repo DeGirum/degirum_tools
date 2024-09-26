@@ -198,7 +198,8 @@ class Gizmo(ABC):
         for s in input_stream_sizes:
             self._inputs.append(Stream(*s))
 
-        self._output_refs = []  # type: List[Stream]
+        self._output_refs: List[Stream] = []
+        self._connected_gizmos: set = set()
         self._abort = False
         self.composition: Optional[Composition] = None
         self.error: Optional[Exception] = None
@@ -222,29 +223,58 @@ class Gizmo(ABC):
         """Get list of input streams"""
         return self._inputs
 
-    def connect_to(self, other_gizmo, inp: int = 0):
+    def connect_to(self, other_gizmo, inp: Union[int, Stream] = 0):
         """Connect given input to other gizmo.
 
         - other_gizmo: gizmo to connect to
-        - inp: input index to use for connection
+        - inp: input stream or input index to use for connection
 
         Returns self
         """
-        other_gizmo._output_refs.append(self.get_input(inp))
+        other_gizmo._output_refs.append(
+            self.get_input(inp) if isinstance(inp, int) else inp
+        )
+        self._connected_gizmos.add(other_gizmo)
+        other_gizmo._connected_gizmos.add(self)
         return self
 
-    def __lshift__(self, other_gizmo):
-        """Operator synonym for connect_to(): connects self to other_gizmo
-        Returns other_gizmo"""
-        self.connect_to(other_gizmo)
-        return other_gizmo
+    def get_connected(self) -> set:
+        """Get a set of all gizmos recursively connected to this gizmo"""
 
-    def __rshift__(self, other_gizmo):
+        def _get_connected(gizmo, visited):
+            visited.add(gizmo)
+            for g in gizmo._connected_gizmos:
+                if g not in visited:
+                    _get_connected(g, visited)
+            return visited
+
+        ret: set = set()
+        return _get_connected(self, ret)
+
+    def __getitem__(self, index):
+        """Overloaded operator [], which returns tuple of self and input stream which corresponds to provided index.
+        Used to connect gizmos by `>>` operator: `g1 >> g2[1]`
+
+        - index: input index
+
+        Returns tuple of self and input stream object
+        """
+        return (self, self.get_input(index))
+
+    def __rshift__(self, other_gizmo: Union[Any, tuple]):
         """Operator antonym for connect_to(): connects other_gizmo to self
 
-        Returns self"""
-        other_gizmo.connect_to(self)
-        return other_gizmo
+        - other_gizmo: either gizmo object or a tuple of a gizmo and it's input stream to connect to;
+            if tuple is provided, input stream is taken from the second element of tuple, otherwise input 0 is assumed.
+
+        When combined with `>>` operator, it allows to connect gizmos like this: `g1 >> g2[1]`
+
+        Returns gizmo object, passed as an argument.
+        """
+
+        g, inp = other_gizmo if isinstance(other_gizmo, tuple) else (other_gizmo, 0)
+        g.connect_to(self, inp)
+        return g
 
     def send_result(self, data: Optional[StreamData], clone_data: bool = False):
         """Send result to all connected outputs.
@@ -305,9 +335,15 @@ class Composition:
         """
 
         self._threads: List[threading.Thread] = []
-        self._gizmos: List[Gizmo] = list(gizmos)
-        for gizmo in self._gizmos:
-            gizmo.composition = self
+
+        # collect all connected gizmos
+        all_gizmos: set = set()
+        for g in gizmos:
+            all_gizmos |= g.get_connected()
+
+        self._gizmos: List[Gizmo] = list(all_gizmos)
+        for g in self._gizmos:
+            g.composition = self
 
     def add(self, gizmo: Gizmo) -> Gizmo:
         """Add a gizmo to composition

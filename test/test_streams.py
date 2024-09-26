@@ -28,6 +28,60 @@ class VideoSink(streams.Gizmo):
             self.frames_cnt += 1
 
 
+class FaninGizmo(streams.Gizmo):
+    """Gizmo to merge multiple inputs into one"""
+
+    def __init__(self, n_inputs):
+        super().__init__([(0, False)] * n_inputs)
+
+    def run(self):
+        while True:
+            if self._abort:
+                break
+
+            for input in self.get_inputs():
+                data = input.get()
+                if data == input._poison:
+                    self._abort = True
+                    break
+                self.send_result(data)
+
+
+def test_streams_connection(short_video):
+    """Test for streams connection"""
+
+    # simple two-element connection
+    source = streams.VideoSourceGizmo(short_video)
+    sink = VideoSink()
+    c = streams.Composition(source >> sink)
+
+    assert source._connected_gizmos == {sink}
+    assert sink._connected_gizmos == {source}
+    assert c._gizmos == list({source, sink})
+
+    # tree connection
+    N = 3
+    fanin = FaninGizmo(N)
+    sources = [streams.VideoSourceGizmo(short_video) for _ in range(N)]
+    sinks = [VideoSink() for _ in range(N)]
+    c = streams.Composition(
+        sources[0] >> fanin[0] >> sinks[0],
+        sources[1] >> fanin[1] >> sinks[1],
+        sources[2] >> fanin[2] >> sinks[2],
+    )
+
+    assert all(
+        sources[i]._connected_gizmos == {fanin}
+        and fanin in sources[i]._connected_gizmos
+        for i in range(N)
+    )
+    assert all(
+        sinks[i]._connected_gizmos == {fanin} and fanin in sinks[i]._connected_gizmos
+        for i in range(N)
+    )
+    assert set(c._gizmos) == set(sources) | set(sinks) | {fanin}
+
+
 def test_streams_video_source(short_video):
 
     with degirum_tools.open_video_stream(short_video) as src:
@@ -38,8 +92,7 @@ def test_streams_video_source(short_video):
 
     source = streams.VideoSourceGizmo(short_video)
     sink = VideoSink()
-    sink.connect_to(source)
-    streams.Composition(source, sink).start()
+    streams.Composition(source >> sink).start()
 
     assert streams.tag_video in source.get_tags()
     assert sink.frames_cnt == frame_count
@@ -59,9 +112,7 @@ def test_streams_video_display(short_video):
     source = streams.VideoSourceGizmo(short_video)
     display = streams.VideoDisplayGizmo()
     sink = VideoSink()
-    display.connect_to(source)
-    sink.connect_to(source)
-    streams.Composition(source, display, sink).start()
+    streams.Composition(source >> display, source >> sink).start()
     assert display._frames == sink.frames
 
 
@@ -71,9 +122,7 @@ def test_streams_video_saver(short_video, temp_dir):
     source = streams.VideoSourceGizmo(short_video)
     saver = streams.VideoSaverGizmo(result_path)
     sink = VideoSink()
-    saver.connect_to(source)
-    sink.connect_to(source)
-    streams.Composition(source, saver, sink).start()
+    streams.Composition(source >> saver, source >> sink).start()
 
     meta = sink.frames[0].meta.find_last(streams.tag_video)
     assert meta is not None
@@ -100,8 +149,7 @@ def test_streams_resizer(short_video):
         w, h, pad_method=pad_method, resize_method=resize_method
     )
     sink = VideoSink()
-    sink.connect_to(resizer.connect_to(source))
-    streams.Composition(source, resizer, sink).start()
+    streams.Composition(source >> resizer >> sink).start()
 
     video_meta = sink.frames[0].meta.find_last(streams.tag_video)
     assert video_meta is not None
@@ -115,6 +163,24 @@ def test_streams_resizer(short_video):
         assert resize_meta[resizer.key_pad_method] == pad_method
         assert resize_meta[resizer.key_resize_method] == resize_method
         assert frame.data.shape == (h, w, 3)
+
+
+def test_streams_simple_ai(short_video, zoo_dir):
+    import degirum as dg
+
+    zoo = dg.connect(dg.LOCAL, zoo_dir)
+    model = zoo.load_model("mobilenet_v2_generic_object--224x224_quant_n2x_cpu_1")
+
+    source = streams.VideoSourceGizmo(short_video)
+    ai = streams.AiSimpleGizmo(model)
+    sink = VideoSink()
+
+    streams.Composition(source >> ai >> sink).start()
+
+    for frame in sink.frames:
+        ai_meta = frame.meta.find_last(streams.tag_inference)
+        assert ai_meta is not None
+        assert isinstance(ai_meta, dg.postprocessor.InferenceResults)
 
 
 def test_streams_error_handling():
@@ -155,16 +221,13 @@ def test_streams_error_handling():
                         time.sleep(0)
                     raise ValueError(SinkWithException.error_msg)
 
-    c = streams.Composition()
-    src = c.add(InfiniteSource())
-    dst = c.add(SinkWithException())
-    src >> dst
-    c.start(wait=False)
+    src1 = InfiniteSource()
+    dst1 = SinkWithException()
 
     with pytest.raises(Exception, match=SinkWithException.error_msg):
-        c.wait()
+        streams.Composition(src1 >> dst1).start()
 
-    assert src.n > dst.limit  # type: ignore[attr-defined]
+    assert src1.n > dst1.limit  # type: ignore[attr-defined]
 
     #
     # Exception in source
@@ -200,13 +263,10 @@ def test_streams_error_handling():
                     break
                 time.sleep(0)
 
-    c = streams.Composition()
-    src = c.add(SourceWithException())
-    dst = c.add(InfiniteSink())
-    src >> dst
-    c.start(wait=False)
+    src2 = SourceWithException()
+    dst2 = InfiniteSink()
 
     with pytest.raises(Exception, match=SourceWithException.error_msg):
-        c.wait()
+        streams.Composition(src2 >> dst2).start()
 
-    assert dst.n == src.limit  # type: ignore[attr-defined]
+    assert dst2.n == src2.limit  # type: ignore[attr-defined]

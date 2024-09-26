@@ -34,3 +34,9 @@ def temp_dir():
     with tempfile.TemporaryDirectory() as directory:
         yield pathlib.Path(directory)
         # cleanup happens automatically when the block exits
+
+
+@pytest.fixture(scope="session")
+def zoo_dir():
+    """Test model zoo directory"""
+    return os.path.join(os.path.dirname(__file__), "model-zoo")
