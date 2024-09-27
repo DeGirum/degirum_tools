@@ -33,7 +33,7 @@
 
 import numpy as np, cv2
 from typing import Tuple, Optional, Dict, List, Union, Any
-from .ui_support import put_text, color_complement, deduce_text_color
+from .ui_support import put_text, color_complement, deduce_text_color, rgb_to_bgr
 from .result_analyzer_base import ResultAnalyzerBase
 from .math_support import (
     AnchorPoint,
@@ -364,7 +364,7 @@ class ZoneCounter(ResultAnalyzerBase):
                 image,
                 [cv2.Mat(self._polygons[zi])],
                 True,
-                line_color,
+                rgb_to_bgr(line_color),
                 line_width,
             )
 
@@ -382,7 +382,7 @@ class ZoneCounter(ResultAnalyzerBase):
                 text,
                 tuple(x + line_width for x in self._polygons[zi][0]),
                 font_color=text_color,
-                bg_color=line_color[::-1],
+                bg_color=line_color,
                 font_scale=result.overlay_font_scale,
             )
         return image

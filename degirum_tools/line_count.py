@@ -10,7 +10,13 @@
 import numpy as np, cv2
 from typing import List, Dict, Optional, Union, Any
 from copy import deepcopy
-from .ui_support import put_text, color_complement, deduce_text_color, CornerPosition
+from .ui_support import (
+    put_text,
+    color_complement,
+    deduce_text_color,
+    rgb_to_bgr,
+    CornerPosition,
+)
 from .result_analyzer_base import ResultAnalyzerBase
 from .math_support import intersect, get_anchor_coordinates, AnchorPoint
 
@@ -56,8 +62,9 @@ class SingleVectorCounts:
     """
     Class to hold vector crossing counts.
 
-    In relation to a vector, "right" specifies points to the right of the vector,
-    and "left" specifies points to the left of the vector.
+    In relation to a vector, "right" specifies crossing of a trail from the left side
+    to the right side of the vector, and "left" specifies crossing of a trail from the
+    right side to the left side of the vector.
     """
 
     def __init__(self):
@@ -91,10 +98,11 @@ class LineCounter(ResultAnalyzerBase):
 
     Analyzes the object detection `result` object passed to `analyze` method and, for each object trail
     in the `result.trails` dictionary, checks if this trail crosses any lines specified by the `lines`
-    constructor parameter. If the trail crosses the line, the corresponding object is counted in
-    two out of four directions (left-to-right vs right-to-left, and top-to-bottom vs bottom-to-top) if
-    `absolute_directions` is set to True, and in one out of two directions relative to the line
-    (left-to-right vs right-to-left) if `absolute_directions` is set to False.
+    constructor parameter. If `absolute_directions` is set to True, an object's trail crossing a line
+    is counted in two out of four directions relative to the frame (left-to-right vs right-to-left,
+    and top-to-bottom vs bottom-to-top). If `absolute_directions` is set to False, an object's trail
+    crossing a line is counted in one out of two directions relative to the line (left-to-right vs
+    right-to-left).
 
     Adds `line_counts` list of either `LineCounts` or `VectorCounts` objects to the `result` object -
     one object per crossing line. The object contains the following attributes: `left`, `right`, `top`,
@@ -314,13 +322,18 @@ class LineCounter(ResultAnalyzerBase):
             line_start = line[:2]
             line_end = line[2:]
 
-            cv2.line(
-                image,
-                line_start,
-                line_end,
-                line_color,
-                line_width,
-            )
+            if self._absolute_directions:
+                cv2.line(
+                    image,
+                    line_start,
+                    line_end,
+                    rgb_to_bgr(line_color),
+                    line_width,
+                )
+            else:
+                cv2.arrowedLine(
+                    image, line_start, line_end, rgb_to_bgr(line_color), line_width
+                )
 
             mostly_horizontal = abs(line_start[0] - line_end[0]) > abs(
                 line_start[1] - line_end[1]
@@ -370,46 +383,10 @@ class LineCounter(ResultAnalyzerBase):
                     (cx, cy),
                     corner_position=corner,
                     font_color=text_color,
-                    bg_color=line_color[::-1],
+                    bg_color=line_color,
                     font_scale=result.overlay_font_scale,
                 )
             else:
-                triangle_scale = 4.5 * line_width
-                triangle_height_vector = (
-                    line_vector
-                    / np.sqrt(line_vector[0] ** 2 + line_vector[1] ** 2)
-                    * 2
-                    * triangle_scale
-                )
-                triangle_base_unit_vector = (-line_vector[1], line_vector[0]) / np.sqrt(
-                    line_vector[0] ** 2 + line_vector[1] ** 2
-                )
-                triangle_half_base_vector = (
-                    int(triangle_base_unit_vector[0] * triangle_scale),
-                    int(triangle_base_unit_vector[1] * triangle_scale),
-                )
-                arrow_head_vertices = np.array(
-                    [
-                        [
-                            line_end[0]
-                            + triangle_half_base_vector[0]
-                            - triangle_height_vector[0],
-                            line_end[1]
-                            + triangle_half_base_vector[1]
-                            - triangle_height_vector[1],
-                        ],
-                        [
-                            line_end[0]
-                            - triangle_half_base_vector[0]
-                            - triangle_height_vector[0],
-                            line_end[1]
-                            - triangle_half_base_vector[1]
-                            - triangle_height_vector[1],
-                        ],
-                        [line_end[0], line_end[1]],
-                    ]
-                ).astype(np.int32)
-                cv2.fillPoly(image, [cv2.Mat(arrow_head_vertices)], line_color)
                 if mostly_horizontal:
                     cx_left = cx_right = line_start[0] + margin
                     if line_start[0] <= line_end[0]:
@@ -495,7 +472,7 @@ class LineCounter(ResultAnalyzerBase):
                     (cx_right, cy_right),
                     corner_position=corner_right,
                     font_color=text_color,
-                    bg_color=line_color[::-1],
+                    bg_color=line_color,
                     font_scale=result.overlay_font_scale,
                 )
                 put_text(
@@ -504,7 +481,7 @@ class LineCounter(ResultAnalyzerBase):
                     (cx_left, cy_left),
                     corner_position=corner_left,
                     font_color=text_color,
-                    bg_color=line_color[::-1],
+                    bg_color=line_color,
                     font_scale=result.overlay_font_scale,
                 )
 
