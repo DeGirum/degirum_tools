@@ -617,6 +617,24 @@ def test_event_detector():
             "res": [{"MyEvent"}],
         },
         {
+            "case": "LineCount: multiple lines, some vector counts, no filters",
+            "params": """
+                Trigger: MyEvent
+                when: LineCount
+                is equal to: 33
+                during: [1, frame]
+            """,
+            "inp": [
+                {
+                    "line_counts": [
+                        D2C(left=1, right=2),
+                        D2C(left=10, right=20),
+                    ]
+                }
+            ],
+            "res": [{"MyEvent"}],
+        },
+        {
             "case": "LineCount: multiple lines, some counts, line filter",
             "params": """
                 Trigger: MyEvent

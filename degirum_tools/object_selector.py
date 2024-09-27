@@ -13,7 +13,7 @@ from typing import List, Optional
 from dataclasses import dataclass
 from .result_analyzer_base import ResultAnalyzerBase
 from .math_support import area
-from .ui_support import color_complement
+from .ui_support import color_complement, rgb_to_bgr
 
 
 class ObjectSelectionStrategies(Enum):
@@ -168,7 +168,7 @@ class ObjectSelector(ResultAnalyzerBase):
                 image,
                 bbox[:2],
                 bbox[2:],
-                color,
+                rgb_to_bgr(color),
                 2,
             )
         return image

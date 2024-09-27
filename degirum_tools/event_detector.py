@@ -264,7 +264,11 @@ def LineCount(result, params):
         if classes is not None:
             count += sum(
                 sum(
-                    getattr(line.for_class[key], dir)
+                    (
+                        getattr(line.for_class[key], dir)
+                        if hasattr(line.for_class[key], dir)
+                        else 0
+                    )
                     for dir in (all_dirs if directions is None else directions)
                 )
                 for key in classes
@@ -272,7 +276,7 @@ def LineCount(result, params):
             )
         else:
             count += sum(
-                getattr(line, dir)
+                getattr(line, dir) if hasattr(line, dir) else 0
                 for dir in (all_dirs if directions is None else directions)
             )
 
