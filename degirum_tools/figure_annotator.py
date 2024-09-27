@@ -242,25 +242,25 @@ class FigureAnnotator:
         self.menu_bar = tk.Menu(self.root)
         self.root.config(menu=self.menu_bar)
 
-        file_menu = tk.Menu(self.menu_bar, tearoff=0)
-        file_menu.add_command(
+        self.file_menu = tk.Menu(self.menu_bar, tearoff=0)
+        self.file_menu.add_command(
             label="Open...", command=self.open_image, accelerator="Ctrl-O"
         )
-        file_menu.add_command(
-            label="Save As...", command=self.save_as_json, accelerator="Ctrl-S"
+        self.file_menu.add_command(
+            label="Save As...", command=self.save_as_json, accelerator="Ctrl-S", state=tk.DISABLED
         )
-        self.menu_bar.add_cascade(label="File", menu=file_menu)
+        self.menu_bar.add_cascade(label="File", menu=self.file_menu)
 
-        edit_menu = tk.Menu(self.menu_bar, tearoff=0)
+        self.edit_menu = tk.Menu(self.menu_bar, tearoff=0)
         if self.with_grid:
-            edit_menu.add_command(
-                label="Add grid", command=self.add_grid, accelerator="Ctrl-A"
+            self.edit_menu.add_command(
+                label="Add Grid", command=self.add_grid, accelerator="Ctrl-A", state=tk.DISABLED
             )
-            edit_menu.add_command(
-                label="Remove grid", command=self.remove_grid, accelerator="Ctrl-D"
+            self.edit_menu.add_command(
+                label="Remove Grid", command=self.remove_grid, accelerator="Ctrl-D", state=tk.DISABLED
             )
-        edit_menu.add_command(label="Undo", command=self.undo, accelerator="Ctrl-Z")
-        self.menu_bar.add_cascade(label="Edit", menu=edit_menu)
+        self.edit_menu.add_command(label="Undo", command=self.undo, accelerator="Ctrl-Z", state=tk.DISABLED)
+        self.menu_bar.add_cascade(label="Edit", menu=self.edit_menu)
 
         if self.with_grid:
             # Create a frame for the second menu and "Current Selection" OptionMenu
@@ -305,6 +305,9 @@ class FigureAnnotator:
         self.current_width = 0  # Current width of the displayed image
         self.current_height = 0  # Current height of the displayed image
         self.aspect_ratio = 1.0  # Aspect ratio of the original image
+        
+        # Constants
+        self.line_width = 1
 
         # Dragging state
         self.dragging_polygon_id = None  # The polygon ID being dragged
@@ -375,6 +378,8 @@ class FigureAnnotator:
         self.root.geometry(f"{self.original_width}x{self.original_height}")
 
         self.update_image(self.original_image)
+        self.file_menu.entryconfig("Save As...", state=tk.NORMAL)
+        self.edit_menu.entryconfig("Add Grid", state=tk.NORMAL)
 
     def update_image(self, image):
         """Helper function to update the image on the canvas."""
@@ -505,6 +510,9 @@ class FigureAnnotator:
 
                 if len(self.displayed_points) % self.num_vertices == 0:
                     self.draw_polygon(self.displayed_points[-self.num_vertices :])
+            
+            if self.points or self.with_grid and self.grids:
+                self.edit_menu.entryconfig("Undo", state=tk.NORMAL)
 
     def on_motion(self, event):
         """Processes actions related to mouse movement."""
@@ -518,7 +526,7 @@ class FigureAnnotator:
                 temp_polygon = grid.get_temp_polygon()[0] + [(event.x, event.y)]
                 if len(temp_polygon) > 1:
                     self.canvas.create_line(
-                        temp_polygon, fill="yellow", tags="temp_polygon", width=2
+                        temp_polygon, fill="yellow", tags="temp_polygon", width=self.line_width
                     )
             else:
                 if len(self.displayed_points) % self.num_vertices != 0:
@@ -526,7 +534,7 @@ class FigureAnnotator:
                         -(len(self.displayed_points) % self.num_vertices) :
                     ] + [(event.x, event.y)]
                     self.canvas.create_line(
-                        current_polygon, fill="yellow", tags="temp_polygon", width=2
+                        current_polygon, fill="yellow", tags="temp_polygon", width=self.line_width
                     )
 
         if self.dragging_polygon_id is not None:
@@ -537,12 +545,11 @@ class FigureAnnotator:
 
         if self.dragging_point_idx is not None:
             # Move an individual point
-            if not grid_chosen:
-                self.update_dragging_point((event.x, event.y))
+            self.update_dragging_point((event.x, event.y), cur_sel)
 
     def on_right_click(self, event):
         """Processes movement of selected point."""
-        if self.dragging_polygon_id is None:
+        if self.figures_complete() and self.dragging_polygon_id is None:
             if self.dragging_point_idx is not None:
                 # Complete the drag operation
                 self.dragging_point_idx = None
@@ -551,12 +558,8 @@ class FigureAnnotator:
 
             # Right Click: Move a specific point
             cur_sel = self.get_cur_sel()
-            if cur_sel is not None:
-                clicked_point = None
-            else:
-                clicked_point, point_index = self.find_point(
-                    event.x, event.y, self.displayed_points
-                )
+            points = self.grids[cur_sel].displayed_points if cur_sel is not None else self.displayed_points
+            clicked_point, point_index = self.find_point(event.x, event.y, points)
 
             if clicked_point is not None:
                 self.dragging_point_idx = point_index
@@ -564,7 +567,7 @@ class FigureAnnotator:
 
     def on_right_click_and_ctrl(self, event):
         """Processes movement of selected polygon."""
-        if self.dragging_point_idx is None:
+        if self.figures_complete() and self.dragging_point_idx is None:
             if self.dragging_polygon_id is not None:
                 # Complete the drag operation
                 self.dragging_polygon_id = None
@@ -574,21 +577,64 @@ class FigureAnnotator:
             # Ctrl + Right Click: Drag entire polygon
             cur_sel = self.get_cur_sel()
             ids = self.grids[cur_sel].ids if cur_sel is not None else self.polygon_ids
-            clicked_polygon_id, polygon_index = self.find_polygon(event.x, event.y, ids)
+            clicked_polygon_id, polygon_point_index = self.find_polygon(event.x, event.y, ids)
             if clicked_polygon_id is not None:
                 self.dragging_polygon_id = clicked_polygon_id
                 self.dragging_polygon_offset_start = self.dragging_polygon_offset = (
                     event.x,
                     event.y,
                 )
-                self.dragging_polygon_point_index = polygon_index
+                self.dragging_polygon_point_index = polygon_point_index
 
-    def update_dragging_point(self, point):
-        self.displayed_points[self.dragging_point_idx] = point
-        self.points[self.dragging_point_idx] = (
-            int(point[0] * self.original_width / self.current_width),
-            int(point[1] * self.original_height / self.current_height),
-        )
+    def update_dragging_point(self, point, cur_sel):
+        if cur_sel is not None:
+            grid = self.grids[cur_sel]
+            dragging_point_idx = self.dragging_point_idx
+            grid.points[dragging_point_idx] = (
+                int(point[0] * self.original_width / self.current_width),
+                int(point[1] * self.original_height / self.current_height),
+            )
+            if dragging_point_idx < 2 or dragging_point_idx >= len(grid.displayed_points) - 2:
+                # corner anchor point
+                grid.update_grid_parameters()
+                for i in range(2, len(grid.points) - 2):
+                    if i % 2 == 0:
+                        grid.points[i] = (
+                            grid.points[i][0],
+                            FigureAnnotator.lin_func(
+                                grid.top_m, grid.top_b, grid.points[i][0]
+                            )
+                        )
+                    else:
+                        grid.points[i] = (
+                            grid.points[i][0],
+                            FigureAnnotator.lin_func(
+                                grid.bottom_m, grid.bottom_b, grid.points[i][0]
+                            )
+                        )
+            else:
+                # intermediate anchor point
+                if dragging_point_idx % 2 == 0:
+                    grid.points[dragging_point_idx] = (
+                        grid.points[dragging_point_idx][0],
+                        FigureAnnotator.lin_func(
+                            grid.top_m, grid.top_b, grid.points[dragging_point_idx][0]
+                        )
+                    )
+                else:
+                    grid.points[dragging_point_idx] = (
+                        grid.points[dragging_point_idx][0],
+                        FigureAnnotator.lin_func(
+                            grid.bottom_m, grid.bottom_b, grid.points[dragging_point_idx][0]
+                        )
+                    )
+            grid.update_displayed_points(self.current_width, self.current_height, self.original_width, self.original_height)
+        else:
+            self.displayed_points[self.dragging_point_idx] = point
+            self.points[self.dragging_point_idx] = (
+                int(point[0] * self.original_width / self.current_width),
+                int(point[1] * self.original_height / self.current_height),
+            )
         self.redraw_polygons()
 
     def update_dragging_polygon(self, offset, cur_sel):
@@ -717,10 +763,10 @@ class FigureAnnotator:
     def draw_point(self, point, grid_id=None):
         """Draws point on canvas."""
         self.canvas.create_oval(
-            point[0] - 3,
-            point[1] - 3,
-            point[0] + 3,
-            point[1] + 3,
+            point[0] - 2,
+            point[1] - 2,
+            point[0] + 2,
+            point[1] + 2,
             fill="red",
             outline="red",
             width=2,
@@ -733,7 +779,7 @@ class FigureAnnotator:
             points,
             outline="yellow",
             fill="",
-            width=2,
+            width=self.line_width,
             tags=self.get_tag("polygon", grid_id),
         )
         if grid_id is not None:
@@ -786,21 +832,27 @@ class FigureAnnotator:
             self.grids[new_grid_id] = Grid()
             self.added_grid_id = self.grid_idx_to_key(new_grid_id)
             self.update_grid_menu()
+            self.edit_menu.entryconfig("Remove Grid", state=tk.NORMAL)
 
     def remove_grid(self, event=None):
         """Remove grid."""
-        if self.image_tk:
+        if self.image_tk and all([grid.complete() or not len(grid.points) for grid in self.grids.values()]) and self.dragging_point_idx is None and self.dragging_polygon_id is None:
             cur_sel = self.get_cur_sel()
             if cur_sel is not None:
                 self.canvas.delete(self.get_tag("polygon", cur_sel))
                 self.canvas.delete(self.get_tag("point", cur_sel))
                 self.grids.pop(cur_sel)
                 self.update_grid_menu()
+                print(self.grids.values())
+                if len(self.grids.values()) == 0:
+                    self.edit_menu.entryconfig("Remove Grid", state=tk.DISABLED)
+                    if self.figures_empty():
+                        self.edit_menu.entryconfig("Undo", state=tk.DISABLED)
 
     def process_esc(self, event=None):
         cur_sel = self.get_cur_sel()
         if self.dragging_point_idx is not None:
-            self.update_dragging_point(self.dragging_point_start)
+            self.update_dragging_point(self.dragging_point_start, cur_sel)
             self.dragging_point_idx = None
         elif self.dragging_polygon_id is not None:
             self.update_dragging_polygon(self.dragging_polygon_offset_start, cur_sel)
@@ -809,10 +861,11 @@ class FigureAnnotator:
             self.canvas.delete("temp_polygon")
             if cur_sel is not None:
                 grid = self.grids[cur_sel]
+                print(grid.points, grid.displayed_points)
                 temp_polygon_point_indices = grid.get_temp_polygon()[1]
+                print(temp_polygon_point_indices)
                 if temp_polygon_point_indices:
-                    for idx in temp_polygon_point_indices:
-                        grid.points.pop(idx)
+                    del grid.points[temp_polygon_point_indices[0]:temp_polygon_point_indices[-1] + 1]
                     grid.update_displayed_points(
                         self.current_width,
                         self.current_height,
@@ -824,6 +877,8 @@ class FigureAnnotator:
                     del self.points[-(len(self.points) % self.num_vertices) :]
                     self.update_displayed_points()
             self.redraw_polygons()
+            if self.figures_empty():
+                self.edit_menu.entryconfig("Undo", state=tk.DISABLED)
 
     def undo(self, event=None):
         """Processes point deletion."""
@@ -836,6 +891,8 @@ class FigureAnnotator:
                 if not points_len:  # If grid has no points, delete it
                     self.grids.pop(cur_sel)
                     self.update_grid_menu()
+                    if len(self.grids.values()) == 0:
+                        self.edit_menu.entryconfig("Remove Grid", state=tk.DISABLED)
                 else:
                     if points_len >= 4 and points_len % 2 == 0:
                         self.canvas.delete(
@@ -867,7 +924,7 @@ class FigureAnnotator:
                     temp_polygon = grid.get_temp_polygon()[0]
                     if len(temp_polygon) > 1:
                         self.canvas.create_line(
-                            temp_polygon, fill="yellow", tags="temp_polygon", width=2
+                            temp_polygon, fill="yellow", tags="temp_polygon", width=self.line_width
                         )
             elif self.points:
                 if len(self.points) % self.num_vertices == 0 and self.polygon_ids:
@@ -887,8 +944,17 @@ class FigureAnnotator:
                     ]
                     if len(current_polygon) > 1:
                         self.canvas.create_line(
-                            current_polygon, fill="yellow", tags="temp_polygon", width=2
+                            current_polygon, fill="yellow", tags="temp_polygon", width=self.line_width
                         )
+            
+            if self.figures_empty():
+                self.edit_menu.entryconfig("Undo", state=tk.DISABLED)
+
+    def figures_complete(self):
+        return all([grid.complete() for grid in self.grids.values()] if self.with_grid else [True]) and len(self.points) % self.num_vertices == 0
+    
+    def figures_empty(self):
+        return not (self.points or self.with_grid and self.grids)
 
     def save_as_json(self, event=None):
         """Saves selected figures to JSON file."""
