@@ -332,7 +332,12 @@ class LineCounter(ResultAnalyzerBase):
                 )
             else:
                 cv2.arrowedLine(
-                    image, line_start, line_end, rgb_to_bgr(line_color), line_width
+                    image,
+                    line_start,
+                    line_end,
+                    rgb_to_bgr(line_color),
+                    line_width,
+                    tipLength=0.05,
                 )
 
             mostly_horizontal = abs(line_start[0] - line_end[0]) > abs(
