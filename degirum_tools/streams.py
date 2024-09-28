@@ -760,8 +760,6 @@ class AiGizmoBase(Gizmo):
         """
         super().__init__([(stream_depth, allow_drop)] * inp_cnt)
 
-        model.image_backend = "opencv"  # select OpenCV backend
-        model.input_numpy_colorspace = "BGR"  # adjust colorspace to match OpenCV
         self.model = model
 
     def get_tags(self) -> List[str]:

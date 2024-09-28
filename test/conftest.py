@@ -23,7 +23,7 @@ def image_dir():
 @pytest.fixture(scope="session")
 def short_video(image_dir):
     """Path to test short video"""
-    file = os.path.join(image_dir, "TrafficHD_short.mp4")
+    file = os.path.join(image_dir, "Traffic2_short.mp4")
     os.environ[degirum_tools.var_VideoSource] = file
     return file
 

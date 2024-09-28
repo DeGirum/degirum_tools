@@ -183,6 +183,51 @@ def test_streams_simple_ai(short_video, zoo_dir):
         assert isinstance(ai_meta, dg.postprocessor.InferenceResults)
 
 
+def test_streams_cropping_ai(short_video, zoo_dir):
+
+    import degirum as dg
+
+    zoo = dg.connect(dg.LOCAL, zoo_dir)
+    model = zoo.load_model("yolov5nu_relu6_car--128x128_float_n2x_cpu_1")
+
+    source = streams.VideoSourceGizmo(short_video)
+    ai = streams.AiSimpleGizmo(model)
+    cropper = streams.AiObjectDetectionCroppingGizmo(["Car"])
+    sink = VideoSink()
+
+    streams.Composition(source >> ai >> cropper >> sink).start()
+
+    expected_crops = 0
+    for frame in sink.frames:
+        ai_meta = frame.meta.find_last(streams.tag_inference)
+        assert ai_meta is not None
+        assert isinstance(ai_meta, dg.postprocessor.DetectionResults)
+
+        crop_meta = frame.meta.find_last(streams.tag_crop)
+        assert crop_meta is not None
+
+        if expected_crops == 0:
+            assert cropper.key_original_result in crop_meta
+            assert crop_meta[cropper.key_original_result] == ai_meta
+            expected_crops = len(ai_meta.results)
+
+        if expected_crops > 0:
+            assert cropper.key_cropped_result in crop_meta
+            assert cropper.key_cropped_index in crop_meta
+            i = crop_meta[cropper.key_cropped_index]
+            r = crop_meta[cropper.key_cropped_result]
+
+            bbox = r["bbox"]
+            assert frame.data.shape == (
+                int(bbox[3]) - int(bbox[1]),
+                int(bbox[2]) - int(bbox[0]),
+                3,
+            )
+            assert r == ai_meta.results[i]
+
+            expected_crops -= 1
+
+
 def test_streams_error_handling():
     """Test for error handling in streams"""
 

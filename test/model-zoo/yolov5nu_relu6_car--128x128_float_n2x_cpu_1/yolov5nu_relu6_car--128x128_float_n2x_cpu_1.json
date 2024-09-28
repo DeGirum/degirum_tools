@@ -1,0 +1,67 @@
+{
+    "ConfigVersion": 6,
+    "Checksum": "65c3a4031231bb75d70de7877c7ba384eb4ca0039e4ea6efb7f7c9af2c6c7b12",
+    "DEVICE": [
+        {
+            "DeviceType": "CPU",
+            "RuntimeAgent": "N2X",
+            "SupportedDeviceTypes": "N2X/CPU"
+        }
+    ],
+    "PRE_PROCESS": [
+        {
+            "InputN": 1,
+            "InputType": "Image",
+            "InputResizeMethod": "bilinear",
+            "InputPadMethod": "letterbox",
+            "ImageBackend": "auto",
+            "InputH": 128,
+            "InputW": 128,
+            "InputC": 3,
+            "InputQuantEn": false,
+            "InputQuantOffset": 0,
+            "InputQuantScale": 1,
+            "InputImgNormEn": true,
+            "InputImgNormCoeff": 0.00392156862745098,
+            "InputNormMean": [
+                0,
+                0,
+                0
+            ],
+            "InputNormStd": [
+                1,
+                1,
+                1
+            ],
+            "InputTensorLayout": "NHWC",
+            "InputImgSliceType": "SLICE2"
+        }
+    ],
+    "MODEL_PARAMETERS": [
+        {
+            "ModelPath": "yolov5nu_relu6_car--128x128_float_n2x_cpu_1.n2x"
+        }
+    ],
+    "POST_PROCESS": [
+        {
+            "OutputPostprocessType": "DetectionYoloV8",
+            "PostProcessorInputs": [
+                269,
+                261,
+                253,
+                273,
+                265,
+                257
+            ],
+            "OutputNumClasses": 1,
+            "LabelsPath": "labels_yolov5nu_relu6_car.json",
+            "OutputClassIDAdjustment": 0,
+            "OutputNMSThreshold": 0.6,
+            "MaxDetectionsPerClass": 100,
+            "MaxClassesPerDetection": 1,
+            "UseRegularNMS": true,
+            "OutputConfThreshold": 0.3,
+            "MaxDetections": 100
+        }
+    ]
+}
