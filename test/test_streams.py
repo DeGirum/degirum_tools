@@ -83,6 +83,7 @@ def test_streams_connection(short_video):
 
 
 def test_streams_video_source(short_video):
+    """Test for VideoSourceGizmo"""
 
     with degirum_tools.open_video_stream(short_video) as src:
         frame_width = int(src.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -108,15 +109,21 @@ def test_streams_video_source(short_video):
 
 
 def test_streams_video_display(short_video):
+    """Test for VideoDisplayGizmo"""
 
     source = streams.VideoSourceGizmo(short_video)
     display = streams.VideoDisplayGizmo()
     sink = VideoSink()
     streams.Composition(source >> display, source >> sink).start()
-    assert display._frames == sink.frames
+
+    assert all(
+        (display._frames[i].data == sink.frames[i].data).all()
+        for i in range(sink.frames_cnt)
+    )
 
 
 def test_streams_video_saver(short_video, temp_dir):
+    """Test for VideoSaverGizmo"""
 
     result_path = temp_dir / "test.mp4"
     source = streams.VideoSourceGizmo(short_video)
@@ -139,6 +146,7 @@ def test_streams_video_saver(short_video, temp_dir):
 
 
 def test_streams_resizer(short_video):
+    """Test for ResizingGizmo"""
 
     w = 320
     h = 240
@@ -166,6 +174,8 @@ def test_streams_resizer(short_video):
 
 
 def test_streams_simple_ai(short_video, zoo_dir):
+    """Test for AiSimpleGizmo"""
+
     import degirum as dg
 
     zoo = dg.connect(dg.LOCAL, zoo_dir)
@@ -184,6 +194,7 @@ def test_streams_simple_ai(short_video, zoo_dir):
 
 
 def test_streams_cropping_ai(short_video, zoo_dir):
+    """Test for AiObjectDetectionCroppingGizmo"""
 
     import degirum as dg
 
@@ -229,6 +240,7 @@ def test_streams_cropping_ai(short_video, zoo_dir):
 
 
 def test_streams_combining_ai(short_video, zoo_dir):
+    """Test for AiResultCombiningGizmo"""
 
     import degirum as dg
 
@@ -258,6 +270,27 @@ def test_streams_combining_ai(short_video, zoo_dir):
                 ai_meta.results[i * L // N : (i + 1) * L // N]
                 == ai_meta.results[0 : L // N]
             )
+
+
+def test_streams_preprocess_ai(short_video, temp_dir):
+    """Test for AiPreprocessGizmo"""
+
+    import degirum as dg
+
+    zoo = dg.connect(dg.LOCAL, temp_dir)
+    model = zoo.load_model("mobilenet_v2_generic_object--224x224_quant_n2x_cpu_1")
+
+    source = streams.VideoSourceGizmo(short_video)
+    preprocessor = streams.AiPreprocessGizmo(model)
+    ai = streams.AiSimpleGizmo(model)
+    sink = VideoSink()
+
+    streams.Composition(source >> preprocessor >> ai >> sink).start()
+
+    for frame in sink.frames:
+        ai_meta = frame.meta.find_last(streams.tag_inference)
+        assert ai_meta is not None
+        assert isinstance(ai_meta, dg.postprocessor.InferenceResults)
 
 
 def test_streams_error_handling():
