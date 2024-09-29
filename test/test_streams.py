@@ -178,8 +178,9 @@ def test_streams_simple_ai(short_video, zoo_dir):
 
     import degirum as dg
 
-    zoo = dg.connect(dg.LOCAL, zoo_dir)
-    model = zoo.load_model("mobilenet_v2_generic_object--224x224_quant_n2x_cpu_1")
+    model = dg.load_model(
+        "mobilenet_v2_generic_object--224x224_quant_n2x_cpu_1", dg.LOCAL, zoo_dir
+    )
 
     source = streams.VideoSourceGizmo(short_video)
     ai = streams.AiSimpleGizmo(model)
@@ -198,8 +199,9 @@ def test_streams_cropping_ai(short_video, zoo_dir):
 
     import degirum as dg
 
-    zoo = dg.connect(dg.LOCAL, zoo_dir)
-    model = zoo.load_model("yolov5nu_relu6_car--128x128_float_n2x_cpu_1")
+    model = dg.load_model(
+        "yolov5nu_relu6_car--128x128_float_n2x_cpu_1", dg.LOCAL, zoo_dir
+    )
 
     source = streams.VideoSourceGizmo(short_video)
     ai = streams.AiSimpleGizmo(model)
@@ -272,25 +274,46 @@ def test_streams_combining_ai(short_video, zoo_dir):
             )
 
 
-def test_streams_preprocess_ai(short_video, temp_dir):
+def test_streams_preprocess_ai(short_video, zoo_dir):
     """Test for AiPreprocessGizmo"""
 
-    import degirum as dg
+    import degirum as dg, numpy as np
 
-    zoo = dg.connect(dg.LOCAL, temp_dir)
-    model = zoo.load_model("mobilenet_v2_generic_object--224x224_quant_n2x_cpu_1")
+    model = dg.load_model(
+        "mobilenet_v2_generic_object--224x224_quant_n2x_cpu_1",
+        dg.LOCAL,
+        zoo_dir,
+        save_model_image=True,
+    )
 
     source = streams.VideoSourceGizmo(short_video)
     preprocessor = streams.AiPreprocessGizmo(model)
-    ai = streams.AiSimpleGizmo(model)
     sink = VideoSink()
 
-    streams.Composition(source >> preprocessor >> ai >> sink).start()
+    streams.Composition(source >> preprocessor >> sink).start()
+
+    model_shape = tuple(model.input_shape[0][1:])
 
     for frame in sink.frames:
-        ai_meta = frame.meta.find_last(streams.tag_inference)
-        assert ai_meta is not None
-        assert isinstance(ai_meta, dg.postprocessor.InferenceResults)
+        assert isinstance(frame.data, bytes)
+        pre_meta = frame.meta.find_last(streams.tag_preprocess)
+        assert pre_meta is not None
+        assert (
+            preprocessor.key_image_input in pre_meta
+            and preprocessor.key_converter in pre_meta
+            and preprocessor.key_image_result in pre_meta
+        )
+        video_meta = frame.meta.find_last(streams.tag_video)
+        assert video_meta is not None
+        assert pre_meta[preprocessor.key_image_input].shape == (
+            video_meta[source.key_frame_height],
+            video_meta[source.key_frame_width],
+            3,
+        )
+
+        image_result = pre_meta[preprocessor.key_image_result]
+        assert image_result is not None and isinstance(image_result, np.ndarray)
+        assert image_result.shape == model_shape
 
 
 def test_streams_error_handling():
