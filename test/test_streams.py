@@ -57,7 +57,7 @@ def test_streams_connection(short_video):
 
     assert source._connected_gizmos == {sink}
     assert sink._connected_gizmos == {source}
-    assert c._gizmos == list({source, sink})
+    assert set(c._gizmos) == {source, sink}
 
     # tree connection
     N = 3
