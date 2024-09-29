@@ -228,6 +228,38 @@ def test_streams_cropping_ai(short_video, zoo_dir):
             expected_crops -= 1
 
 
+def test_streams_combining_ai(short_video, zoo_dir):
+
+    import degirum as dg
+
+    N = 3
+    zoo = dg.connect(dg.LOCAL, zoo_dir)
+    models = [
+        zoo.load_model("yolov5nu_relu6_car--128x128_float_n2x_cpu_1") for _ in range(N)
+    ]
+
+    source = streams.VideoSourceGizmo(short_video)
+    ai = [streams.AiSimpleGizmo(models[i]) for i in range(N)]
+
+    combiner = streams.AiResultCombiningGizmo(N)
+    sink = VideoSink()
+
+    streams.Composition(
+        *(source >> ai[i] >> combiner[i] for i in range(N)), combiner >> sink
+    ).start()
+
+    for frame in sink.frames:
+        ai_meta = frame.meta.find_last(streams.tag_inference)
+        assert ai_meta is not None
+        L = len(ai_meta.results)
+        assert L % N == 0
+        for i in range(1, N):
+            assert (
+                ai_meta.results[i * L // N : (i + 1) * L // N]
+                == ai_meta.results[0 : L // N]
+            )
+
+
 def test_streams_error_handling():
     """Test for error handling in streams"""
 

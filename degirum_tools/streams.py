@@ -276,19 +276,19 @@ class Gizmo(ABC):
         g.connect_to(self, inp)
         return g
 
-    def send_result(self, data: Optional[StreamData], clone_data: bool = False):
+    def send_result(self, data: Optional[StreamData]):
         """Send result to all connected outputs.
 
         - data: a tuple containing raw data object as a first element, and meta info object as a second element.
         When None is passed, all outputs will be closed.
-        - clone_data: clone data when sending to different outputs
         """
         self.result_cnt += 1
         for out in self._output_refs:
             if data is None:
                 out.close()
             else:
-                out.put(copy.deepcopy(data) if clone_data else data)
+                # clone meta to avoid cross-modifications by downstream gizmos in tree-like pipelines
+                out.put(StreamData(data.data, data.meta.clone()))
 
     @abstractmethod
     def run(self):
@@ -966,6 +966,7 @@ class AiResultCombiningGizmo(Gizmo):
                 else:
                     base_result += sub_result
 
+            assert base_data is not None
             self.send_result(base_data)
 
 
@@ -1011,29 +1012,3 @@ class AiPreprocessGizmo(Gizmo):
             res = self._preprocessor.forward(data.data)
             data.meta.append(res[1], self.get_tags())
             self.send_result(StreamData(res[0], data.meta))
-
-
-class FanoutGizmo(Gizmo):
-    """Gizmo to fan-out single input into multiple outputs.
-    NOTE: by default it drops frames when experiencing back-pressure."""
-
-    def __init__(
-        self,
-        *,
-        stream_depth: int = 2,
-        allow_drop: bool = True,
-    ):
-        """Constructor.
-
-        - stream_depth: input stream depth
-        - allow_drop: allow dropping frames from input stream on overflow
-        """
-        super().__init__([(stream_depth, allow_drop)])
-
-    def run(self):
-        """Run gizmo"""
-        for data in self.get_input(0):
-            if self._abort:
-                break
-            meta = data.meta.clone()
-            self.send_result(data, meta)
