@@ -8,9 +8,15 @@
 #
 
 import numpy as np, cv2
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Union, Any
 from copy import deepcopy
-from .ui_support import put_text, color_complement, deduce_text_color, CornerPosition
+from .ui_support import (
+    put_text,
+    color_complement,
+    deduce_text_color,
+    rgb_to_bgr,
+    CornerPosition,
+)
 from .result_analyzer_base import ResultAnalyzerBase
 from .math_support import intersect, get_anchor_coordinates, AnchorPoint
 
@@ -52,22 +58,61 @@ class LineCounts(SingleLineCounts):
         self.for_class: Dict[str, SingleLineCounts] = {}
 
 
+class SingleVectorCounts:
+    """
+    Class to hold vector crossing counts.
+
+    In relation to a vector, "right" specifies crossing of a trail from the left side
+    to the right side of the vector, and "left" specifies crossing of a trail from the
+    right side to the left side of the vector.
+    """
+
+    def __init__(self):
+        self.right: int = 0
+        self.left: int = 0
+
+    def __eq__(self, other):
+        if not isinstance(other, SingleVectorCounts):
+            return NotImplemented
+        return self.right == other.right and self.left == other.left
+
+    def __iadd__(self, other):
+        if not isinstance(other, SingleVectorCounts):
+            return NotImplemented
+        self.right += other.right
+        self.left += other.left
+        return self
+
+
+class VectorCounts(SingleVectorCounts):
+    """Class to hold total vector crossing counts and counts for multiple classes"""
+
+    def __init__(self):
+        super().__init__()
+        self.for_class: Dict[str, SingleVectorCounts] = {}
+
+
 class LineCounter(ResultAnalyzerBase):
     """
     Class to count object tracking trails crossing lines.
 
     Analyzes the object detection `result` object passed to `analyze` method and, for each object trail
     in the `result.trails` dictionary, checks if this trail crosses any lines specified by the `lines`
-    constructor parameter. If the trail crosses the line, the corresponding object is counted in
-    two out of four directions: left-to-right vs right-to-left, and top-to-bottom vs bottom-to-top.
+    constructor parameter. If `absolute_directions` is set to True, an object's trail crossing a line
+    is counted in two out of four directions relative to the frame (left-to-right vs right-to-left,
+    and top-to-bottom vs bottom-to-top). If `absolute_directions` is set to False, an object's trail
+    crossing a line is counted in one out of two directions relative to the line (left-to-right vs
+    right-to-left).
 
-    Adds `line_counts` list of `LineCounts` objects to the `result` object - one objects per crossing line.
-    Each object contains four attributes: `left`, `right`, `top`, and `bottom`. Each attribute
-    value is the number of occurrences of a trail crossing the corresponding line from the
-    corresponding direction. For each trail crossing, two directions are updated:
-    `left` vs `right`, and `top` vs `bottom`.
-    Additionally, if `per_class_display` constructor parameter is set to True, the pre-class counts are
-    stored in the `for_class` dictionary of the `LineCounts` object.
+    Adds `line_counts` list of either `LineCounts` or `VectorCounts` objects to the `result` object -
+    one object per crossing line. The object contains the following attributes: `left`, `right`, `top`,
+    and `bottom` in a `LineCounts` object, `left` and `right` in a `VectorCounts` object.
+    Each attribute value is the number of occurrences of a trail crossing the corresponding line to the
+    corresponding direction. For each trail crossing, the following directions are updated:
+        `left` vs `right`, and `top` vs `bottom` - for `LineCounts`
+        `left` (left side of vector) vs `right` (right side of vector) - for `VectorCounts`
+    Additionally, if `per_class_display` constructor parameter is set to True, the per-class counts are
+    stored in the `for_class` dictionary of the `LineCounts` or `VectorCounts` object.
 
     This class works in conjunction with `ObjectTracker` class that should be used to track object trails.
 
@@ -81,11 +126,11 @@ class LineCounter(ResultAnalyzerBase):
         whole_trail: bool = True,
         count_first_crossing: bool = True,
         absolute_directions: bool = False,
-        count_only_left_and_right: bool = True,
         accumulate: bool = True,
         per_class_display: bool = False,
         show_overlay: bool = True,
         annotation_color: Optional[tuple] = None,
+        annotation_line_width: Optional[int] = None,
         window_name: Optional[str] = None,
     ):
         """Constructor
@@ -99,16 +144,15 @@ class LineCounter(ResultAnalyzerBase):
             count_first_crossing (bool, optional): when True, count only first time a trail intersects a line;
                 when False, count all times when trail interstects a line
             absolute_directions (bool, optional): when True, direction of trail is calculated relative to coordinate
-                system of image; when False, direction of trail is calculated relative to coordinate system defined
-                by line that it intersects
-            count_only_left_and_right (bool, optional): when True, only two directions, "right" and "left" are computed; when False,
-                all four directions are computed; applied only when absolute_directions is False
+                system of image, and four directions are updated; when False, direction of trail is calculated
+                relative to coordinate system defined by line that it intersects, and two directions are updated
             accumulate (bool, optional): when True, accumulate line counts; when False, store line counts only for current
                 frame
             per_class_display (bool, optional): when True, display counts per class,
                 otherwise display total counts
             show_overlay (bool, optional): if True, annotate image; if False, send through original image
             annotation_color (tuple, optional): Color to use for annotations, None to use complement to result overlay color
+            annotation_line_width (int, optional): Line width to use for annotations, None to use result overlay line width
             window_name (str, optional): optional OpenCV window name to configure for interactive line adjustment
         """
 
@@ -118,12 +162,15 @@ class LineCounter(ResultAnalyzerBase):
         self._whole_trail = whole_trail
         self._count_first_crossing = count_first_crossing
         self._absolute_directions = absolute_directions
-        self._count_only_left_and_right = count_only_left_and_right
+        self._count_type: Union[type[LineCounts], type[VectorCounts]] = (
+            LineCounts if absolute_directions else VectorCounts
+        )
         self._accumulate = accumulate
         self._mouse_callback_installed = False
         self._per_class_display = per_class_display
         self._show_overlay = show_overlay
         self._annotation_color = annotation_color
+        self._annotation_line_width = annotation_line_width
         self._win_name = window_name
         self.reset()
 
@@ -131,18 +178,24 @@ class LineCounter(ResultAnalyzerBase):
         """
         Reset line counts
         """
-        self._counted_trails = set()
-        self._line_counts = [LineCounts() for _ in self._lines]
+        self._counted_trails_list: List[set] = [set() for _ in self._lines]
+        self._line_counts: List[Union[LineCounts, VectorCounts]] = [
+            self._count_type() for _ in self._lines
+        ]
 
     def analyze(self, result):
         """
         Detect trails crossing the line.
 
         Adds `line_counts` list of dataclasses to the `result` object - one element per crossing line.
-        Each dataclass contains four attributes: `left`, `right`, `top`, and `bottom`. Each attribute
-        value is the number of occurrences of a trail crossing the corresponding line to the
-        corresponding direction. For each trail crossing, two directions are updated:
-        `left` vs `right`, and `top` vs `bottom`.
+        The dataclass contains the following attributes:
+            `left`, `right`, `top`, and `bottom` in a `LineCounts` object
+            `left` and `right` in a `VectorCounts` object
+
+        Each attribute value is the number of occurrences of a trail crossing the corresponding line to the
+        corresponding direction. For each trail crossing, the following directions are updated:
+            `left` vs `right`, and `top` vs `bottom` - for `LineCounts`
+            `left` (left side of vector) vs `right` (right side of vector) - for `VectorCounts`
 
         Args:
             result: PySDK model result object, containing `trails` dictionary from ObjectTracker
@@ -154,80 +207,81 @@ class LineCounter(ResultAnalyzerBase):
             return
 
         new_trails = set(result.trails.keys())
+        new_trails_list = [new_trails for _ in self._counted_trails_list]
         if self._count_first_crossing:
-            # remove old trails, which are not active anymore
-            self._counted_trails = self._counted_trails & new_trails
-            # obtain a set of new trails, which were not counted yet
-            new_trails -= self._counted_trails
+            for i in range(len(self._counted_trails_list)):
+                # remove old trails, which are not active anymore
+                self._counted_trails_list[i] = (
+                    self._counted_trails_list[i] & new_trails_list[i]
+                )
+                # obtain a set of new trails, which were not counted yet
+                new_trails_list[i] = new_trails_list[i] - self._counted_trails_list[i]
 
         def count_increment(trail_vector, line_vector):
-            counts = SingleLineCounts()
+            increment_counts: Optional[Union[SingleLineCounts, SingleVectorCounts]] = (
+                None
+            )
             if self._absolute_directions:
+                increment_counts = SingleLineCounts()
                 if trail_vector[0] < 0:
-                    counts.left += 1
+                    increment_counts.left += 1
                 else:
-                    counts.right += 1
+                    increment_counts.right += 1
                 if trail_vector[1] < 0:
-                    counts.top += 1
+                    increment_counts.top += 1
                 else:
-                    counts.bottom += 1
+                    increment_counts.bottom += 1
             else:
+                increment_counts = SingleVectorCounts()
                 cross_product = np.cross(trail_vector, line_vector)
                 if cross_product > 0:
-                    counts.left += 1
+                    increment_counts.left += 1
                 elif cross_product < 0:
-                    counts.right += 1
+                    increment_counts.right += 1
                 else:
                     if np.sign(trail_vector) == np.sign(line_vector):
-                        counts.left += 1
+                        increment_counts.left += 1
                     else:
-                        counts.right += 1
-
-                if not self._count_only_left_and_right:
-                    trail_onto_line_projection = self._projection(
-                        line_vector, trail_vector
-                    )
-                    trail_onto_line_projection_sign = np.sign(
-                        trail_onto_line_projection
-                    )
-                    if np.all(trail_onto_line_projection_sign == np.sign(line_vector)):
-                        counts.top += 1
-                    else:
-                        if not np.any(trail_onto_line_projection_sign):
-                            if cross_product > 0:
-                                counts.bottom += 1
-                            else:
-                                counts.top += 1
-                        else:
-                            counts.bottom += 1
-            return counts
+                        increment_counts.right += 1
+            return increment_counts
 
         if not self._accumulate:
-            self._line_counts = [LineCounts() for _ in self._lines]
+            self._line_counts = [self._count_type() for _ in self._lines]
 
-        for tid in new_trails:
-            trail = get_anchor_coordinates(
-                np.array(result.trails[tid]), self._anchor_point
-            )
-            if len(trail) > 1:
-                trail_start = trail[0] if self._whole_trail else trail[-2]
-                trail_end = trail[-1]
-                trail_vector = self._line_to_vector(
-                    trail_start.tolist() + trail_end.tolist()
+        for new_trails, counted_trails, total_count, line, line_vector in zip(
+            new_trails_list,
+            self._counted_trails_list,
+            self._line_counts,
+            self._lines,
+            self._line_vectors,
+        ):
+            for tid in new_trails:
+                trail = get_anchor_coordinates(
+                    np.array(result.trails[tid]), self._anchor_point
                 )
-
-                for total_count, line, line_vector in zip(
-                    self._line_counts, self._lines, self._line_vectors
-                ):
+                if len(trail) > 1:
+                    trail_start = trail[0] if self._whole_trail else trail[-2]
+                    trail_end = trail[-1]
+                    trail_vector = self._line_to_vector(
+                        trail_start.tolist() + trail_end.tolist()
+                    )
                     if intersect(line[:2], line[2:], trail_start, trail_end):
                         if self._count_first_crossing:
-                            self._counted_trails.add(tid)
+                            counted_trails.add(tid)
                         increment = count_increment(trail_vector, line_vector)
                         total_count += increment
                         if self._per_class_display:
-                            class_count = total_count.for_class.setdefault(
-                                result.trail_classes[tid], SingleLineCounts()
-                            )
+                            class_count: Optional[
+                                Union[SingleLineCounts, SingleVectorCounts]
+                            ] = None
+                            if isinstance(total_count, LineCounts):
+                                class_count = total_count.for_class.setdefault(
+                                    result.trail_classes[tid], SingleLineCounts()
+                                )
+                            elif isinstance(total_count, VectorCounts):
+                                class_count = total_count.for_class.setdefault(
+                                    result.trail_classes[tid], SingleVectorCounts()
+                                )
                             class_count += increment
 
         result.line_counts = deepcopy(self._line_counts)
@@ -253,82 +307,188 @@ class LineCounter(ResultAnalyzerBase):
             else self._annotation_color
         )
         text_color = deduce_text_color(line_color)
+        line_width = (
+            result.overlay_line_width
+            if self._annotation_line_width is None
+            else self._annotation_line_width
+        )
 
         margin = 3
         img_center = (image.shape[1] // 2, image.shape[0] // 2)
 
-        for line_count, line in zip(result.line_counts, self._lines):
+        for line_count, line, line_vector in zip(
+            result.line_counts, self._lines, self._line_vectors
+        ):
             line_start = line[:2]
             line_end = line[2:]
 
-            cv2.line(
-                image,
-                line_start,
-                line_end,
-                line_color,
-                result.overlay_line_width,
-            )
+            if self._absolute_directions:
+                cv2.line(
+                    image,
+                    line_start,
+                    line_end,
+                    rgb_to_bgr(line_color),
+                    line_width,
+                )
+            else:
+                cv2.arrowedLine(
+                    image,
+                    line_start,
+                    line_end,
+                    rgb_to_bgr(line_color),
+                    line_width,
+                    tipLength=0.05,
+                )
 
             mostly_horizontal = abs(line_start[0] - line_end[0]) > abs(
                 line_start[1] - line_end[1]
             )
 
             # compute coordinate where to put text
-            if mostly_horizontal:
-                cx = line_start[0] + margin
-                if line_start[1] <= img_center[1]:
-                    cy = line_start[1] + margin
-                    corner = CornerPosition.TOP_LEFT
-                elif line_start[1] > img_center[1]:
-                    cy = line_start[1] - margin
-                    corner = CornerPosition.BOTTOM_LEFT
-            else:
-                cy = line_start[1] + margin
-                if line_start[0] <= img_center[0]:
+            if self._absolute_directions:
+                if mostly_horizontal:
                     cx = line_start[0] + margin
-                    corner = CornerPosition.TOP_LEFT
-                elif line_start[0] > img_center[1]:
-                    cx = line_start[0] - margin
-                    corner = CornerPosition.TOP_RIGHT
+                    if line_start[1] <= img_center[1]:
+                        cy = line_start[1] + margin
+                        corner = CornerPosition.TOP_LEFT
+                    elif line_start[1] > img_center[1]:
+                        cy = line_start[1] - margin
+                        corner = CornerPosition.BOTTOM_LEFT
+                else:
+                    cy = line_start[1] + margin
+                    if line_start[0] <= img_center[0]:
+                        cx = line_start[0] + margin
+                        corner = CornerPosition.TOP_LEFT
+                    elif line_start[0] > img_center[1]:
+                        cx = line_start[0] - margin
+                        corner = CornerPosition.TOP_RIGHT
 
-            def line_count_str(
-                lc: SingleLineCounts,
-                prefix: str = "",
-                count_only_left_and_right: bool = False,
-            ) -> str:
-                return (
-                    f"{prefix}<({lc.left}) >({lc.right})"
-                    if count_only_left_and_right
-                    else f"{prefix}^({lc.top}) v({lc.bottom}) <({lc.left}) >({lc.right})"
-                )
+                def line_count_str(
+                    lc: SingleLineCounts,
+                    prefix: str = "",
+                ) -> str:
+                    return (
+                        f"{prefix}^({lc.top}) v({lc.bottom}) <({lc.left}) >({lc.right})"
+                    )
 
-            count_only_left_and_right = (
-                not self._absolute_directions and self._count_only_left_and_right
-            )
-            if self._per_class_display:
-                capt = "\n".join(
-                    [
-                        line_count_str(
-                            class_count, f"{class_name}: ", count_only_left_and_right
-                        )
-                        for class_name, class_count in line_count.for_class.items()
-                    ]
-                    + [line_count_str(line_count, "Total: ", count_only_left_and_right)]
+                if self._per_class_display:
+                    capt = "\n".join(
+                        [
+                            line_count_str(class_count, f"{class_name}: ")
+                            for class_name, class_count in line_count.for_class.items()
+                        ]
+                        + [line_count_str(line_count, "Total: ")]
+                    )
+                else:
+                    capt = line_count_str(line_count)
+
+                put_text(
+                    image,
+                    capt,
+                    (cx, cy),
+                    corner_position=corner,
+                    font_color=text_color,
+                    bg_color=line_color,
+                    font_scale=result.overlay_font_scale,
                 )
             else:
-                capt = line_count_str(
-                    line_count, count_only_left_and_right=count_only_left_and_right
-                )
+                if mostly_horizontal:
+                    cx_left = cx_right = line_start[0] + margin
+                    if line_start[0] <= line_end[0]:
+                        cy_right = line_start[1] + margin
+                        cy_left = line_start[1] - margin
+                        if line_start[1] < line_end[1]:
+                            corner_right = CornerPosition.TOP_RIGHT
+                            corner_left = CornerPosition.BOTTOM_LEFT
+                        elif line_start[1] > line_end[1]:
+                            corner_right = CornerPosition.TOP_LEFT
+                            corner_left = CornerPosition.BOTTOM_RIGHT
+                        else:
+                            corner_right = CornerPosition.TOP_LEFT
+                            corner_left = CornerPosition.BOTTOM_LEFT
+                    elif line_start[0] > line_end[0]:
+                        cy_right = line_start[1] - margin
+                        cy_left = line_start[1] + margin
+                        if line_start[1] < line_end[1]:
+                            corner_right = CornerPosition.BOTTOM_RIGHT
+                            corner_left = CornerPosition.TOP_LEFT
+                        elif line_start[1] > line_end[1]:
+                            corner_right = CornerPosition.BOTTOM_LEFT
+                            corner_left = CornerPosition.TOP_RIGHT
+                        else:
+                            corner_right = CornerPosition.BOTTOM_LEFT
+                            corner_left = CornerPosition.TOP_LEFT
+                else:
+                    cy_left = cy_right = line_start[1] + margin
+                    if line_start[1] <= line_end[1]:
+                        cx_right = line_start[0] - margin
+                        cx_left = line_start[0] + margin
+                        if line_start[0] < line_end[0]:
+                            corner_right = CornerPosition.TOP_RIGHT
+                            corner_left = CornerPosition.BOTTOM_LEFT
+                        elif line_start[0] > line_end[0]:
+                            corner_right = CornerPosition.BOTTOM_RIGHT
+                            corner_left = CornerPosition.TOP_LEFT
+                        else:
+                            corner_right = CornerPosition.TOP_RIGHT
+                            corner_left = CornerPosition.TOP_LEFT
+                    elif line_start[1] > line_end[1]:
+                        cx_right = line_start[0] + margin
+                        cx_left = line_start[0] - margin
+                        if line_start[0] < line_end[0]:
+                            corner_right = CornerPosition.TOP_LEFT
+                            corner_left = CornerPosition.BOTTOM_RIGHT
+                        elif line_start[0] > line_end[0]:
+                            corner_right = CornerPosition.BOTTOM_LEFT
+                            corner_left = CornerPosition.TOP_RIGHT
+                        else:
+                            corner_right = CornerPosition.BOTTOM_LEFT
+                            corner_left = CornerPosition.BOTTOM_RIGHT
 
-            put_text(
-                image,
-                capt,
-                (cx, cy),
-                corner_position=corner,
-                font_color=text_color,
-                bg_color=line_color,
-                font_scale=result.overlay_font_scale,
-            )
+                def vector_count_str(
+                    lc: SingleVectorCounts, prefix: str = "", right: bool = True
+                ) -> str:
+                    return f"{prefix}{lc.right if right else lc.left}"
+
+                capt_right = "right\n"
+                capt_left = "left\n"
+                if self._per_class_display:
+                    capt_right += "\n".join(
+                        [
+                            vector_count_str(class_count, f"{class_name}: ", True)
+                            for class_name, class_count in line_count.for_class.items()
+                        ]
+                        + [vector_count_str(line_count, "Total: ", True)]
+                    )
+                    capt_left += "\n".join(
+                        [
+                            vector_count_str(class_count, f"{class_name}: ", False)
+                            for class_name, class_count in line_count.for_class.items()
+                        ]
+                        + [vector_count_str(line_count, "Total: ", False)]
+                    )
+                else:
+                    capt_right += vector_count_str(line_count, right=True)
+                    capt_left += vector_count_str(line_count, right=False)
+
+                put_text(
+                    image,
+                    capt_right,
+                    (cx_right, cy_right),
+                    corner_position=corner_right,
+                    font_color=text_color,
+                    bg_color=line_color,
+                    font_scale=result.overlay_font_scale,
+                )
+                put_text(
+                    image,
+                    capt_left,
+                    (cx_left, cy_left),
+                    corner_position=corner_left,
+                    font_color=text_color,
+                    bg_color=line_color,
+                    font_scale=result.overlay_font_scale,
+                )
 
         return image
 

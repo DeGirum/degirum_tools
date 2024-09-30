@@ -25,24 +25,27 @@ def test_zone_counter():
     box_1_zone_2 = [155, 50, 185, 110]
     zone_1 = [[30, 30], [80, 30], [80, 80], [30, 80]]
     zone_2 = [[150, 70], [190, 70], [190, 100], [150, 100]]
+    zone_3 = [[55, 55], [105, 55], [105, 105], [55, 105]]
+    zone_4 = [[85, 85], [135, 85], [135, 135], [85, 135]]
     zones = [zone_1, zone_2]
+    overlapping_zones = [zone_1, zone_3]
 
     test_cases: List[dict] = [
         # ----------------------------------------------------------------
         # No tracking
         # ----------------------------------------------------------------
-        # no objects
         {
+            "case": "No objects",
             "params": {
                 "count_polygons": zones,
                 "triggering_position": AnchorPoint.TOP_RIGHT,
                 "use_tracking": False,
             },
             "inp": [[]],
-            "res": [[[], [{}, {}]]],
+            "res": [[[], [{"total": 0}, {"total": 0}]]],
         },
-        # one trigger
         {
+            "case": "One trigger",
             "params": {
                 "count_polygons": zones,
                 "triggering_position": AnchorPoint.TOP_RIGHT,
@@ -58,16 +61,65 @@ def test_zone_counter():
             "res": [
                 [
                     [
-                        {"bbox": box_1_zone_1, "label": "label1", "in_zone": 0},
-                        {"bbox": box_2_zone_1, "label": "label2"},
-                        {"bbox": box_1_zone_2, "label": "label3"},
+                        {
+                            "bbox": box_1_zone_1,
+                            "label": "label1",
+                            "in_zone": [True, False],
+                        },
+                        {
+                            "bbox": box_2_zone_1,
+                            "label": "label2",
+                            "in_zone": [False, False],
+                        },
+                        {
+                            "bbox": box_1_zone_2,
+                            "label": "label3",
+                            "in_zone": [False, False],
+                        },
                     ],
-                    [{"total": 1}, {}],
+                    [{"total": 1}, {"total": 0}],
                 ]
             ],
         },
-        # multiple triggers
         {
+            "case": "One trigger, overlapping zones",
+            "params": {
+                "count_polygons": overlapping_zones,
+                "triggering_position": AnchorPoint.CENTER,
+                "use_tracking": False,
+            },
+            "inp": [
+                [
+                    {"bbox": box_1_zone_1, "label": "label1"},
+                    {"bbox": box_2_zone_1, "label": "label2"},
+                    {"bbox": box_1_zone_2, "label": "label3"},
+                ]
+            ],
+            "res": [
+                [
+                    [
+                        {
+                            "bbox": box_1_zone_1,
+                            "label": "label1",
+                            "in_zone": [False, False],
+                        },
+                        {
+                            "bbox": box_2_zone_1,
+                            "label": "label2",
+                            "in_zone": [True, True],
+                        },
+                        {
+                            "bbox": box_1_zone_2,
+                            "label": "label3",
+                            "in_zone": [False, False],
+                        },
+                    ],
+                    [{"total": 1}, {"total": 1}],
+                ]
+            ],
+        },
+        {
+            "case": "Multiple triggers",
             "params": {
                 "count_polygons": zones,
                 "triggering_position": [AnchorPoint.TOP_RIGHT, AnchorPoint.TOP_LEFT],
@@ -83,16 +135,65 @@ def test_zone_counter():
             "res": [
                 [
                     [
-                        {"bbox": box_1_zone_1, "label": "label1", "in_zone": 0},
-                        {"bbox": box_2_zone_1, "label": "label2", "in_zone": 0},
-                        {"bbox": box_1_zone_2, "label": "label3"},
+                        {
+                            "bbox": box_1_zone_1,
+                            "label": "label1",
+                            "in_zone": [True, False],
+                        },
+                        {
+                            "bbox": box_2_zone_1,
+                            "label": "label2",
+                            "in_zone": [True, False],
+                        },
+                        {
+                            "bbox": box_1_zone_2,
+                            "label": "label3",
+                            "in_zone": [False, False],
+                        },
                     ],
-                    [{"total": 2}, {}],
+                    [{"total": 2}, {"total": 0}],
                 ]
             ],
         },
-        # multiple triggers, defined class list
         {
+            "case": "Multiple triggers, object in multiple zones",
+            "params": {
+                "count_polygons": [zone_1, zone_4],
+                "triggering_position": [AnchorPoint.TOP_LEFT, AnchorPoint.BOTTOM_RIGHT],
+                "use_tracking": False,
+            },
+            "inp": [
+                [
+                    {"bbox": box_1_zone_1, "label": "label1"},
+                    {"bbox": box_2_zone_1, "label": "label2"},
+                    {"bbox": box_1_zone_2, "label": "label3"},
+                ]
+            ],
+            "res": [
+                [
+                    [
+                        {
+                            "bbox": box_1_zone_1,
+                            "label": "label1",
+                            "in_zone": [True, False],
+                        },
+                        {
+                            "bbox": box_2_zone_1,
+                            "label": "label2",
+                            "in_zone": [True, True],
+                        },
+                        {
+                            "bbox": box_1_zone_2,
+                            "label": "label3",
+                            "in_zone": [False, False],
+                        },
+                    ],
+                    [{"total": 2}, {"total": 1}],
+                ]
+            ],
+        },
+        {
+            "case": "Multiple triggers, defined class list",
             "params": {
                 "class_list": ["label1"],
                 "count_polygons": zones,
@@ -109,16 +210,51 @@ def test_zone_counter():
             "res": [
                 [
                     [
-                        {"bbox": box_1_zone_1, "label": "label1", "in_zone": 0},
+                        {
+                            "bbox": box_1_zone_1,
+                            "label": "label1",
+                            "in_zone": [True, False],
+                        },
                         {"bbox": box_2_zone_1, "label": "label2"},
                         {"bbox": box_1_zone_2, "label": "label3"},
                     ],
-                    [{"total": 1}, {}],
+                    [{"total": 1}, {"total": 0}],
                 ]
             ],
         },
-        # one trigger, bbox scaling
         {
+            "case": "Multiple triggers, defined class list and per class display",
+            "params": {
+                "class_list": ["label1"],
+                "count_polygons": zones,
+                "triggering_position": [AnchorPoint.TOP_RIGHT, AnchorPoint.TOP_LEFT],
+                "use_tracking": False,
+                "per_class_display": True,
+            },
+            "inp": [
+                [
+                    {"bbox": box_1_zone_1, "label": "label1"},
+                    {"bbox": box_2_zone_1, "label": "label2"},
+                    {"bbox": box_1_zone_2, "label": "label3"},
+                ]
+            ],
+            "res": [
+                [
+                    [
+                        {
+                            "bbox": box_1_zone_1,
+                            "label": "label1",
+                            "in_zone": [True, False],
+                        },
+                        {"bbox": box_2_zone_1, "label": "label2"},
+                        {"bbox": box_1_zone_2, "label": "label3"},
+                    ],
+                    [{"label1": 1, "total": 1}, {"label1": 0, "total": 0}],
+                ]
+            ],
+        },
+        {
+            "case": "One trigger, bbox scaling",
             "params": {
                 "count_polygons": zones,
                 "triggering_position": AnchorPoint.TOP_RIGHT,
@@ -135,16 +271,28 @@ def test_zone_counter():
             "res": [
                 [
                     [
-                        {"bbox": box_1_zone_1, "label": "label1"},
-                        {"bbox": box_2_zone_1, "label": "label2", "in_zone": 0},
-                        {"bbox": box_1_zone_2, "label": "label3"},
+                        {
+                            "bbox": box_1_zone_1,
+                            "label": "label1",
+                            "in_zone": [False, False],
+                        },
+                        {
+                            "bbox": box_2_zone_1,
+                            "label": "label2",
+                            "in_zone": [True, False],
+                        },
+                        {
+                            "bbox": box_1_zone_2,
+                            "label": "label3",
+                            "in_zone": [False, False],
+                        },
                     ],
-                    [{"total": 1}, {}],
+                    [{"total": 1}, {"total": 0}],
                 ]
             ],
         },
-        # IoPA
         {
+            "case": "IoPA",
             "params": {
                 "count_polygons": zones,
                 "triggering_position": None,
@@ -161,16 +309,28 @@ def test_zone_counter():
             "res": [
                 [
                     [
-                        {"bbox": box_1_zone_1, "label": "label1"},
-                        {"bbox": box_2_zone_1, "label": "label2", "in_zone": 0},
-                        {"bbox": box_1_zone_2, "label": "label3", "in_zone": 1},
+                        {
+                            "bbox": box_1_zone_1,
+                            "label": "label1",
+                            "in_zone": [False, False],
+                        },
+                        {
+                            "bbox": box_2_zone_1,
+                            "label": "label2",
+                            "in_zone": [True, False],
+                        },
+                        {
+                            "bbox": box_1_zone_2,
+                            "label": "label3",
+                            "in_zone": [False, True],
+                        },
                     ],
                     [{"total": 1}, {"total": 1}],
                 ]
             ],
         },
-        # IoPA, bbox scaling
         {
+            "case": "IoPA, bbox scaling",
             "params": {
                 "count_polygons": zones,
                 "triggering_position": None,
@@ -188,29 +348,41 @@ def test_zone_counter():
             "res": [
                 [
                     [
-                        {"bbox": box_1_zone_1, "label": "label1"},
-                        {"bbox": box_2_zone_1, "label": "label2"},
-                        {"bbox": box_1_zone_2, "label": "label3", "in_zone": 1},
+                        {
+                            "bbox": box_1_zone_1,
+                            "label": "label1",
+                            "in_zone": [False, False],
+                        },
+                        {
+                            "bbox": box_2_zone_1,
+                            "label": "label2",
+                            "in_zone": [False, False],
+                        },
+                        {
+                            "bbox": box_1_zone_2,
+                            "label": "label3",
+                            "in_zone": [False, True],
+                        },
                     ],
-                    [{}, {"total": 1}],
+                    [{"total": 0}, {"total": 1}],
                 ]
             ],
         },
         # ----------------------------------------------------------------
         # With tracking
         # ----------------------------------------------------------------
-        # no objects
         {
+            "case": "No objects",
             "params": {
                 "count_polygons": zones,
                 "triggering_position": AnchorPoint.TOP_RIGHT,
                 "use_tracking": True,
             },
             "inp": [[[]]],
-            "res": [[[], [{}, {}]]],
+            "res": [[[], [{"total": 0}, {"total": 0}]]],
         },
-        # one trigger, no tracking info
         {
+            "case": "One trigger, no tracking info",
             "params": {
                 "count_polygons": zones,
                 "triggering_position": AnchorPoint.TOP_RIGHT,
@@ -232,12 +404,12 @@ def test_zone_counter():
                         {"bbox": box_2_zone_1, "label": "label2"},
                         {"bbox": box_1_zone_2, "label": "label3"},
                     ],
-                    [{}, {}],
+                    [{"total": 0}, {"total": 0}],
                 ]
             ],
         },
-        # one trigger, object disappears and appears again
         {
+            "case": "One trigger, object disappears and appears again",
             "params": {
                 "count_polygons": zones,
                 "triggering_position": AnchorPoint.TOP_RIGHT,
@@ -313,19 +485,39 @@ def test_zone_counter():
                             "bbox": box_1_zone_1,
                             "label": "label1",
                             "track_id": 0,
-                            "in_zone": 0,
+                            "in_zone": [True, False],
                         },
-                        {"bbox": box_2_zone_1, "label": "label2", "track_id": 1},
-                        {"bbox": box_1_zone_2, "label": "label3", "track_id": 2},
+                        {
+                            "bbox": box_2_zone_1,
+                            "label": "label2",
+                            "track_id": 1,
+                            "in_zone": [False, False],
+                        },
+                        {
+                            "bbox": box_1_zone_2,
+                            "label": "label3",
+                            "track_id": 2,
+                            "in_zone": [False, False],
+                        },
                     ],
-                    [{"total": 1}, {}],
+                    [{"total": 1}, {"total": 0}],
                 ],
                 [
                     [
-                        {"bbox": box_2_zone_1, "label": "label2", "track_id": 1},
-                        {"bbox": box_1_zone_2, "label": "label3", "track_id": 2},
+                        {
+                            "bbox": box_2_zone_1,
+                            "label": "label2",
+                            "track_id": 1,
+                            "in_zone": [False, False],
+                        },
+                        {
+                            "bbox": box_1_zone_2,
+                            "label": "label3",
+                            "track_id": 2,
+                            "in_zone": [False, False],
+                        },
                     ],
-                    [{"total": 1}, {}],
+                    [{"total": 1}, {"total": 0}],
                 ],
                 [
                     [
@@ -333,17 +525,27 @@ def test_zone_counter():
                             "bbox": box_1_zone_1,
                             "label": "label1",
                             "track_id": 0,
-                            "in_zone": 0,
+                            "in_zone": [True, False],
                         },
-                        {"bbox": box_2_zone_1, "label": "label2", "track_id": 1},
-                        {"bbox": box_1_zone_2, "label": "label3", "track_id": 2},
+                        {
+                            "bbox": box_2_zone_1,
+                            "label": "label2",
+                            "track_id": 1,
+                            "in_zone": [False, False],
+                        },
+                        {
+                            "bbox": box_1_zone_2,
+                            "label": "label3",
+                            "track_id": 2,
+                            "in_zone": [False, False],
+                        },
                     ],
-                    [{"total": 1}, {}],
+                    [{"total": 1}, {"total": 0}],
                 ],
             ],
         },
-        # one trigger, object exits and re-enters zone within timeout period
         {
+            "case": "One trigger, object exits and re-enters zone within timeout period",
             "params": {
                 "count_polygons": zones,
                 "triggering_position": AnchorPoint.TOP_RIGHT,
@@ -429,12 +631,22 @@ def test_zone_counter():
                             "bbox": box_1_zone_1,
                             "label": "label1",
                             "track_id": 0,
-                            "in_zone": 0,
+                            "in_zone": [True, False],
                         },
-                        {"bbox": box_2_zone_1, "label": "label2", "track_id": 1},
-                        {"bbox": box_1_zone_2, "label": "label3", "track_id": 2},
+                        {
+                            "bbox": box_2_zone_1,
+                            "label": "label2",
+                            "track_id": 1,
+                            "in_zone": [False, False],
+                        },
+                        {
+                            "bbox": box_1_zone_2,
+                            "label": "label3",
+                            "track_id": 2,
+                            "in_zone": [False, False],
+                        },
                     ],
-                    [{"total": 1}, {}],
+                    [{"total": 1}, {"total": 0}],
                 ],
                 [
                     [
@@ -442,11 +654,22 @@ def test_zone_counter():
                             "bbox": box_1_zone_1_shifted,
                             "label": "label1",
                             "track_id": 0,
+                            "in_zone": [False, False],
                         },
-                        {"bbox": box_2_zone_1, "label": "label2", "track_id": 1},
-                        {"bbox": box_1_zone_2, "label": "label3", "track_id": 2},
+                        {
+                            "bbox": box_2_zone_1,
+                            "label": "label2",
+                            "track_id": 1,
+                            "in_zone": [False, False],
+                        },
+                        {
+                            "bbox": box_1_zone_2,
+                            "label": "label3",
+                            "track_id": 2,
+                            "in_zone": [False, False],
+                        },
                     ],
-                    [{"total": 1}, {}],
+                    [{"total": 1}, {"total": 0}],
                 ],
                 [
                     [
@@ -454,17 +677,27 @@ def test_zone_counter():
                             "bbox": box_1_zone_1,
                             "label": "label1",
                             "track_id": 0,
-                            "in_zone": 0,
+                            "in_zone": [True, False],
                         },
-                        {"bbox": box_2_zone_1, "label": "label2", "track_id": 1},
-                        {"bbox": box_1_zone_2, "label": "label3", "track_id": 2},
+                        {
+                            "bbox": box_2_zone_1,
+                            "label": "label2",
+                            "track_id": 1,
+                            "in_zone": [False, False],
+                        },
+                        {
+                            "bbox": box_1_zone_2,
+                            "label": "label3",
+                            "track_id": 2,
+                            "in_zone": [False, False],
+                        },
                     ],
-                    [{"total": 1}, {}],
+                    [{"total": 1}, {"total": 0}],
                 ],
             ],
         },
-        # one trigger, object exits and re-enters the zone late
         {
+            "case": "One trigger, object exits and re-enters the zone late",
             "params": {
                 "count_polygons": zones,
                 "triggering_position": AnchorPoint.TOP_RIGHT,
@@ -584,12 +817,22 @@ def test_zone_counter():
                             "bbox": box_1_zone_1,
                             "label": "label1",
                             "track_id": 0,
-                            "in_zone": 0,
+                            "in_zone": [True, False],
                         },
-                        {"bbox": box_2_zone_1, "label": "label2", "track_id": 1},
-                        {"bbox": box_1_zone_2, "label": "label3", "track_id": 2},
+                        {
+                            "bbox": box_2_zone_1,
+                            "label": "label2",
+                            "track_id": 1,
+                            "in_zone": [False, False],
+                        },
+                        {
+                            "bbox": box_1_zone_2,
+                            "label": "label3",
+                            "track_id": 2,
+                            "in_zone": [False, False],
+                        },
                     ],
-                    [{"total": 1}, {}],
+                    [{"total": 1}, {"total": 0}],
                 ],
                 [
                     [
@@ -597,11 +840,22 @@ def test_zone_counter():
                             "bbox": box_1_zone_1_shifted,
                             "label": "label1",
                             "track_id": 0,
+                            "in_zone": [False, False],
                         },
-                        {"bbox": box_2_zone_1, "label": "label2", "track_id": 1},
-                        {"bbox": box_1_zone_2, "label": "label3", "track_id": 2},
+                        {
+                            "bbox": box_2_zone_1,
+                            "label": "label2",
+                            "track_id": 1,
+                            "in_zone": [False, False],
+                        },
+                        {
+                            "bbox": box_1_zone_2,
+                            "label": "label3",
+                            "track_id": 2,
+                            "in_zone": [False, False],
+                        },
                     ],
-                    [{"total": 1}, {}],
+                    [{"total": 1}, {"total": 0}],
                 ],
                 [
                     [
@@ -609,11 +863,22 @@ def test_zone_counter():
                             "bbox": box_1_zone_1_shifted,
                             "label": "label1",
                             "track_id": 0,
+                            "in_zone": [False, False],
                         },
-                        {"bbox": box_2_zone_1, "label": "label2", "track_id": 1},
-                        {"bbox": box_1_zone_2, "label": "label3", "track_id": 2},
+                        {
+                            "bbox": box_2_zone_1,
+                            "label": "label2",
+                            "track_id": 1,
+                            "in_zone": [False, False],
+                        },
+                        {
+                            "bbox": box_1_zone_2,
+                            "label": "label3",
+                            "track_id": 2,
+                            "in_zone": [False, False],
+                        },
                     ],
-                    [{}, {}],
+                    [{"total": 0}, {"total": 0}],
                 ],
                 [
                     [
@@ -621,18 +886,28 @@ def test_zone_counter():
                             "bbox": box_1_zone_1,
                             "label": "label1",
                             "track_id": 0,
-                            "in_zone": 0,
+                            "in_zone": [True, False],
                         },
-                        {"bbox": box_2_zone_1, "label": "label2", "track_id": 1},
-                        {"bbox": box_1_zone_2, "label": "label3", "track_id": 2},
+                        {
+                            "bbox": box_2_zone_1,
+                            "label": "label2",
+                            "track_id": 1,
+                            "in_zone": [False, False],
+                        },
+                        {
+                            "bbox": box_1_zone_2,
+                            "label": "label3",
+                            "track_id": 2,
+                            "in_zone": [False, False],
+                        },
                     ],
-                    [{"total": 1}, {}],
+                    [{"total": 1}, {"total": 0}],
                 ],
             ],
         },
     ]
 
-    for ci, case in enumerate(test_cases):
+    for case in test_cases:
         zone_counter = degirum_tools.ZoneCounter(**case["params"])
 
         for i, input in enumerate(case["inp"]):
@@ -649,9 +924,15 @@ def test_zone_counter():
                     result.trail_classes = input[2][0]
 
             zone_counter.analyze(result)
-            assert (
-                result._inference_results == case["res"][i][0]
-            ), f"Case {ci} failed at step {i}: Inference result do not match."
-            assert (
-                result.zone_counts == case["res"][i][1]
-            ), f"Case {ci} failed at step {i}: Zone counts do not match."
+            assert result._inference_results == case["res"][i][0], (
+                f"Case `{case['case']}` failed at step {i}: "
+                + f"inference results `{result._inference_results}` "
+                + f"do not match expected `{case['res'][i][0]}`."
+                + f"\nConfig: {case['params']}"
+            )
+            assert result.zone_counts == case["res"][i][1], (
+                f"Case `{case['case']}` failed at step {i}: "
+                + f"zone counts `{result.zone_counts}` "
+                + f"do not match expected `{case['res'][i][1]}`."
+                + f"\nConfig: {case['params']}"
+            )

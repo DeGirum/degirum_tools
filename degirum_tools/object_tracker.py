@@ -38,7 +38,7 @@ from scipy.optimize import linear_sum_assignment
 from dataclasses import dataclass
 from typing import List, Tuple, Optional, Dict
 from .math_support import box_iou_batch, AnchorPoint, get_anchor_coordinates
-from .ui_support import put_text, deduce_text_color, color_complement
+from .ui_support import put_text, deduce_text_color, color_complement, rgb_to_bgr
 from .result_analyzer_base import ResultAnalyzerBase
 
 
@@ -966,7 +966,11 @@ class ObjectTracker(ResultAnalyzerBase):
                 if len(trail) > 1
             ]
             cv2.polylines(
-                image, all_trails, False, line_color, result.overlay_line_width
+                image,
+                all_trails,
+                False,
+                rgb_to_bgr(line_color),
+                result.overlay_line_width,
             )
 
             if result.overlay_show_labels:

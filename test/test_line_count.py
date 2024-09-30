@@ -32,6 +32,13 @@ def test_line_counter():
             for key, value in kwargs.items():
                 setattr(self, key, value)
 
+    # SingleVectorCounts wrapper class for result comparisons
+    class ResSingleVectorCounts(degirum_tools.SingleVectorCounts):
+        def __init__(self, **kwargs):
+            super().__init__()
+            for key, value in kwargs.items():
+                setattr(self, key, value)
+
     lines = [(40, 50, 110, 140)]
 
     test_cases: List[dict] = [
@@ -48,11 +55,9 @@ def test_line_counter():
             "res": [
                 [
                     {
-                        "bottom": 0,
                         "for_class": {},
-                        "left": 0,
                         "right": 0,
-                        "top": 0,
+                        "left": 0,
                     }
                 ]
             ],
@@ -71,11 +76,9 @@ def test_line_counter():
             "res": [
                 [
                     {
-                        "bottom": 0,
                         "for_class": {},
-                        "left": 0,
                         "right": 0,
-                        "top": 0,
+                        "left": 0,
                     }
                 ]
             ],
@@ -94,11 +97,9 @@ def test_line_counter():
             "res": [
                 [
                     {
-                        "bottom": 0,
                         "for_class": {},
-                        "left": 1,
                         "right": 0,
-                        "top": 0,
+                        "left": 1,
                     }
                 ]
             ],
@@ -123,20 +124,16 @@ def test_line_counter():
             "res": [
                 [
                     {
-                        "bottom": 0,
                         "for_class": {},
-                        "left": 1,
                         "right": 0,
-                        "top": 0,
+                        "left": 1,
                     }
                 ],
                 [
                     {
-                        "bottom": 0,
                         "for_class": {},
-                        "left": 1,
                         "right": 1,
-                        "top": 0,
+                        "left": 1,
                     }
                 ],
             ],
@@ -161,25 +158,19 @@ def test_line_counter():
             "res": [
                 [
                     {
-                        "bottom": 0,
-                        "for_class": {
-                            "label1": {"bottom": 0, "left": 1, "right": 0, "top": 0}
-                        },
-                        "left": 1,
+                        "for_class": {"label1": {"right": 0, "left": 1}},
                         "right": 0,
-                        "top": 0,
+                        "left": 1,
                     }
                 ],
                 [
                     {
-                        "bottom": 0,
                         "for_class": {
-                            "label1": {"bottom": 0, "left": 1, "right": 0, "top": 0},
-                            "label2": {"bottom": 0, "left": 0, "right": 1, "top": 0},
+                            "label1": {"right": 0, "left": 1},
+                            "label2": {"right": 1, "left": 0},
                         },
-                        "left": 1,
                         "right": 1,
-                        "top": 0,
+                        "left": 1,
                     }
                 ],
             ],
@@ -204,20 +195,16 @@ def test_line_counter():
             "res": [
                 [
                     {
-                        "bottom": 0,
                         "for_class": {},
-                        "left": 1,
                         "right": 0,
-                        "top": 0,
+                        "left": 1,
                     }
                 ],
                 [
                     {
-                        "bottom": 0,
                         "for_class": {},
-                        "left": 0,
                         "right": 1,
-                        "top": 0,
+                        "left": 0,
                     }
                 ],
             ],
@@ -225,86 +212,6 @@ def test_line_counter():
         {
             "case": "Two trails, directions are relative to the image",
             "params": {"lines": lines, "absolute_directions": True},
-            "inp": [
-                {
-                    "trails": {
-                        1: [np.array([20, 35, 30, 55]), np.array([70, 40, 80, 60])]
-                    },
-                    "trail_classes": {1: "label1"},
-                },
-                {
-                    "trails": {
-                        2: [np.array([80, 60, 90, 80]), np.array([50, 120, 60, 140])]
-                    },
-                    "trail_classes": {2: "label2"},
-                },
-            ],
-            "res": [
-                [
-                    {
-                        "bottom": 1,
-                        "for_class": {},
-                        "left": 0,
-                        "right": 1,
-                        "top": 0,
-                    }
-                ],
-                [
-                    {
-                        "bottom": 2,
-                        "for_class": {},
-                        "left": 1,
-                        "right": 1,
-                        "top": 0,
-                    }
-                ],
-            ],
-        },
-        {
-            "case": "Two trails, count all four directions",
-            "params": {"lines": lines, "count_only_left_and_right": False},
-            "inp": [
-                {
-                    "trails": {
-                        1: [np.array([20, 35, 30, 55]), np.array([70, 40, 80, 60])]
-                    },
-                    "trail_classes": {1: "label1"},
-                },
-                {
-                    "trails": {
-                        2: [np.array([80, 60, 90, 80]), np.array([50, 120, 60, 140])]
-                    },
-                    "trail_classes": {2: "label2"},
-                },
-            ],
-            "res": [
-                [
-                    {
-                        "bottom": 0,
-                        "for_class": {},
-                        "left": 1,
-                        "right": 0,
-                        "top": 1,
-                    }
-                ],
-                [
-                    {
-                        "bottom": 0,
-                        "for_class": {},
-                        "left": 1,
-                        "right": 1,
-                        "top": 2,
-                    }
-                ],
-            ],
-        },
-        {
-            "case": "Two trails, directions are relative to the image and count all four directions",
-            "params": {
-                "lines": lines,
-                "absolute_directions": True,
-                "count_only_left_and_right": False,
-            },
             "inp": [
                 {
                     "trails": {
@@ -375,29 +282,23 @@ def test_line_counter():
             "res": [
                 [
                     {
-                        "bottom": 0,
                         "for_class": {},
-                        "left": 1,
                         "right": 0,
-                        "top": 0,
+                        "left": 1,
                     }
                 ],
                 [
                     {
-                        "bottom": 0,
                         "for_class": {},
-                        "left": 1,
                         "right": 0,
-                        "top": 0,
+                        "left": 1,
                     }
                 ],
                 [
                     {
-                        "bottom": 0,
                         "for_class": {},
-                        "left": 1,
                         "right": 0,
-                        "top": 0,
+                        "left": 1,
                     }
                 ],
             ],
@@ -437,29 +338,23 @@ def test_line_counter():
             "res": [
                 [
                     {
-                        "bottom": 0,
                         "for_class": {},
-                        "left": 1,
                         "right": 0,
-                        "top": 0,
+                        "left": 1,
                     }
                 ],
                 [
                     {
-                        "bottom": 0,
                         "for_class": {},
-                        "left": 1,
                         "right": 0,
-                        "top": 0,
+                        "left": 1,
                     }
                 ],
                 [
                     {
-                        "bottom": 0,
                         "for_class": {},
+                        "right": 0,
                         "left": 2,
-                        "right": 0,
-                        "top": 0,
                     }
                 ],
             ],
@@ -482,11 +377,9 @@ def test_line_counter():
             "res": [
                 [
                     {
-                        "bottom": 0,
                         "for_class": {},
-                        "left": 0,
                         "right": 1,
-                        "top": 0,
+                        "left": 0,
                     }
                 ]
             ],
@@ -530,29 +423,23 @@ def test_line_counter():
             "res": [
                 [
                     {
-                        "bottom": 0,
                         "for_class": {},
-                        "left": 1,
                         "right": 0,
-                        "top": 0,
-                    }
-                ],
-                [
-                    {
-                        "bottom": 0,
-                        "for_class": {},
                         "left": 1,
-                        "right": 1,
-                        "top": 0,
                     }
                 ],
                 [
                     {
-                        "bottom": 0,
                         "for_class": {},
-                        "left": 2,
                         "right": 1,
-                        "top": 0,
+                        "left": 1,
+                    }
+                ],
+                [
+                    {
+                        "for_class": {},
+                        "right": 1,
+                        "left": 2,
                     }
                 ],
             ],
@@ -572,7 +459,11 @@ def test_line_counter():
                     result, "line_counts"
                 ), f"Case {ci} failed at step {i}: result has line_counts field."
             else:
-                res = ResSingleLineCounts(**case["res"][i][0])
+                res = (
+                    ResSingleLineCounts(**case["res"][i][0])
+                    if "top" in case["res"][i][0].keys()
+                    else ResSingleVectorCounts(**case["res"][i][0])
+                )
                 assert result.line_counts[0] == res, (  # type: ignore[attr-defined]
                     f"Case `{case['case']}` failed at step {i}: "
                     + f"line counts `{result.line_counts}` "  # type: ignore[attr-defined]

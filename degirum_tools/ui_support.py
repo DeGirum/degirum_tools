@@ -31,8 +31,17 @@ def color_complement(color):
     Args:
         color - color to complement (RGB)
     """
-    adj_color = (color[0] if isinstance(color, list) else color)[::-1]
+    adj_color = color[0] if isinstance(color, list) else color
     return tuple([255 - c for c in adj_color])
+
+
+def rgb_to_bgr(color):
+    """Convert color from RGB to BGR and return color in BGR
+
+    Args:
+        color - color to convert (RGB)
+    """
+    return color[::-1]
 
 
 def ipython_display(obj: Any, clear: bool = False, display_id: Optional[str] = None):
@@ -117,8 +126,8 @@ def put_text(
     if not label:
         return image
 
-    font_color = font_color[::-1]  # RGB to BGR
-    bg_color = bg_color[::-1] if bg_color is not None else None
+    font_color = rgb_to_bgr(font_color)
+    bg_color = rgb_to_bgr(bg_color) if bg_color is not None else None
 
     im_h, im_w = image.shape[:2]
     margin = 6
