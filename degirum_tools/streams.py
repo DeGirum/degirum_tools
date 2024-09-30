@@ -1012,3 +1012,37 @@ class AiPreprocessGizmo(Gizmo):
             res = self._preprocessor.forward(data.data)
             data.meta.append(res[1], self.get_tags())
             self.send_result(StreamData(res[0], data.meta))
+
+
+class AiAnalyzerGizmo(Gizmo):
+    """Gizmo to apply a chain of analyzers to the inference result"""
+
+    def __init__(
+        self,
+        analyzers: list,
+        *,
+        stream_depth: int = 10,
+        allow_drop: bool = False,
+    ):
+        """Constructor.
+
+        - analyzers: list of analyzer objects
+        - stream_depth: input stream depth
+        - allow_drop: allow dropping frames from input stream on overflow
+        """
+
+        self._analyzers = analyzers
+        super().__init__([(stream_depth, allow_drop)])
+
+    def run(self):
+        """Run gizmo"""
+
+        for data in self.get_input(0):
+            if self._abort:
+                break
+
+            inference_meta = data.meta.find_last(tag_inference)
+            if inference_meta is not None:
+                for analyzer in self._analyzers:
+                    analyzer.analyze(inference_meta)
+            self.send_result(data)

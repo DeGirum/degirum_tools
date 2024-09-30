@@ -316,6 +316,41 @@ def test_streams_preprocess_ai(short_video, zoo_dir):
         assert image_result.shape == model_shape
 
 
+def test_streams_analyzer_ai(short_video, zoo_dir):
+    """Test for AiAnalyzerGizmo"""
+
+    import degirum as dg
+
+    model = dg.load_model(
+        "mobilenet_v2_generic_object--224x224_quant_n2x_cpu_1", dg.LOCAL, zoo_dir
+    )
+
+    class TestAnalyzer(degirum_tools.ResultAnalyzerBase):
+
+        def __init__(self, attribute: str):
+            self.attribute = attribute
+
+        def analyze(self, result):
+            setattr(result, self.attribute, 1)
+            return result
+
+    N = 3
+    analyzers = [TestAnalyzer(f"attr{i}") for i in range(N)]
+
+    source = streams.VideoSourceGizmo(short_video)
+    ai = streams.AiSimpleGizmo(model)
+    analyzer = streams.AiAnalyzerGizmo(analyzers)
+    sink = VideoSink()
+
+    streams.Composition(source >> ai >> analyzer >> sink).start()
+
+    for frame in sink.frames:
+        ai_meta = frame.meta.find_last(streams.tag_inference)
+        assert ai_meta is not None
+        for i in range(N):
+            assert hasattr(ai_meta, f"attr{i}") and getattr(ai_meta, f"attr{i}") == 1
+
+
 def test_streams_error_handling():
     """Test for error handling in streams"""
 
