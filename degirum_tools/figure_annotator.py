@@ -9,7 +9,8 @@
 #
 
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, ttk, Toplevel, Scrollbar, Text
+import tkinter.font as tkFont
 from PIL import Image, ImageTk
 import json
 import argparse
@@ -17,6 +18,184 @@ import cv2
 import numpy as np
 from enum import Enum
 from typing import Tuple, List, Dict, Optional
+from copy import deepcopy
+
+
+help_message_line = """
+    The DeGirum Line Annotator is a command-line utility for interactive
+    annotation of an image. The user can draw lines on an image and save
+    the line data to a JSON file.
+
+    Open an image file
+
+        To open an image file, click File > Open... or press Control-O.
+
+    Annotate
+
+        The user left-clicks the endpoints of a line segment. Once a line is complete,
+        the user can modify the most recently added line or draw a new line.
+
+    Undo
+
+        To remove the most-recently clicked point, click Edit > Undo or press Control-Z.
+
+    Save
+
+        To save the current results, click File > Save or press Control-S. To save the
+        current results to a specific file, click File > Save As... or press Control-Shift-S.
+
+    Additional Controls
+
+        Right-click  -  if cursor is next to a point of a line, the point is grabbed and can be
+                        dragged to a new location. Right-click again to release the point at the
+                        current cursor location.
+
+        Control-right-click  -  if cursor position is next to a line, the line is grabbed and
+                                can be dragged to a new location. Control-right-click again to
+                                release the line at the current cursor location.
+
+        Escape key  -  when drawing a line and line is incomplete, removes the remnants of the line;
+                       when dragging a point, returns the point to original position and cancels drag;
+                       when dragging a line, returns the line to original position and cancels drag
+
+    Key Shortcuts Summary
+
+        Control-O        -  open an image file
+        Control-S        -  save changes
+        Control-Shift-S  -  save line data to a JSON file
+        Control-Z        -  undo last selected point
+    """
+
+help_message_grid = """
+    The DeGirum Zone Annotator is a command-line utility for interactive
+    annotation of an image. The user can draw zones on an image and save
+    the zone data to a JSON file.
+
+    Open an image file
+
+        To open an image file, click File > Open... or press Control-O.
+
+    Annotate
+
+        There are two modes of annotation: non-grid and grid modes.
+
+        In non-grid mode, the user left-clicks the vertices of a zone,
+        clockwise or counter-clockwise from each other, to create a convex
+        polygon. Once a zone is complete, the user can modify the most recently
+        added zone or draw a new zone.
+
+        In grid mode, the user can create a horizontal 1-by-N grid with N adjacent
+        zones. Starting from the top-left corner of the grid and going
+        counter-clockwise, the user left-clicks to select 4 corner points of the grid.
+        At this point, this grid is minimally-complete and the user can save it as a
+        zone. However, the user can continue to select points, point on the top edge of
+        the grid followed by a point on the bottom edge of the grid, to define dividing
+        segments that divide the main grid into zones. The user can add as many grids
+        as needed, and can select the active grid to edit from the drop-down menu
+        labeled "Active Grid" (see below).
+
+    Undo
+
+        To remove the most-recently clicked point, click Edit > Undo or press Control-Z.
+        If in grid mode and no points are selected for this grid, this action deletes
+        the grid.
+
+    Modes
+
+        Right below the main menu bar is a drop-down menu labeled "Active Grid".
+        Initially, this drop-down menu has only one option, "Non-grid mode", meaning that
+        the utility is in non-grid mode. Whenever non-grid mode is necessary, select this
+        option from the drop-down menu. When grids are added (see below), their names appear
+        in the menu. In order to edit a specific grid, e.g. "Grid 1", select "Grid 1" from
+        the menu.
+
+    Add grid
+
+        To add a grid, click Edit > Add Grid or press Control-A. A new grid will be created
+        and added to the "Active Grid" menu.
+
+    Remove grid
+
+        To remove a grid, select it from the "Active Grid" menu and click Edit > Remove Grid
+        or press Control-D. The grid will be removed from the canvas and from the menu.
+
+    Save
+
+        To save the current results, click File > Save or press Control-S. To save the
+        current results to a specific file, click File > Save As... or press Control-Shift-S.
+
+    Additional Controls
+
+        Right-click  -  if cursor is next to a point of a zone (if in non-grid mode) or of a grid
+                        (if that grid is selected), the point is grabbed and can be dragged to a
+                        new location. Right-click again to release the point at the current cursor
+                        location.
+
+        Control-right-click  -  if cursor position is enclosed by a zone (if in non-grid mode)
+                                or a grid (if that grid is selected), the zone/grid is grabbed and
+                                can be dragged to a new location. Control-right-click again to
+                                release the zone/grid at the current cursor location.
+
+        Escape key  -  when drawing a zone and zone is incomplete, removes the remnants of the zone;
+                        when dragging a point, returns the point to original position and cancels drag;
+                        when dragging a zone/grid, returns the zone/grid to original position and
+                        cancels drag
+
+    Key Shortcuts Summary
+
+        Control-O        -  open an image file
+        Control-S        -  save changes
+        Control-Shift-S  -  save zone data to a JSON file
+        Control-A        -  add grid
+        Control-D        -  remove grid
+        Control-Z        -  undo last selected point; if in grid mode and grid is empty, deletes grid
+    """
+
+help_message_polygon = """
+    The DeGirum Zone Annotator is a command-line utility for interactive
+    annotation of an image. The user can draw zones on an image and save
+    the zone data to a JSON file.
+
+    Open an image file
+
+        To open an image file, click File > Open... or press Control-O.
+
+    Annotate
+
+        The user left-clicks the vertices of a zone, clockwise or counter-clockwise
+        from each other, to create a convex polygon. Once a zone is complete, the user
+        can modify the most recently added zone or draw a new zone.
+
+    Undo
+
+        To remove the most-recently clicked point, click Edit > Undo or press Control-Z.
+
+    Save
+
+        To save the current results, click File > Save or press Control-S. To save the
+        current results to a specific file, click File > Save As... or press Control-Shift-S.
+
+    Additional Controls
+
+        Right-click  -  if cursor is next to a point of a zone, the point is grabbed and can be
+                        dragged to a new location. Right-click again to release the point at the
+                        current cursor location.
+
+        Control-right-click  -  if cursor position is enclosed by a zone, the zone is grabbed and
+                                can be dragged to a new location. Control-right-click again to
+                                release the zone at the current cursor location.
+
+        Escape key  -  when drawing a zone and zone is incomplete, removes the remnants of the zone;
+                       when dragging a point, returns the point to original position and cancels drag;
+                       when dragging a zone, returns the zone to original position and cancels drag
+
+    Key Shortcuts Summary
+
+        Control-O        -  open an image file
+        Control-S        -  save changes
+        Control-Shift-S  -  save zone data to a JSON file
+        Control-Z        -  undo last selected point
+    """
 
 
 def _figure_annotator_run(args):
@@ -122,7 +301,8 @@ object_format_versions = {
 
 
 class Grid:
-    def __init__(self):
+    def __init__(self, grid_id: str):
+        self.grid_id = grid_id
         self.ids = []
         self.points = []
         self.displayed_points = []
@@ -139,6 +319,54 @@ class Grid:
         points_len = len(self.points)
         return points_len >= 4 and points_len % 2 == 0
 
+    @staticmethod
+    def lin_func(m, b, x):
+        """Return y-coordinate for a given x-coordinate based on line defined by slope and y-intercept."""
+        return m * x + b
+
+    def process_point_addition(self, point):
+        """
+        Add new point to grid.
+        """
+        points_len = len(self.points)
+        if points_len >= 4:  # Scale intermediate point to grid
+            self.points.insert(-2, self.scale_point(point, points_len))
+        else:
+            self.points.append(point)
+
+        if len(self.points) == 4:
+            self.update_grid_parameters()
+
+    def scale_point(self, point, idx):
+        if self.mostly_horizontal():
+            scaled_x = point[0]
+            if idx % 2 == 0:
+                lims = sorted([self.points[0][0], self.points[-1][0]])
+                scaled_x = np.clip(scaled_x, lims[0], lims[1])
+                scaled_y = Grid.lin_func(self.top_m, self.top_b, scaled_x)
+            else:
+                lims = sorted([self.points[1][0], self.points[-2][0]])
+                scaled_x = np.clip(scaled_x, lims[0], lims[1])
+                scaled_y = Grid.lin_func(self.bottom_m, self.bottom_b, scaled_x)
+        else:
+            scaled_y = point[1]
+            if idx % 2 == 0:
+                lims = sorted([self.points[0][1], self.points[-1][1]])
+                scaled_y = np.clip(scaled_y, lims[0], lims[1])
+                scaled_x = Grid.lin_func(self.top_m, self.top_b, scaled_y)
+            else:
+                lims = sorted([self.points[1][1], self.points[-2][1]])
+                scaled_y = np.clip(scaled_y, lims[0], lims[1])
+                scaled_x = Grid.lin_func(self.bottom_m, self.bottom_b, scaled_y)
+        return (scaled_x, scaled_y)
+
+    def mostly_horizontal(self):
+        guide_top_r = self.points[-1]
+        guide_top_l = self.points[0]
+        return abs(guide_top_r[1] - guide_top_l[1]) < abs(
+            guide_top_r[0] - guide_top_l[0]
+        )
+
     def update_grid_parameters(self):
         """
         Calculates key defining parameters of grid:
@@ -149,14 +377,25 @@ class Grid:
             guide_top_l = self.points[0]
             guide_bot_r = self.points[-2]
             guide_bot_l = self.points[1]
-            self.top_m = (guide_top_r[1] - guide_top_l[1]) / (
-                guide_top_r[0] - guide_top_l[0]
-            )
-            self.top_b = guide_top_r[1] - self.top_m * guide_top_r[0]
-            self.bottom_m = (guide_bot_r[1] - guide_bot_l[1]) / (
-                guide_bot_r[0] - guide_bot_l[0]
-            )
-            self.bottom_b = guide_bot_r[1] - self.bottom_m * guide_bot_r[0]
+
+            if self.mostly_horizontal():
+                self.top_m = (guide_top_r[1] - guide_top_l[1]) / (
+                    guide_top_r[0] - guide_top_l[0]
+                )
+                self.top_b = guide_top_r[1] - self.top_m * guide_top_r[0]
+                self.bottom_m = (guide_bot_r[1] - guide_bot_l[1]) / (
+                    guide_bot_r[0] - guide_bot_l[0]
+                )
+                self.bottom_b = guide_bot_r[1] - self.bottom_m * guide_bot_r[0]
+            else:
+                self.top_m = (guide_top_r[0] - guide_top_l[0]) / (
+                    guide_top_r[1] - guide_top_l[1]
+                )
+                self.top_b = guide_top_r[0] - self.top_m * guide_top_r[1]
+                self.bottom_m = (guide_bot_r[0] - guide_bot_l[0]) / (
+                    guide_bot_r[1] - guide_bot_l[1]
+                )
+                self.bottom_b = guide_bot_r[0] - self.bottom_m * guide_bot_r[1]
 
     def update_displayed_points(
         self, current_width, current_height, original_width, original_height
@@ -231,9 +470,24 @@ class FigureAnnotator:
             self.num_vertices == FigureAnnotatorType.QUADRILATERAL.value
         )
         self.results_file_name = results_file_name
+        self.save_path = ""
+
+        # Constants
+        self.line_width = 1
 
         self.root = tk.Tk()
         self.root.title(f"{self.figure_type.capitalize()} Annotator")
+        self.root.geometry("700x500")
+
+        # Override the close button event
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+
+        # Set window icon
+        self.icon_image = ImageTk.PhotoImage(file="assets/logo.png")
+        self.root.iconphoto(True, self.icon_image)
+
+        # Set font
+        self.font = tkFont.Font(family="courier 10 pitch", size=12)
 
         # Create the main frame to hold the menu and canvas
         self.main_frame = tk.Frame(self.root)
@@ -244,23 +498,55 @@ class FigureAnnotator:
 
         self.file_menu = tk.Menu(self.menu_bar, tearoff=0)
         self.file_menu.add_command(
-            label="Open...", command=self.open_image, accelerator="Ctrl-O"
+            label="Open...",
+            font=self.font,
+            command=self.open_image,
+            accelerator="Ctrl-O",
         )
         self.file_menu.add_command(
-            label="Save As...", command=self.save_as_json, accelerator="Ctrl-S", state=tk.DISABLED
+            label="Save",
+            font=self.font,
+            command=self.save,
+            accelerator="Ctrl-S",
+            state=tk.DISABLED,
         )
-        self.menu_bar.add_cascade(label="File", menu=self.file_menu)
+        self.file_menu.add_command(
+            label="Save As...",
+            font=self.font,
+            command=self.save_to_file,
+            accelerator="Ctrl-Shift-S",
+            state=tk.DISABLED,
+        )
+        self.menu_bar.add_cascade(label="File", font=self.font, menu=self.file_menu)
 
         self.edit_menu = tk.Menu(self.menu_bar, tearoff=0)
         if self.with_grid:
             self.edit_menu.add_command(
-                label="Add Grid", command=self.add_grid, accelerator="Ctrl-A", state=tk.DISABLED
+                label="Add Grid",
+                font=self.font,
+                command=self.add_grid,
+                accelerator="Ctrl-A",
+                state=tk.DISABLED,
             )
             self.edit_menu.add_command(
-                label="Remove Grid", command=self.remove_grid, accelerator="Ctrl-D", state=tk.DISABLED
+                label="Remove Grid",
+                font=self.font,
+                command=self.remove_grid,
+                accelerator="Ctrl-D",
+                state=tk.DISABLED,
             )
-        self.edit_menu.add_command(label="Undo", command=self.undo, accelerator="Ctrl-Z", state=tk.DISABLED)
-        self.menu_bar.add_cascade(label="Edit", menu=self.edit_menu)
+        self.edit_menu.add_command(
+            label="Undo",
+            font=self.font,
+            command=self.undo,
+            accelerator="Ctrl-Z",
+            state=tk.DISABLED,
+        )
+        self.menu_bar.add_cascade(label="Edit", font=self.font, menu=self.edit_menu)
+
+        self.help_menu = tk.Menu(self.menu_bar, tearoff=0)
+        self.help_menu.add_command(label="Help", font=self.font, command=self.show_help)
+        self.menu_bar.add_cascade(label="Help", font=self.font, menu=self.help_menu)
 
         if self.with_grid:
             # Create a frame for the second menu and "Current Selection" OptionMenu
@@ -269,7 +555,7 @@ class FigureAnnotator:
 
             # Add "Active Grid" ComboBox to the grid_selection_frame
             self.grid_selection_menu_label = tk.Label(
-                self.grid_selection_frame, text="Active Grid"
+                self.grid_selection_frame, text="Active Grid", font=self.font
             )
             self.grid_selection_menu_label.grid(row=0, column=0)
             self.grid_selection_default_value = "Non-grid mode"
@@ -284,6 +570,8 @@ class FigureAnnotator:
                 self.grid_selection_frame,
                 textvariable=self.grid_selection_var,
                 values=self.grid_selection_options,
+                font=self.font,
+                state="readonly",
             )
             self.grid_selection_menu.grid(row=0, column=1, padx=10)
 
@@ -296,18 +584,17 @@ class FigureAnnotator:
         self.points: List[Tuple] = []  # Points relative to the original image
         self.displayed_points: List[Tuple] = []  # Points relative to the resized image
         self.polygon_ids: List[int] = []  # Store polygon IDs for undo
+        self.saved_data = [[]]
 
         if self.with_grid:
             self.grids: Dict[int, Grid] = {}  # Grids
+            self.saved_data.append({})
 
         self.original_width = 0  # Store original image width
         self.original_height = 0  # Store original image height
         self.current_width = 0  # Current width of the displayed image
         self.current_height = 0  # Current height of the displayed image
         self.aspect_ratio = 1.0  # Aspect ratio of the original image
-        
-        # Constants
-        self.line_width = 1
 
         # Dragging state
         self.dragging_polygon_id = None  # The polygon ID being dragged
@@ -340,7 +627,8 @@ class FigureAnnotator:
         self.root.bind_all("<Control-o>", self.open_image)
         self.root.bind_all("<Control-a>", self.add_grid)
         self.root.bind_all("<Control-d>", self.remove_grid)
-        self.root.bind_all("<Control-s>", self.save_as_json)
+        self.root.bind_all("<Control-s>", self.save)
+        self.root.bind_all("<Control-S>", self.save_to_file)
         self.root.bind_all("<Control-z>", self.undo)
         self.root.bind_all("<Escape>", self.process_esc)
 
@@ -378,8 +666,10 @@ class FigureAnnotator:
         self.root.geometry(f"{self.original_width}x{self.original_height}")
 
         self.update_image(self.original_image)
+        self.file_menu.entryconfig("Save", state=tk.NORMAL)
         self.file_menu.entryconfig("Save As...", state=tk.NORMAL)
-        self.edit_menu.entryconfig("Add Grid", state=tk.NORMAL)
+        if self.with_grid:
+            self.edit_menu.entryconfig("Add Grid", state=tk.NORMAL)
 
     def update_image(self, image):
         """Helper function to update the image on the canvas."""
@@ -412,9 +702,9 @@ class FigureAnnotator:
 
     def update_grid_menu(self):
         """Update the dropdown menu listing all of the present grids."""
-        self.grid_selection_options = [self.grid_selection_options[0]] + sorted(
-            [self.grid_idx_to_key(v) for v in self.grids.keys()]
-        )
+        self.grid_selection_options = [self.grid_selection_options[0]] + [
+            self.grid_idx_to_key(v) for v in sorted(self.grids.keys())
+        ]
         self.grid_selection_menu["values"] = self.grid_selection_options
         if self.added_grid_id:
             self.grid_selection_var.set(self.added_grid_id)
@@ -455,30 +745,15 @@ class FigureAnnotator:
 
             if cur_sel is not None:
                 grid = self.grids[cur_sel]
-
                 points_len = len(grid.points)
-                if points_len >= 4:  # Add intermediate point to grid
-                    if points_len % 2 == 0:
-                        scaled_y = FigureAnnotator.lin_func(
-                            grid.top_m, grid.top_b, scaled_x
-                        )
-                    else:
-                        scaled_y = FigureAnnotator.lin_func(
-                            grid.bottom_m, grid.bottom_b, scaled_x
-                        )
 
                 if (
-                    points_len > 4 and points_len % 2 == 1
+                    points_len > 4 and points_len % 2 == 1 and len(grid.ids) > 1
                 ):  # Remove most recent intermediate polygon (if such exists)
-                    if len(grid.ids) > 1:
-                        self.canvas.delete(grid.ids.pop())
+                    self.canvas.delete(grid.ids.pop())
 
-                # Add new point
-                (
-                    grid.points.insert(-2, (scaled_x, scaled_y))
-                    if points_len >= 4
-                    else grid.points.append((scaled_x, scaled_y))
-                )
+                # Add new point to grid
+                grid.process_point_addition((scaled_x, scaled_y))
                 grid.update_displayed_points(
                     self.current_width,
                     self.current_height,
@@ -486,19 +761,19 @@ class FigureAnnotator:
                     self.original_height,
                 )
 
+                # Draw added point
                 points_len = len(grid.points)
                 self.draw_point(
                     grid.displayed_points[-3 if points_len > 4 else -1], cur_sel
                 )
 
-                if (
-                    points_len == 4
-                ):  # Determine parameters of minimally-complete grid and draw on canvas
-                    grid.update_grid_parameters()
+                # Draw main grid and label (if it was just created)
+                if points_len == 4:
                     self.draw_polygon(grid.get_grid_polygons()[-1], cur_sel)
-                if (
-                    points_len > 4 and points_len % 2 == 0
-                ):  # Add new intermediate polygons (if such are created)
+                    self.draw_grid_label(grid)
+
+                # Draw new intermediate zones (if such are created)
+                if points_len > 4 and points_len % 2 == 0:
                     polygons = grid.get_grid_polygons()
                     self.draw_polygon(polygons[-2], cur_sel)
                     self.draw_polygon(polygons[-1], cur_sel)
@@ -510,7 +785,7 @@ class FigureAnnotator:
 
                 if len(self.displayed_points) % self.num_vertices == 0:
                     self.draw_polygon(self.displayed_points[-self.num_vertices :])
-            
+
             if self.points or self.with_grid and self.grids:
                 self.edit_menu.entryconfig("Undo", state=tk.NORMAL)
 
@@ -526,7 +801,10 @@ class FigureAnnotator:
                 temp_polygon = grid.get_temp_polygon()[0] + [(event.x, event.y)]
                 if len(temp_polygon) > 1:
                     self.canvas.create_line(
-                        temp_polygon, fill="yellow", tags="temp_polygon", width=self.line_width
+                        temp_polygon,
+                        fill="yellow",
+                        tags="temp_polygon",
+                        width=self.line_width,
                     )
             else:
                 if len(self.displayed_points) % self.num_vertices != 0:
@@ -534,7 +812,10 @@ class FigureAnnotator:
                         -(len(self.displayed_points) % self.num_vertices) :
                     ] + [(event.x, event.y)]
                     self.canvas.create_line(
-                        current_polygon, fill="yellow", tags="temp_polygon", width=self.line_width
+                        current_polygon,
+                        fill="yellow",
+                        tags="temp_polygon",
+                        width=self.line_width,
                     )
 
         if self.dragging_polygon_id is not None:
@@ -558,7 +839,11 @@ class FigureAnnotator:
 
             # Right Click: Move a specific point
             cur_sel = self.get_cur_sel()
-            points = self.grids[cur_sel].displayed_points if cur_sel is not None else self.displayed_points
+            points = (
+                self.grids[cur_sel].displayed_points
+                if cur_sel is not None
+                else self.displayed_points
+            )
             clicked_point, point_index = self.find_point(event.x, event.y, points)
 
             if clicked_point is not None:
@@ -577,7 +862,9 @@ class FigureAnnotator:
             # Ctrl + Right Click: Drag entire polygon
             cur_sel = self.get_cur_sel()
             ids = self.grids[cur_sel].ids if cur_sel is not None else self.polygon_ids
-            clicked_polygon_id, polygon_point_index = self.find_polygon(event.x, event.y, ids)
+            clicked_polygon_id, polygon_point_index = self.find_polygon(
+                event.x, event.y, ids
+            )
             if clicked_polygon_id is not None:
                 self.dragging_polygon_id = clicked_polygon_id
                 self.dragging_polygon_offset_start = self.dragging_polygon_offset = (
@@ -589,52 +876,42 @@ class FigureAnnotator:
     def update_dragging_point(self, point, cur_sel):
         if cur_sel is not None:
             grid = self.grids[cur_sel]
-            dragging_point_idx = self.dragging_point_idx
-            grid.points[dragging_point_idx] = (
+            dpi = self.dragging_point_idx
+
+            # Scale dragged point to original dimensions
+            grid.points[dpi] = (
                 int(point[0] * self.original_width / self.current_width),
                 int(point[1] * self.original_height / self.current_height),
             )
-            if dragging_point_idx < 2 or dragging_point_idx >= len(grid.displayed_points) - 2:
-                # corner anchor point
+
+            # Modify grid points based on the change to the dragged point
+            if dpi < 2 or dpi >= len(grid.displayed_points) - 2:
+                # corner anchor point: modify grid parameters, scale intermediate points
                 grid.update_grid_parameters()
                 for i in range(2, len(grid.points) - 2):
-                    if i % 2 == 0:
-                        grid.points[i] = (
-                            grid.points[i][0],
-                            FigureAnnotator.lin_func(
-                                grid.top_m, grid.top_b, grid.points[i][0]
-                            )
-                        )
-                    else:
-                        grid.points[i] = (
-                            grid.points[i][0],
-                            FigureAnnotator.lin_func(
-                                grid.bottom_m, grid.bottom_b, grid.points[i][0]
-                            )
-                        )
+                    grid.points[i] = grid.scale_point(grid.points[i], i)
             else:
-                # intermediate anchor point
-                if dragging_point_idx % 2 == 0:
-                    grid.points[dragging_point_idx] = (
-                        grid.points[dragging_point_idx][0],
-                        FigureAnnotator.lin_func(
-                            grid.top_m, grid.top_b, grid.points[dragging_point_idx][0]
-                        )
-                    )
-                else:
-                    grid.points[dragging_point_idx] = (
-                        grid.points[dragging_point_idx][0],
-                        FigureAnnotator.lin_func(
-                            grid.bottom_m, grid.bottom_b, grid.points[dragging_point_idx][0]
-                        )
-                    )
-            grid.update_displayed_points(self.current_width, self.current_height, self.original_width, self.original_height)
+                # intermediate anchor point: scale it based on grid parameters
+                grid.points[dpi] = grid.scale_point(grid.points[dpi], dpi)
+
+            # Update displayed grid points
+            grid.update_displayed_points(
+                self.current_width,
+                self.current_height,
+                self.original_width,
+                self.original_height,
+            )
         else:
+            # Update displayed dragged point
             self.displayed_points[self.dragging_point_idx] = point
+
+            # Scale dragged point to original dimensions
             self.points[self.dragging_point_idx] = (
                 int(point[0] * self.original_width / self.current_width),
                 int(point[1] * self.original_height / self.current_height),
             )
+
+        # Re-draw all figures
         self.redraw_polygons()
 
     def update_dragging_polygon(self, offset, cur_sel):
@@ -692,6 +969,8 @@ class FigureAnnotator:
                 grid.ids, grid.get_grid_polygons()
             ):
                 self.canvas.coords(disp_polygon_id, *sum(disp_polygon, []))
+            self.remove_grid_label(grid)
+            self.draw_grid_label(grid)
         else:
             self.canvas.coords(
                 self.dragging_polygon_id,
@@ -736,11 +1015,6 @@ class FigureAnnotator:
             / ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
         )
         return dist < 5  # Threshold distance to be "near" the line
-
-    @staticmethod
-    def lin_func(m, b, x):
-        """Return y-coordinate for a given x-coordinate based on line defined by slope and y-intercept."""
-        return m * x + b
 
     def get_cur_sel(self):
         """Returns current selection for editing."""
@@ -806,6 +1080,7 @@ class FigureAnnotator:
                 self.canvas.delete(self.get_tag("polygon", idx))
                 self.canvas.delete(self.get_tag("point", idx))
                 grid = self.grids[idx]
+                self.remove_grid_label(grid)
                 grid.ids.clear()
                 grid.update_grid_parameters()
                 if len(grid.displayed_points) >= 4:
@@ -815,6 +1090,7 @@ class FigureAnnotator:
                         self.draw_point(point, idx)
                     for poly in grid.get_grid_polygons():
                         self.draw_polygon(poly, idx)
+                    self.draw_grid_label(grid)
 
     def grid_key_to_idx(self, key: str):
         return int(key.lstrip("Grid "))
@@ -825,29 +1101,89 @@ class FigureAnnotator:
     def add_grid(self, event=None):
         """Add grid."""
         if self.image_tk:
-            grid_ids = list(self.grids.keys())
+            grid_ids = sorted(list(self.grids.keys()))
             new_grid_id = next(
                 (i for i, num in enumerate(grid_ids) if i != num), len(grid_ids)
             )
-            self.grids[new_grid_id] = Grid()
+            self.grids[new_grid_id] = Grid(str(new_grid_id))
             self.added_grid_id = self.grid_idx_to_key(new_grid_id)
             self.update_grid_menu()
             self.edit_menu.entryconfig("Remove Grid", state=tk.NORMAL)
 
     def remove_grid(self, event=None):
         """Remove grid."""
-        if self.image_tk and all([grid.complete() or not len(grid.points) for grid in self.grids.values()]) and self.dragging_point_idx is None and self.dragging_polygon_id is None:
+        if (
+            self.image_tk
+            and all(
+                [
+                    grid.complete() or not len(grid.points)
+                    for grid in self.grids.values()
+                ]
+            )
+            and self.dragging_point_idx is None
+            and self.dragging_polygon_id is None
+        ):
             cur_sel = self.get_cur_sel()
             if cur_sel is not None:
                 self.canvas.delete(self.get_tag("polygon", cur_sel))
                 self.canvas.delete(self.get_tag("point", cur_sel))
+                grid = self.grids[cur_sel]
+                if grid.complete():
+                    self.remove_grid_label(grid)
                 self.grids.pop(cur_sel)
                 self.update_grid_menu()
-                print(self.grids.values())
                 if len(self.grids.values()) == 0:
                     self.edit_menu.entryconfig("Remove Grid", state=tk.DISABLED)
                     if self.figures_empty():
                         self.edit_menu.entryconfig("Undo", state=tk.DISABLED)
+
+    def draw_grid_label(self, grid: Grid):
+        ref_point = grid.displayed_points[0]
+        center_offset = 10
+        if grid.top_m >= 0:
+            if ref_point[0] < grid.displayed_points[-1][0]:
+                circle_center = (
+                    ref_point[0] - center_offset,
+                    ref_point[1] - center_offset,
+                )
+            else:
+                circle_center = (
+                    ref_point[0] + center_offset,
+                    ref_point[1] + center_offset,
+                )
+        else:
+            if ref_point[0] < grid.displayed_points[-1][0]:
+                circle_center = (
+                    ref_point[0] - center_offset,
+                    ref_point[1] + center_offset,
+                )
+            else:
+                circle_center = (
+                    ref_point[0] + center_offset,
+                    ref_point[1] - center_offset,
+                )
+        label = grid.grid_id
+        tag = self.get_tag("label", label)
+        self.canvas.create_oval(
+            circle_center[0] - 7,
+            circle_center[1] - 7,
+            circle_center[0] + 7,
+            circle_center[1] + 7,
+            fill="yellow",
+            outline="yellow",
+            tags=tag,
+        )
+        self.canvas.create_text(
+            circle_center[0],
+            circle_center[1],
+            text=label,
+            fill="red",
+            font=("Arial", 10, "bold"),
+            tag=tag,
+        )
+
+    def remove_grid_label(self, grid: Grid):
+        self.canvas.delete(self.get_tag("label", grid.grid_id))
 
     def process_esc(self, event=None):
         cur_sel = self.get_cur_sel()
@@ -861,11 +1197,12 @@ class FigureAnnotator:
             self.canvas.delete("temp_polygon")
             if cur_sel is not None:
                 grid = self.grids[cur_sel]
-                print(grid.points, grid.displayed_points)
                 temp_polygon_point_indices = grid.get_temp_polygon()[1]
-                print(temp_polygon_point_indices)
                 if temp_polygon_point_indices:
-                    del grid.points[temp_polygon_point_indices[0]:temp_polygon_point_indices[-1] + 1]
+                    del grid.points[
+                        temp_polygon_point_indices[0] : temp_polygon_point_indices[-1]
+                        + 1
+                    ]
                     grid.update_displayed_points(
                         self.current_width,
                         self.current_height,
@@ -894,7 +1231,7 @@ class FigureAnnotator:
                     if len(self.grids.values()) == 0:
                         self.edit_menu.entryconfig("Remove Grid", state=tk.DISABLED)
                 else:
-                    if points_len >= 4 and points_len % 2 == 0:
+                    if grid.complete():
                         self.canvas.delete(
                             grid.ids.pop()
                         )  # Remove the last polygon of the grid from canvas
@@ -916,6 +1253,8 @@ class FigureAnnotator:
                     )
 
                     points_len = len(points)
+                    if points_len < 4:
+                        self.remove_grid_label(grid)
                     if points_len > 4 and points_len % 2 == 0:
                         polygons = grid.get_grid_polygons()
                         self.draw_polygon(polygons[-1], cur_sel)
@@ -924,7 +1263,10 @@ class FigureAnnotator:
                     temp_polygon = grid.get_temp_polygon()[0]
                     if len(temp_polygon) > 1:
                         self.canvas.create_line(
-                            temp_polygon, fill="yellow", tags="temp_polygon", width=self.line_width
+                            temp_polygon,
+                            fill="yellow",
+                            tags="temp_polygon",
+                            width=self.line_width,
                         )
             elif self.points:
                 if len(self.points) % self.num_vertices == 0 and self.polygon_ids:
@@ -944,20 +1286,29 @@ class FigureAnnotator:
                     ]
                     if len(current_polygon) > 1:
                         self.canvas.create_line(
-                            current_polygon, fill="yellow", tags="temp_polygon", width=self.line_width
+                            current_polygon,
+                            fill="yellow",
+                            tags="temp_polygon",
+                            width=self.line_width,
                         )
-            
+
             if self.figures_empty():
                 self.edit_menu.entryconfig("Undo", state=tk.DISABLED)
 
     def figures_complete(self):
-        return all([grid.complete() for grid in self.grids.values()] if self.with_grid else [True]) and len(self.points) % self.num_vertices == 0
-    
+        return (
+            all(
+                [grid.complete() for grid in self.grids.values()]
+                if self.with_grid
+                else [True]
+            )
+            and len(self.points) % self.num_vertices == 0
+        )
+
     def figures_empty(self):
         return not (self.points or self.with_grid and self.grids)
 
-    def save_as_json(self, event=None):
-        """Saves selected figures to JSON file."""
+    def check_completeness_on_save(self):
         if (
             self.points
             and len(self.points) % self.num_vertices != 0
@@ -970,35 +1321,122 @@ class FigureAnnotator:
             )
         ):
             messagebox.showerror("Error", "No points or insufficient points to save.")
-            return
+            return False
+        return True
 
-        save_path = filedialog.asksaveasfilename(
-            initialfile=self.results_file_name,
-            defaultextension=".json",
-            filetypes=[("JSON files", "*.json")],
+    def data_updated(self):
+        return (
+            self.saved_data[0] != self.points
+            or self.with_grid
+            and self.grids
+            and (
+                len(self.saved_data[1].values()) != len(self.grids.values())
+                or any(
+                    [
+                        saved_grid.points != grid.points
+                        for saved_grid, grid in zip(
+                            self.saved_data[1].values(), self.grids.values()
+                        )
+                    ]
+                )
+            )
         )
-        if save_path:
-            out_json = {
-                "version": object_format_versions[self.figure_type],
-                "type": self.figure_type,
-            }
-            data = [
-                (
-                    [*sum(self.points[i : i + self.num_vertices], ())]
-                    if self.num_vertices == FigureAnnotatorType.LINE.value
-                    else self.points[i : i + self.num_vertices]
-                )
-                for i in range(
-                    0, len(self.points) - self.num_vertices + 1, self.num_vertices
-                )
-            ]
-            if self.with_grid:
-                for grid in self.grids.values():
-                    polygons = grid.get_grid_polygons(display=False)
-                    data.extend(polygons[1:] if len(polygons) > 1 else polygons)
-            out_json["objects"] = data
-            with open(save_path, "w") as f:
-                json.dump(out_json, f, indent=4)
+
+    def save_data(self):
+        self.saved_data = [deepcopy(self.points)]
+        if self.with_grid:
+            self.saved_data.append(deepcopy(self.grids))
+        out_json = {
+            "version": object_format_versions[self.figure_type],
+            "type": self.figure_type,
+        }
+        data = [
+            (
+                [*sum(self.points[i : i + self.num_vertices], ())]
+                if self.num_vertices == FigureAnnotatorType.LINE.value
+                else self.points[i : i + self.num_vertices]
+            )
+            for i in range(
+                0, len(self.points) - self.num_vertices + 1, self.num_vertices
+            )
+        ]
+        if self.with_grid:
+            for grid in self.grids.values():
+                polygons = grid.get_grid_polygons(display=False)
+                data.extend(polygons[1:] if len(polygons) > 1 else polygons)
+        out_json["objects"] = data
+        with open(self.save_path, "w") as f:
+            json.dump(out_json, f, indent=4)
+
+    def save(self, event=None):
+        if self.image_tk:
+            if not self.check_completeness_on_save():
+                return
+            if self.data_updated():
+                if self.save_path:
+                    # Data already saved previously.
+                    self.save_data()
+                else:
+                    # Data has not been saved to a file yet.
+                    self.save_to_file()
+
+    def save_to_file(self, event=None):
+        """Saves selected figures to JSON file."""
+        if self.image_tk:
+            if not self.check_completeness_on_save():
+                return
+
+            self.save_path = filedialog.asksaveasfilename(
+                initialfile=self.results_file_name,
+                defaultextension=".json",
+                filetypes=[("JSON files", "*.json")],
+            )
+            if self.save_path:
+                self.save_data()
+
+    def on_close(self):
+        """Prompt the user before closing the window if there are unsaved changes."""
+        if not self.figures_empty() and self.data_updated():
+            response = messagebox.askyesnocancel(
+                "Unsaved Changes", "You have unsaved changes. Save before exiting?"
+            )
+            if response:  # Yes: Save the changes
+                self.save()
+                self.root.destroy()  # Then close the window
+            elif response is False:  # No: Discard changes and exit
+                self.root.destroy()
+            else:  # Cancel: Do nothing, stay in the application
+                return
+        else:
+            # No unsaved changes, close the window
+            self.root.destroy()
+
+    def get_help_message(self):
+        figure_type = self.figure_type
+        if figure_type == "line":
+            return help_message_line
+        elif figure_type == "zone":
+            if self.num_vertices == FigureAnnotatorType.QUADRILATERAL.value:
+                return help_message_grid
+            else:
+                return help_message_polygon
+
+    def show_help(self):
+        help_window = Toplevel(self.root)
+        help_window.title(f"About {self.figure_type.capitalize()} Annotator")
+        help_window.geometry("1100x500")  # Set the size of the window
+
+        scrollbar = Scrollbar(help_window)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        help_text = Text(
+            help_window, wrap=tk.WORD, yscrollcommand=scrollbar.set, font=self.font
+        )
+
+        help_text.insert(tk.END, self.get_help_message())
+        help_text.config(state=tk.DISABLED)
+        help_text.pack(expand=True, fill=tk.BOTH)
+        scrollbar.config(command=help_text.yview)
 
 
 if __name__ == "__main__":
