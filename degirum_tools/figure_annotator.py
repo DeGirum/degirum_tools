@@ -19,6 +19,7 @@ import numpy as np
 from enum import Enum
 from typing import Tuple, List, Dict, Optional
 from copy import deepcopy
+from pathlib import Path
 
 
 help_message_line = """
@@ -483,7 +484,9 @@ class FigureAnnotator:
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
         # Set window icon
-        self.icon_image = ImageTk.PhotoImage(file="assets/logo.png")
+        self.icon_image = ImageTk.PhotoImage(
+            file=str(Path(__file__).parent.parent) + "/assets/logo.png"
+        )
         self.root.iconphoto(True, self.icon_image)
 
         # Set font

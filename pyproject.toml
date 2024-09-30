@@ -1,5 +1,5 @@
 [tool.mypy]
-files = "degirum_tools,test"
+files = "degirum_tools,test,assets"
 warn_unused_configs = true
 ignore_missing_imports = true
 check_untyped_defs = true
