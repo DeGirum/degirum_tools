@@ -192,6 +192,9 @@ def test_streams_simple_ai(short_video, zoo_dir):
         ai_meta = frame.meta.find_last(streams.tag_inference)
         assert ai_meta is not None
         assert isinstance(ai_meta, dg.postprocessor.InferenceResults)
+        # expect meta in frame info
+        assert isinstance(ai_meta.info, streams.StreamMeta)
+        assert ai_meta.info.find_last(streams.tag_inference) == ai_meta
 
 
 def test_streams_cropping_ai(short_video, zoo_dir):
@@ -218,15 +221,21 @@ def test_streams_cropping_ai(short_video, zoo_dir):
 
         crop_meta = frame.meta.find_last(streams.tag_crop)
         assert crop_meta is not None
+        assert cropper.key_original_result in crop_meta
+        assert cropper.key_cropped_result in crop_meta
+        assert cropper.key_cropped_index in crop_meta
+        assert cropper.key_is_last_crop in crop_meta
+        assert crop_meta[cropper.key_original_result] == ai_meta
 
         if expected_crops == 0:
-            assert cropper.key_original_result in crop_meta
-            assert crop_meta[cropper.key_original_result] == ai_meta
             expected_crops = len(ai_meta.results)
 
         if expected_crops > 0:
-            assert cropper.key_cropped_result in crop_meta
-            assert cropper.key_cropped_index in crop_meta
+            assert (
+                crop_meta[cropper.key_is_last_crop]
+                if expected_crops == 1
+                else not crop_meta[cropper.key_is_last_crop]
+            )
             i = crop_meta[cropper.key_cropped_index]
             r = crop_meta[cropper.key_cropped_result]
 
@@ -239,6 +248,10 @@ def test_streams_cropping_ai(short_video, zoo_dir):
             assert r == ai_meta.results[i]
 
             expected_crops -= 1
+        else:
+            assert crop_meta[cropper.key_is_last_crop]
+            assert crop_meta[cropper.key_cropped_index] == -1
+            assert crop_meta[cropper.key_cropped_result] is None
 
 
 def test_streams_combining_ai(short_video, zoo_dir):

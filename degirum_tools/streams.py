@@ -844,9 +844,10 @@ class AiObjectDetectionCroppingGizmo(Gizmo):
     Output image is the crop of original image.
     Output meta-info is a dictionary with the following keys:
 
-    - "original_result": reference to original AI object detection result (contained only in the first crop)
+    - "original_result": reference to original AI object detection result
     - "cropped_result": reference to sub-result for particular crop
     - "cropped_index": the number of that sub-result
+    - "is_last_crop": the flag indicating that this is the last crop in the frame
     The last two key are present only if at least one object is detected in a frame.
     """
 
@@ -854,6 +855,9 @@ class AiObjectDetectionCroppingGizmo(Gizmo):
     key_original_result = "original_result"  # original AI object detection result
     key_cropped_result = "cropped_result"  # sub-result for particular crop
     key_cropped_index = "cropped_index"  # the number of that sub-result
+    key_is_last_crop = (
+        "is_last_crop"  # the flag indicating that this is the last crop in the frame
+    )
 
     def __init__(
         self,
@@ -891,29 +895,32 @@ class AiObjectDetectionCroppingGizmo(Gizmo):
                 self.send_result(data)
                 continue
 
-            is_first = True
-            for i, r in enumerate(result.results):
-                bbox = r.get("bbox")
-                label = r.get("label")
-                if not bbox or not label or label not in self._labels:
-                    continue
-                crop = Display.crop(result.image, bbox)
+            nresults = len(result.results)
 
-                crop_meta = {}
-                if is_first:
-                    # send whole result first
+            if nresults > 0:
+                for i in range(nresults):
+                    r = result.results[i]
+                    bbox = r.get("bbox")
+                    label = r.get("label")
+                    if not bbox or not label or label not in self._labels:
+                        continue
+                    crop = Display.crop(result.image, bbox)
+
+                    crop_meta = {}
                     crop_meta[self.key_original_result] = result
+                    crop_meta[self.key_cropped_result] = r
+                    crop_meta[self.key_cropped_index] = i
+                    crop_meta[self.key_is_last_crop] = i == nresults - 1
+                    data.meta.append(crop_meta, self.get_tags())
+                    self.send_result(StreamData(crop, data.meta))
 
-                crop_meta[self.key_cropped_result] = r
-                crop_meta[self.key_cropped_index] = i
-                is_first = False
-
-                new_meta = data.meta.clone()
-                new_meta.append(crop_meta, self.get_tags())
-                self.send_result(StreamData(crop, new_meta))
-
-            if is_first:  # no objects detected: send just original result
-                data.meta.append({self.key_original_result: result}, self.get_tags())
+            else:  # no objects detected: send just original result
+                crop_meta = {}
+                crop_meta[self.key_original_result] = result
+                crop_meta[self.key_cropped_result] = None
+                crop_meta[self.key_cropped_index] = -1
+                crop_meta[self.key_is_last_crop] = True
+                data.meta.append(crop_meta, self.get_tags())
                 self.send_result(StreamData(img, data.meta))
 
 
