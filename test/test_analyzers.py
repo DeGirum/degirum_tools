@@ -64,6 +64,10 @@ def test_attach_analyzers():
     assert np.array_equal(result.image_overlay[0, 0], red)
     assert np.array_equal(result.image_overlay[1, 1], green)
 
+    # test result attributes propagation
+    result._inference_results = []
+    assert len(result.results) == 0
+
     # remove second analyzer
     degirum_tools.attach_analyzers(model, None)
     assert model.custom_postprocessor is not None
