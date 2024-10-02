@@ -513,7 +513,7 @@ class FigureAnnotator:
 
         self.root = tk.Tk()
         self.root.title(f"{self.figure_type.capitalize()} Annotator")
-        self.root.geometry("700x405" if self.with_grid else "700x370")
+        self.root.geometry("700x410" if self.with_grid else "700x375")
         self.root.resizable(False, False)
 
         # Override the close button event
@@ -627,7 +627,7 @@ class FigureAnnotator:
                 self.open_image_frame,
                 text="Open Image",
                 command=self.open_image,
-                font=tkFont.Font(family="courier 10 pitch", size=36),
+                font=tkFont.Font(family="courier 10 pitch", size=28),
                 bg=self.darker_theme_color,
                 fg="black",
             )
