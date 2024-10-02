@@ -389,11 +389,13 @@ class Grid:
         return (scaled_x, scaled_y)
 
     def mostly_horizontal(self):
-        guide_top_r = self.points[-1]
-        guide_top_l = self.points[0]
-        return abs(guide_top_r[1] - guide_top_l[1]) < abs(
-            guide_top_r[0] - guide_top_l[0]
-        )
+        if len(self.points) > 1:
+            guide_top_r = self.points[-1]
+            guide_top_l = self.points[0]
+            return abs(guide_top_r[1] - guide_top_l[1]) < abs(
+                guide_top_r[0] - guide_top_l[0]
+            )
+        return True
 
     def update_grid_parameters(self):
         """
