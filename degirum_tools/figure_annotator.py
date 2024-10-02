@@ -589,7 +589,9 @@ class FigureAnnotator:
 
         if self.with_grid:
             # Create a frame for the second menu and "Current Selection" OptionMenu
-            self.grid_selection_frame = tk.Frame(self.main_frame, bg=self.lighter_theme_color)
+            self.grid_selection_frame = tk.Frame(
+                self.main_frame, bg=self.lighter_theme_color
+            )
             self.grid_selection_frame.pack(fill=tk.X, pady=5)
 
             # Add "Active Grid" ComboBox to the grid_selection_frame
