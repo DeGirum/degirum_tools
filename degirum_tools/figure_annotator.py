@@ -17,7 +17,7 @@ import argparse
 import cv2
 import numpy as np
 from enum import Enum
-from typing import Tuple, List, Dict, Optional
+from typing import Tuple, List, Dict, Union, Optional
 from copy import deepcopy
 from pathlib import Path
 
@@ -209,7 +209,11 @@ def _figure_annotator_run(args):
     if args.num_vertices < 2:
         raise ValueError("Number of vertices must be at least 2")
 
-    FigureAnnotator(num_vertices=args.num_vertices, results_file_name=args.save_path)
+    FigureAnnotator(
+        num_vertices=args.num_vertices,
+        image_path=args.img_path,
+        results_file_name=args.save_path,
+    )
 
 
 def _zone_annotator_run(args):
@@ -219,7 +223,7 @@ def _zone_annotator_run(args):
     Args:
         args: argparse command line arguments
     """
-    FigureAnnotator(results_file_name=args.save_path)
+    FigureAnnotator(image_path=args.img_path, results_file_name=args.save_path)
 
 
 def _line_annotator_run(args):
@@ -230,7 +234,9 @@ def _line_annotator_run(args):
         args: argparse command line arguments
     """
     FigureAnnotator(
-        num_vertices=FigureAnnotatorType.LINE.value, results_file_name=args.save_path
+        num_vertices=FigureAnnotatorType.LINE.value,
+        image_path=args.img_path,
+        results_file_name=args.save_path,
     )
 
 
@@ -241,6 +247,13 @@ def _figure_annotator_args(parser):
     Args:
         parser: argparse parser object to be stuffed with args
     """
+    parser.add_argument(
+        "img_path",
+        nargs="?",
+        type=str,
+        default="",
+        help="path to image file for annotation",
+    )
     parser.add_argument(
         "--num-vertices",
         type=int,
@@ -264,6 +277,13 @@ def _zone_annotator_args(parser):
         parser: argparse parser object to be stuffed with args
     """
     parser.add_argument(
+        "img_path",
+        nargs="?",
+        type=str,
+        default="",
+        help="path to image file for annotation",
+    )
+    parser.add_argument(
         "--save-path",
         type=str,
         default="zones.json",
@@ -279,6 +299,13 @@ def _line_annotator_args(parser):
     Args:
         parser: argparse parser object to be stuffed with args
     """
+    parser.add_argument(
+        "img_path",
+        nargs="?",
+        type=str,
+        default="",
+        help="path to image file for annotation",
+    )
     parser.add_argument(
         "--save-path",
         type=str,
@@ -304,13 +331,13 @@ object_format_versions = {
 class Grid:
     def __init__(self, grid_id: str):
         self.grid_id = grid_id
-        self.ids = []
-        self.points = []
-        self.displayed_points = []
-        self.top_m = 0
-        self.top_b = 0
-        self.bottom_m = 0
-        self.bottom_b = 0
+        self.ids: List[int] = []
+        self.points: List[Tuple[float, float]] = []
+        self.displayed_points: List[Tuple[int, int]] = []
+        self.top_m = 0.0
+        self.top_b = 0.0
+        self.bottom_m = 0.0
+        self.bottom_b = 0.0
 
     def complete(self) -> bool:
         """
@@ -411,7 +438,7 @@ class Grid:
                 )
             )
 
-    def get_temp_polygon(self) -> Tuple[List[Tuple[float]], List[int]]:
+    def get_temp_polygon(self) -> Tuple[List[Tuple[int, int]], List[int]]:
         """
         Returns part of latest incomplete polygon if such exists and indices of points comprising
         this part, empty lists otherwise.
@@ -426,7 +453,11 @@ class Grid:
 
     def get_grid_polygons(self, display: bool = True) -> List[List[Tuple[int]]]:
         """Returns list of polygons defined by grid."""
-        points = self.displayed_points if display else self.points
+        points: Union[List[Tuple[float, float]], List[Tuple[int, int]]] = []
+        if display:
+            points = self.displayed_points
+        else:
+            points = self.points
         polygons = []
         if len(points) >= 4:
             polygons.append(
@@ -461,6 +492,7 @@ class FigureAnnotator:
     def __init__(
         self,
         num_vertices: int = FigureAnnotatorType.QUADRILATERAL.value,
+        image_path: str = "",
         results_file_name: str = "zones.json",
     ):
         self.num_vertices = num_vertices  # Number of vertices for each polygon
@@ -470,6 +502,7 @@ class FigureAnnotator:
         self.with_grid: bool = (
             self.num_vertices == FigureAnnotatorType.QUADRILATERAL.value
         )
+        self.image_path: str = image_path
         self.results_file_name = results_file_name
         self.save_path = ""
 
@@ -478,14 +511,15 @@ class FigureAnnotator:
 
         self.root = tk.Tk()
         self.root.title(f"{self.figure_type.capitalize()} Annotator")
-        self.root.geometry("700x500")
+        self.root.geometry("700x405" if self.with_grid else "700x370")
+        self.root.resizable(False, False)
 
         # Override the close button event
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
         # Set window icon
         self.icon_image = ImageTk.PhotoImage(
-            file=str(Path(__file__).parent) + "/assets/logo.png"
+            file=str(Path(__file__).parent) + "/assets/logo.ico"
         )
         self.root.iconphoto(True, self.icon_image)
 
@@ -493,10 +527,10 @@ class FigureAnnotator:
         self.font = tkFont.Font(family="courier 10 pitch", size=12)
 
         # Create the main frame to hold the menu and canvas
-        self.main_frame = tk.Frame(self.root)
+        self.main_frame = tk.Frame(self.root, bg="lightblue")
         self.main_frame.pack(fill=tk.BOTH, expand=True)
 
-        self.menu_bar = tk.Menu(self.root)
+        self.menu_bar = tk.Menu(self.root, bg="#89CFF0")
         self.root.config(menu=self.menu_bar)
 
         self.file_menu = tk.Menu(self.menu_bar, tearoff=0)
@@ -553,12 +587,15 @@ class FigureAnnotator:
 
         if self.with_grid:
             # Create a frame for the second menu and "Current Selection" OptionMenu
-            self.grid_selection_frame = tk.Frame(self.main_frame)
+            self.grid_selection_frame = tk.Frame(self.main_frame, bg="lightblue")
             self.grid_selection_frame.pack(fill=tk.X, pady=5)
 
             # Add "Active Grid" ComboBox to the grid_selection_frame
             self.grid_selection_menu_label = tk.Label(
-                self.grid_selection_frame, text="Active Grid", font=self.font
+                self.grid_selection_frame,
+                text="Active Grid",
+                font=self.font,
+                bg="lightblue",
             )
             self.grid_selection_menu_label.grid(row=0, column=0)
             self.grid_selection_default_value = "Non-grid mode"
@@ -578,20 +615,33 @@ class FigureAnnotator:
             )
             self.grid_selection_menu.grid(row=0, column=1, padx=10)
 
+        self.open_image_frame = None
+        if not self.image_path:
+            self.open_image_frame = tk.Frame(self.main_frame)
+            self.open_image_frame.pack(fill=tk.NONE, padx=150, pady=150)
+            self.open_button = tk.Button(
+                self.open_image_frame,
+                text="Open Image",
+                command=self.open_image,
+                font=tkFont.Font(family="courier 10 pitch", size=36),
+                bg="#89CFF0",
+                fg="black",
+            )
+            self.open_button.grid(row=0, column=3)
+
         self.canvas = tk.Canvas(self.main_frame, cursor="cross")
         self.canvas.pack(fill=tk.BOTH, expand=True)
 
-        self.image_path: str = ""
         self.original_image: Optional[Image.Image] = None  # Store the original image
         self.image_tk: Optional[ImageTk.PhotoImage] = None
         self.points: List[Tuple] = []  # Points relative to the original image
         self.displayed_points: List[Tuple] = []  # Points relative to the resized image
         self.polygon_ids: List[int] = []  # Store polygon IDs for undo
-        self.saved_data = [[]]
+        self.saved_points: List = []
 
         if self.with_grid:
             self.grids: Dict[int, Grid] = {}  # Grids
-            self.saved_data.append({})
+            self.saved_grids: Dict[int, Grid] = {}
 
         self.original_width = 0  # Store original image width
         self.original_height = 0  # Store original image height
@@ -600,20 +650,26 @@ class FigureAnnotator:
         self.aspect_ratio = 1.0  # Aspect ratio of the original image
 
         # Dragging state
-        self.dragging_polygon_id = None  # The polygon ID being dragged
-        self.dragging_polygon_offset: Optional[Tuple] = (
-            None  # The offset from the click position to the vertices
-        )
-        self.dragging_polygon_offset_start: Optional[Tuple] = (
-            None  # The starting offset from the click position to the vertices
-        )
-        self.dragging_polygon_point_index = (
-            None  # The index of the points in `self.points` being dragged
-        )
+        self.dragging_polygon_id: int = -1  # The polygon ID being dragged
+        self.dragging_polygon_offset: Tuple[int, int] = (
+            0,
+            0,
+        )  # The offset from the click position to the vertices
+        self.dragging_polygon_offset_start: Tuple[int, int] = (
+            0,
+            0,
+        )  # The starting offset from the click position to the vertices
+        self.dragging_polygon_point_index: int = (
+            -1
+        )  # The index of the points in `self.points` being dragged
         self.dragging_point_start = (
             None  # The starting coordinates of the dragged point
         )
-        self.dragging_point_idx = None  # The index of the point being dragged
+        self.dragging_point_idx: int = -1  # The index of the point being dragged
+
+        # Load image if path is provided
+        if self.image_path:
+            self.load_image()
 
         # Bind mouse-controlled actions
         self.canvas.bind("<Button-1>", self.on_click)
@@ -648,6 +704,14 @@ class FigureAnnotator:
 
     def load_image(self):
         """Loads image."""
+        # Remove "Open Image" button if necessary, and make window resizable
+        if self.open_image_frame:
+            self.open_image_frame.destroy()
+            del self.open_button
+            del self.open_image_frame
+
+        self.root.resizable(True, True)
+
         # Clear the canvas before loading a new image
         self.canvas.delete("all")
         self.points.clear()
@@ -737,8 +801,8 @@ class FigureAnnotator:
         """Processes point addition."""
         if (
             self.image_tk
-            and self.dragging_polygon_id is None
-            and self.dragging_point_idx is None
+            and self.dragging_polygon_id < 0
+            and self.dragging_point_idx < 0
             and event.x <= self.current_width
             and event.y <= self.current_height
         ):
@@ -821,22 +885,22 @@ class FigureAnnotator:
                         width=self.line_width,
                     )
 
-        if self.dragging_polygon_id is not None:
+        if self.dragging_polygon_id >= 0:
             # Move entire polygon
             offset = (event.x, event.y)
             self.update_dragging_polygon(offset, cur_sel)
             self.dragging_polygon_offset = offset
 
-        if self.dragging_point_idx is not None:
+        if self.dragging_point_idx >= 0:
             # Move an individual point
             self.update_dragging_point((event.x, event.y), cur_sel)
 
     def on_right_click(self, event):
         """Processes movement of selected point."""
-        if self.figures_complete() and self.dragging_polygon_id is None:
-            if self.dragging_point_idx is not None:
+        if self.figures_complete() and self.dragging_polygon_id < 0:
+            if self.dragging_point_idx >= 0:
                 # Complete the drag operation
-                self.dragging_point_idx = None
+                self.dragging_point_idx = -1
                 self.redraw_polygons()
                 return
 
@@ -855,10 +919,10 @@ class FigureAnnotator:
 
     def on_right_click_and_ctrl(self, event):
         """Processes movement of selected polygon."""
-        if self.figures_complete() and self.dragging_point_idx is None:
-            if self.dragging_polygon_id is not None:
+        if self.figures_complete() and self.dragging_point_idx < 0:
+            if self.dragging_polygon_id >= 0:
                 # Complete the drag operation
-                self.dragging_polygon_id = None
+                self.dragging_polygon_id = -1
                 self.redraw_polygons()
                 return
 
@@ -1030,7 +1094,7 @@ class FigureAnnotator:
         else:
             return None
 
-    def get_tag(self, prefix="", grid_idx=None):
+    def get_tag(self, prefix: str = "", grid_idx=None) -> str:
         """Returns selection-specific tag for a given canvas element type"""
         tag = prefix
         if grid_idx is not None:
@@ -1123,8 +1187,8 @@ class FigureAnnotator:
                     for grid in self.grids.values()
                 ]
             )
-            and self.dragging_point_idx is None
-            and self.dragging_polygon_id is None
+            and self.dragging_point_idx < 0
+            and self.dragging_polygon_id < 0
         ):
             cur_sel = self.get_cur_sel()
             if cur_sel is not None:
@@ -1182,7 +1246,7 @@ class FigureAnnotator:
             text=label,
             fill="red",
             font=("Arial", 10, "bold"),
-            tag=tag,
+            tags=tag,
         )
 
     def remove_grid_label(self, grid: Grid):
@@ -1190,12 +1254,12 @@ class FigureAnnotator:
 
     def process_esc(self, event=None):
         cur_sel = self.get_cur_sel()
-        if self.dragging_point_idx is not None:
+        if self.dragging_point_idx >= 0:
             self.update_dragging_point(self.dragging_point_start, cur_sel)
-            self.dragging_point_idx = None
-        elif self.dragging_polygon_id is not None:
+            self.dragging_point_idx = -1
+        elif self.dragging_polygon_id >= 0:
             self.update_dragging_polygon(self.dragging_polygon_offset_start, cur_sel)
-            self.dragging_polygon_id = None
+            self.dragging_polygon_id = -1
         elif self.image_tk:
             self.canvas.delete("temp_polygon")
             if cur_sel is not None:
@@ -1222,7 +1286,7 @@ class FigureAnnotator:
 
     def undo(self, event=None):
         """Processes point deletion."""
-        if self.dragging_polygon_id is None and self.dragging_point_idx is None:
+        if self.dragging_polygon_id < 0 and self.dragging_point_idx < 0:
             cur_sel = self.get_cur_sel()
             if cur_sel is not None:
                 grid = self.grids[cur_sel]
@@ -1329,16 +1393,16 @@ class FigureAnnotator:
 
     def data_updated(self):
         return (
-            self.saved_data[0] != self.points
+            self.saved_points != self.points
             or self.with_grid
             and self.grids
             and (
-                len(self.saved_data[1].values()) != len(self.grids.values())
+                len(self.saved_grids.values()) != len(self.grids.values())
                 or any(
                     [
                         saved_grid.points != grid.points
                         for saved_grid, grid in zip(
-                            self.saved_data[1].values(), self.grids.values()
+                            self.saved_grids.values(), self.grids.values()
                         )
                     ]
                 )
@@ -1346,9 +1410,9 @@ class FigureAnnotator:
         )
 
     def save_data(self):
-        self.saved_data = [deepcopy(self.points)]
+        self.saved_points = deepcopy(self.points)
         if self.with_grid:
-            self.saved_data.append(deepcopy(self.grids))
+            self.saved_grids = deepcopy(self.grids)
         out_json = {
             "version": object_format_versions[self.figure_type],
             "type": self.figure_type,
