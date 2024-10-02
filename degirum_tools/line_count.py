@@ -204,6 +204,7 @@ class LineCounter(ResultAnalyzerBase):
         self._lazy_init()
 
         if not hasattr(result, "trails") or len(result.trails) == 0:
+            result.line_counts = deepcopy(self._line_counts)
             return
 
         new_trails = set(result.trails.keys())
