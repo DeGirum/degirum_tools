@@ -508,6 +508,8 @@ class FigureAnnotator:
 
         # Constants
         self.line_width = 1
+        self.darker_theme_color = "#89CFF0"
+        self.lighter_theme_color = "lightblue"
 
         self.root = tk.Tk()
         self.root.title(f"{self.figure_type.capitalize()} Annotator")
@@ -527,10 +529,10 @@ class FigureAnnotator:
         self.font = tkFont.Font(family="courier 10 pitch", size=12)
 
         # Create the main frame to hold the menu and canvas
-        self.main_frame = tk.Frame(self.root, bg="lightblue")
+        self.main_frame = tk.Frame(self.root, bg=self.lighter_theme_color)
         self.main_frame.pack(fill=tk.BOTH, expand=True)
 
-        self.menu_bar = tk.Menu(self.root, bg="#89CFF0")
+        self.menu_bar = tk.Menu(self.root, bg=self.darker_theme_color)
         self.root.config(menu=self.menu_bar)
 
         self.file_menu = tk.Menu(self.menu_bar, tearoff=0)
@@ -587,7 +589,7 @@ class FigureAnnotator:
 
         if self.with_grid:
             # Create a frame for the second menu and "Current Selection" OptionMenu
-            self.grid_selection_frame = tk.Frame(self.main_frame, bg="lightblue")
+            self.grid_selection_frame = tk.Frame(self.main_frame, bg=self.lighter_theme_color)
             self.grid_selection_frame.pack(fill=tk.X, pady=5)
 
             # Add "Active Grid" ComboBox to the grid_selection_frame
@@ -595,7 +597,7 @@ class FigureAnnotator:
                 self.grid_selection_frame,
                 text="Active Grid",
                 font=self.font,
-                bg="lightblue",
+                bg=self.lighter_theme_color,
             )
             self.grid_selection_menu_label.grid(row=0, column=0)
             self.grid_selection_default_value = "Non-grid mode"
@@ -624,7 +626,7 @@ class FigureAnnotator:
                 text="Open Image",
                 command=self.open_image,
                 font=tkFont.Font(family="courier 10 pitch", size=36),
-                bg="#89CFF0",
+                bg=self.darker_theme_color,
                 fg="black",
             )
             self.open_button.grid(row=0, column=3)
