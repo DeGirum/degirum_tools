@@ -509,7 +509,7 @@ class VideoSourceGizmo(Gizmo):
         """
         super().__init__()
         self._video_source = video_source
-        self._stop_composition_on_end = stop_composition_on_end
+        self._stop_composition_on_end = stop_composition_on_end and not get_test_mode()
 
     def get_tags(self) -> List[str]:
         """Get list of tags assigned to this gizmo"""
