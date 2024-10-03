@@ -272,7 +272,7 @@ def test_streams_combining_ai(short_video, zoo_dir):
     sink = VideoSink()
 
     streams.Composition(
-        *(source >> ai[i] >> combiner[i] for i in range(N)), combiner >> sink
+        (source >> ai[i] >> combiner[i] for i in range(N)), combiner >> sink
     ).start()
 
     for frame in sink.frames:

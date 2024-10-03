@@ -15,7 +15,7 @@ import cv2
 import numpy
 
 from abc import ABC, abstractmethod
-from typing import Optional, Any, List, Dict, Union
+from typing import Optional, Any, List, Dict, Union, Iterator
 from contextlib import ExitStack
 from .environment import get_test_mode
 from .video_support import open_video_stream, open_video_writer
@@ -121,12 +121,23 @@ class StreamData:
 class Stream(queue.Queue):
     """Queue-based iterable class with optional item drop"""
 
+    # minimum queue size to avoid deadlocks:
+    # one for stray result, one for poison pill in request_stop(),
+    # and one for poison pill gizmo_run()
+    min_queue_size = 3
+
     def __init__(self, maxsize=0, allow_drop: bool = False):
         """Constructor
 
         - maxsize: maximum stream depth; 0 for unlimited depth
         - allow_drop: allow dropping elements on put() when stream is full
         """
+
+        if maxsize < self.min_queue_size and maxsize != 0:
+            raise Exception(
+                f"Incorrect stream depth: {maxsize}. Should be 0 (unlimited) or at least {self.min_queue_size}"
+            )
+
         super().__init__(maxsize)
         self.allow_drop = allow_drop
         self.dropped_cnt = 0  # number of dropped items
@@ -284,7 +295,7 @@ class Gizmo(ABC):
         """
         self.result_cnt += 1
         for out in self._output_refs:
-            if data is None:
+            if data == Stream._poison or data is None:
                 out.close()
             else:
                 # clone meta to avoid cross-modifications by downstream gizmos in tree-like pipelines
@@ -328,10 +339,10 @@ class Composition:
     Then you start your composition by calling start() method.
     You may stop your composition by calling stop() method."""
 
-    def __init__(self, *gizmos):
+    def __init__(self, *gizmos: Union[Gizmo, Iterator[Gizmo]]):
         """Constructor.
 
-        - gizmos: optional list of gizmos to add to composition
+        - gizmos: optional list of gizmos or tuples of gizmos to add to composition
         """
 
         self._threads: List[threading.Thread] = []
@@ -339,7 +350,13 @@ class Composition:
         # collect all connected gizmos
         all_gizmos: set = set()
         for g in gizmos:
-            all_gizmos |= g.get_connected()
+            if isinstance(g, Iterator):
+                for gi in g:
+                    all_gizmos |= gi.get_connected()
+            elif isinstance(g, Gizmo):
+                all_gizmos |= g.get_connected()
+            else:
+                raise Exception(f"Invalid argument type {type(g)}")
 
         self._gizmos: List[Gizmo] = list(all_gizmos)
         for g in self._gizmos:
@@ -484,13 +501,15 @@ class VideoSourceGizmo(Gizmo):
     key_fps = "fps"  # stream frame rate
     key_frame_count = "frame_count"  # total stream frame count
 
-    def __init__(self, video_source=None):
+    def __init__(self, video_source=None, *, stop_composition_on_end: bool = False):
         """Constructor.
 
         - video_source: cv2.VideoCapture-compatible video source designator
+        - stop_composition_on_end: stop composition when video source is over
         """
         super().__init__()
         self._video_source = video_source
+        self._stop_composition_on_end = stop_composition_on_end
 
     def get_tags(self) -> List[str]:
         """Get list of tags assigned to this gizmo"""
@@ -510,11 +529,17 @@ class VideoSourceGizmo(Gizmo):
             while not self._abort:
                 ret, data = src.read()
                 if not ret:
-                    self._abort = True
+                    break
                 else:
                     self.send_result(
                         StreamData(data, StreamMeta(meta, self.get_tags()))
                     )
+
+            if self._stop_composition_on_end:
+                # stop composition if video source is over;
+                # needed to stop other branches of the pipeline, like video sources, which are not over yet
+                if self.composition is not None and not self._abort:
+                    self.composition.stop()
 
 
 class VideoDisplayGizmo(Gizmo):
@@ -551,6 +576,8 @@ class VideoDisplayGizmo(Gizmo):
         self._window_titles = window_titles
         self._show_fps = show_fps
         self._show_ai_overlay = show_ai_overlay
+        if multiplex and allow_drop:
+            raise Exception("Frame multiplexing with frame dropping is not supported")
         self._multiplex = multiplex
         self._frames: list = []  # saved frames for tests
 
@@ -568,7 +595,7 @@ class VideoDisplayGizmo(Gizmo):
             ]
             first_run = [True] * ndisplays
 
-            di = 0  # di is display index
+            di = -1  # di is display index
             try:
                 while True:
                     if self._abort:
