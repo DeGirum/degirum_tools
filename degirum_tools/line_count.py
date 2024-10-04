@@ -204,6 +204,7 @@ class LineCounter(ResultAnalyzerBase):
         self._lazy_init()
 
         if not hasattr(result, "trails") or len(result.trails) == 0:
+            result.line_counts = deepcopy(self._line_counts)
             return
 
         new_trails = set(result.trails.keys())
@@ -548,22 +549,30 @@ class LineCounter(ResultAnalyzerBase):
                     self._gui_state["dragging"] = line
                     self._gui_state["offset"] = click_point
                     self._gui_state["update"] = idx
+                    self._gui_state["type"] = "line"
                     break
 
         if event == cv2.EVENT_RBUTTONDOWN:
             for idx, line in enumerate(self._lines):
-                for pt in [line[:2], line[2:]]:
-                    if np.linalg.norm(pt - click_point) < 10:
+                for i in range(0, len(line), 2):
+                    if np.linalg.norm(line[i : i + 2] - click_point) < 10:
                         line_update()
-                        self._gui_state["dragging"] = pt
+                        self._gui_state["dragging"] = line
                         self._gui_state["offset"] = click_point
                         self._gui_state["update"] = idx
+                        self._gui_state["type"] = "point"
+                        self._gui_state["point_idx"] = i
                         break
 
         elif event == cv2.EVENT_MOUSEMOVE:
             if self._gui_state["dragging"] is not None:
                 delta = click_point - self._gui_state["offset"]
-                self._gui_state["dragging"] += delta
+                if self._gui_state["type"] == "line":
+                    for i in range(0, len(self._gui_state["dragging"]), 2):
+                        self._gui_state["dragging"][i : i + 2] += delta
+                elif self._gui_state["type"] == "point":
+                    i = self._gui_state["point_idx"]
+                    self._gui_state["dragging"][i : i + 2] += delta
                 self._gui_state["offset"] = click_point
 
         elif event == cv2.EVENT_LBUTTONUP or event == cv2.EVENT_RBUTTONUP:

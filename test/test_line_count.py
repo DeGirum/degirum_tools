@@ -42,7 +42,20 @@ def test_line_counter():
     lines = [(40, 50, 110, 140)]
 
     test_cases: List[dict] = [
-        {"case": "No trails", "params": {"lines": lines}, "inp": [{}]},
+        {
+            "case": "No trails",
+            "params": {"lines": lines},
+            "inp": [{}],
+            "res": [
+                [
+                    {
+                        "for_class": {},
+                        "right": 0,
+                        "left": 0,
+                    }
+                ]
+            ],
+        },
         {
             "case": "Incomplete trail",
             "params": {"lines": lines},
@@ -454,19 +467,14 @@ def test_line_counter():
 
             line_counter.analyze(result)
 
-            if "res" not in case:
-                assert not hasattr(
-                    result, "line_counts"
-                ), f"Case {ci} failed at step {i}: result has line_counts field."
-            else:
-                res = (
-                    ResSingleLineCounts(**case["res"][i][0])
-                    if "top" in case["res"][i][0].keys()
-                    else ResSingleVectorCounts(**case["res"][i][0])
-                )
-                assert result.line_counts[0] == res, (  # type: ignore[attr-defined]
-                    f"Case `{case['case']}` failed at step {i}: "
-                    + f"line counts `{result.line_counts}` "  # type: ignore[attr-defined]
-                    + f"do not match expected `{case['res'][i]}`."
-                    + f"\nConfig: {case['params']}"
-                )
+            res = (
+                ResSingleLineCounts(**case["res"][i][0])
+                if "top" in case["res"][i][0].keys()
+                else ResSingleVectorCounts(**case["res"][i][0])
+            )
+            assert result.line_counts[0] == res, (  # type: ignore[attr-defined]
+                f"Case `{case['case']}` failed at step {i}: "
+                + f"line counts `{result.line_counts}` "  # type: ignore[attr-defined]
+                + f"do not match expected `{case['res'][i]}`."
+                + f"\nConfig: {case['params']}"
+            )
