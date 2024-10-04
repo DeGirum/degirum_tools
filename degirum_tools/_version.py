@@ -6,5 +6,5 @@
 #
 
 # >>> increment version here vvv
-__version_info__ = ("0", "12", "5")
+__version_info__ = ("0", "13", "0")
 __version__ = ".".join(__version_info__)
