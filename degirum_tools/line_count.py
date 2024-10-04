@@ -156,7 +156,7 @@ class LineCounter(ResultAnalyzerBase):
             window_name (str, optional): optional OpenCV window name to configure for interactive line adjustment
         """
 
-        self._lines = lines
+        self._lines = [list(line) for line in lines]
         self._line_vectors = [self._line_to_vector(line) for line in lines]
         self._anchor_point = anchor_point
         self._whole_trail = whole_trail
