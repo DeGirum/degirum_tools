@@ -87,11 +87,11 @@ def _create_analyzing_postprocessor_class(
         def __init__(self, *args, **kwargs):
             if AnalyzingPostprocessor._postprocessor_type is not None:
                 # create postprocessor of proper type
-                self._result = AnalyzingPostprocessor._postprocessor_type(
+                self.__dict__["_result"] = AnalyzingPostprocessor._postprocessor_type(
                     *args, **kwargs
                 )
             else:
-                self._result = kwargs.get("result")
+                self.__dict__["_result"] = kwargs.get("result")
 
             # apply all analyzers to analyze result
             for analyzer in AnalyzingPostprocessor._analyzers:
@@ -112,6 +112,12 @@ def _create_analyzing_postprocessor_class(
         # delegate all other attributes to wrapped postprocessor
         def __getattr__(self, attr):
             return getattr(self._result, attr)
+
+        def __setattr__(self, attr, value):
+            if attr in self.__dict__:
+                super().__setattr__(attr, value)
+            else:
+                setattr(self._result, attr, value)
 
         def __dir__(self):
             return self._result.__dir__() + [

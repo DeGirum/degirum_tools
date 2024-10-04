@@ -37,7 +37,9 @@ jobs:
         with:
           python-version: 3.9
       - name: Install
-        run: pip install -e '.[testing]'
+        run: |
+          pip install -e '.[testing]'
+          sudo apt install ffmpeg
       - name: Run pytest (with coverage)
         run: python3 -m coverage run -m pytest test/
       - name: Display coverage report
