@@ -39,7 +39,7 @@ from enum import Enum
 from copy import deepcopy
 from scipy.optimize import linear_sum_assignment
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Type, Union
 from .math_support import box_iou_batch, AnchorPoint, get_anchor_coordinates
 from .ui_support import put_text, deduce_text_color, color_complement, rgb_to_bgr
 from .result_analyzer_base import ResultAnalyzerBase
@@ -243,7 +243,10 @@ def _diou_distance(
     return cost_matrix
 
 
-def _cosine_embedding_distance(atracks: List[STrack], btracks: List[STrack]) -> np.ndarray:
+def _cosine_embedding_distance(
+    atracks: Sequence[Union[np.ndarray, STrack]],
+    btracks: Sequence[Union[np.ndarray, STrack]]
+) -> np.ndarray:
     '''
     Calculates the batch cosine distance between two sets of features.
     Sets tracks with fake/dummy embeddings to the maximum distance.
@@ -255,13 +258,22 @@ def _cosine_embedding_distance(atracks: List[STrack], btracks: List[STrack]) -> 
     Returns:
         ndarray: Returns the cosine distance in an array of size N x M
     '''
-    # type ignores because all tracks will have a feature_module if a featuremodule is in TrackerModules
-    # the error will be obvious.
-    afeats = np.asarray([track.feature_module.comparable_feature() for track in atracks])  # type: ignore[union-attr]
-    bfeats = np.asarray([track.feature_module.comparable_feature() for track in btracks])  # type: ignore[union-attr]
+    is_strack = False
 
-    afakes = np.asarray([track.feature_module.is_fake_embedding for track in atracks]).nonzero()  # type: ignore[union-attr]
-    bfakes = np.asarray([track.feature_module.is_fake_embedding for track in btracks]).nonzero()  # type: ignore[union-attr]
+    if (
+        not isinstance(atracks[0], np.ndarray)
+        and not isinstance(btracks[0], np.ndarray)
+    ):
+        is_strack = True
+
+        afeats = np.asarray([track.feature_module.comparable_feature() for track in atracks])  # type: ignore[union-attr]
+        bfeats = np.asarray([track.feature_module.comparable_feature() for track in btracks])  # type: ignore[union-attr]
+
+        afakes = np.asarray([track.feature_module.is_fake_embedding for track in atracks]).nonzero()  # type: ignore[union-attr]
+        bfakes = np.asarray([track.feature_module.is_fake_embedding for track in btracks]).nonzero()  # type: ignore[union-attr]
+    else:
+        afeats = np.asarray(atracks)
+        bfeats = np.asarray(btracks)
 
     if afeats.size == 0 or bfeats.size == 0:
         return np.zeros((len(afeats), len(bfeats)))
@@ -273,12 +285,13 @@ def _cosine_embedding_distance(atracks: List[STrack], btracks: List[STrack]) -> 
 
     cost_matrix /= 2  # Divide by 2 so that the range is [0, 1]
 
-    # Make fake embeddings max distance
-    for idx in afakes:
-        cost_matrix[idx, :] = 1.0
+    if is_strack:
+        # Make fake embeddings max distance
+        for idx in afakes:
+            cost_matrix[idx, :] = 1.0
 
-    for idx in bfakes:
-        cost_matrix[:, idx] = 1.0
+        for idx in bfakes:
+            cost_matrix[:, idx] = 1.0
 
     return cost_matrix
 
@@ -293,7 +306,7 @@ class FeatureHistory(ABC):
 
     def __init__(self):
         self.current_feat: Optional[np.ndarray] = None
-        self.historical_feats = deque(maxlen=FeatureHistory.max_history_length)
+        self.historical_feats: deque[np.ndarray] = deque(maxlen=FeatureHistory.max_history_length)
         self.is_fake_embedding = False
 
     @classmethod
@@ -426,7 +439,7 @@ class DistanceWeightedAverageHistory(AverageFeatureHistory):
     def comparable_feature(self, *args, **kwargs) -> np.ndarray:
         dists = DistanceWeightedAverageHistory.distance_function(self.historical_feats, self.historical_feats)
         # The average is maxlen - 1 because one of the distances is the comparison to itself which is zero.
-        weights = 1 / (np.sum(dists, axis=0) / (self.historical_feats.maxlen - 1))
+        weights = 1.0 / (np.sum(dists, axis=0) / (DistanceWeightedAverageHistory.max_history_length - 1.0))
         return np.average(self.historical_feats, weights=weights, axis=0)
 
 
@@ -991,7 +1004,7 @@ class NewTrackInitiator(ABC):
         pass
 
     @abstractmethod
-    def initiate_track(self, detection: STrack) -> Union[None, STrack]:
+    def initiate_track(self, detection: STrack) -> bool:
         ...
 
 
@@ -1009,11 +1022,11 @@ class ConfidenceNewTrackInitiator(NewTrackInitiator):
         self.track_thresh = track_thresh
         self.delta = new_track_delta
 
-    def initiate_track(self, detection: STrack) -> Union[None, STrack]:
+    def initiate_track(self, detection: STrack) -> bool:
         if detection.data['score'] > self.track_thresh + self.delta:
-            return detection
+            return True
         else:
-            return None
+            return False
 
 
 class TrackerModules:
@@ -1835,8 +1848,7 @@ class _ByteTrack:
             track = detections[inew]
 
             if self.new_track_hook is not None:
-                track = self.new_track_hook.initiate_track(track)
-                if track is None:
+                if not self.new_track_hook.initiate_track(track):
                     continue
             else:
                 if track.score < self._det_thresh:
