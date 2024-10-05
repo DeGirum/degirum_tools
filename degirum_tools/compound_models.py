@@ -10,9 +10,10 @@
 import queue, cv2, numpy as np, degirum as dg
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Union, Optional
+from typing import Union, Optional, List
 from .image_tools import detect_motion
 from .math_support import nms, NmsBoxSelectionPolicy
+from .result_analyzer_base import ResultAnalyzerBase
 from enum import Enum
 
 
@@ -105,6 +106,7 @@ class CompoundModelBase(ModelLike):
         self.queue = CompoundModelBase.NonBlockingQueue()
         # soft limit for the queue size
         self._queue_soft_limit = model1.frame_queue_depth
+        self._analyzers: List[ResultAnalyzerBase] = []
 
     @abstractmethod
     def queue_result1(self, result1):
@@ -149,6 +151,36 @@ class CompoundModelBase(ModelLike):
         # iterator over predictions of nested model
         model2_iter = self.model2.predict_batch(self.queue)
 
+        def result2_apply_final_steps(result2, transformed_result2):
+
+            # restore original frame info to support nested compound models
+            transformed_result2._frame_info = result2.info.original_info
+
+            # apply analyzers if any
+            if self._analyzers:
+                for analyzer in self._analyzers:
+                    analyzer.analyze(transformed_result2)
+
+                def analyzer_image_overlay(self):
+                    """Image overlay method with all analyzer annotations applied"""
+                    image = self._orig_image_overlay
+                    for analyzer in self._analyzers:
+                        image = analyzer.annotate(self, image)
+                    return image
+
+                # redefine image_overlay to apply all analyzer rendering
+                setattr(transformed_result2, "_analyzers", self._analyzers)
+                setattr(
+                    transformed_result2.__class__,
+                    "_orig_image_overlay",
+                    transformed_result2.__class__.value,
+                )
+                transformed_result2.__class__.image_overlay = property(
+                    analyzer_image_overlay
+                )
+
+            return transformed_result2
+
         for result1 in self.model1.predict_batch(data):
             # put result of the first model into the queue
             if result1 is not None:
@@ -161,9 +193,7 @@ class CompoundModelBase(ModelLike):
                     if (
                         transformed_result2 := self.transform_result2(result2)
                     ) is not None:
-                        # restore original frame info to support nested compound models
-                        transformed_result2._frame_info = result2.info.original_info
-                        yield transformed_result2
+                        yield result2_apply_final_steps(result2, transformed_result2)
                         no_results = False
 
                 if no_results and self.model1.non_blocking_batch_predict:
@@ -178,9 +208,7 @@ class CompoundModelBase(ModelLike):
         # process all remaining results
         for result2 in model2_iter:
             if (transformed_result2 := self.transform_result2(result2)) is not None:
-                # restore original frame info to support nested compound models
-                transformed_result2._frame_info = result2.info.original_info
-                yield transformed_result2
+                yield result2_apply_final_steps(result2, transformed_result2)
 
     # explicitly redirect setting of `non_blocking_batch_predict` to the first model
     @property
@@ -198,6 +226,22 @@ class CompoundModelBase(ModelLike):
     @_custom_postprocessor.setter
     def _custom_postprocessor(self, val: type):
         raise Exception("Custom postprocessor is not supported for compound models")
+
+    def attach_analyzers(
+        self, analyzers: Union[ResultAnalyzerBase, List[ResultAnalyzerBase], None]
+    ):
+        """
+        Attach analyzers to a model.
+
+        Args:
+            analyzers: List of analyzer objects to attach to model,
+                or `None` to detach all analyzers if any were attached before
+        """
+        self._analyzers = (
+            []
+            if analyzers is None
+            else (analyzers if isinstance(analyzers, list) else [analyzers])
+        )
 
     # fallback all getters of model-like attributes to the first model
     def __getattr__(self, attr):
