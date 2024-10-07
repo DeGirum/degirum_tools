@@ -7,7 +7,7 @@
 # Implements unit tests to test general analyzer functionality
 #
 
-import numpy as np, pytest
+import numpy as np
 
 
 def test_attach_analyzers():

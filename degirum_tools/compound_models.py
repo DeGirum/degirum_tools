@@ -168,7 +168,7 @@ class CompoundModelBase(ModelLike):
                         image = analyzer.annotate(self, image)
                     return image
 
-                # redefine `image_overlay` property to `analyzer_image_overlay` function so 
+                # redefine `image_overlay` property to `analyzer_image_overlay` function so
                 # that it will be called instead of the original one to annotate the image with analyzer results;
                 # preserve original `image_overlay` property as `_orig_image_overlay` property;
                 # assign analyzer list to `_analyzers` attribute
