@@ -88,7 +88,23 @@ def test_attach_analyzers():
     assert np.array_equal(result.image_overlay[0, 0], black)
     assert np.array_equal(result.image_overlay[1, 1], black)
 
-    # check that compound model cannot have analyzers
-    compound_model = degirum_tools.CombiningCompoundModel(model, model)
-    with pytest.raises(Exception):
-        degirum_tools.attach_analyzers(compound_model, red_analyzer)
+    # check that compound model can have analyzers
+    model2 = dg.connect(dg.LOCAL, "test/model-zoo/dummy/dummy.json").load_model("dummy")
+    model2._model_parameters.SimulateParams = True
+    model2.output_postprocess_type = "Classification"
+
+    class SampleCompoundModel(degirum_tools.CompoundModelBase):
+
+        def queue_result1(self, result1):
+            self.queue.put(
+                (result1.image, degirum_tools.compound_models._FrameInfo(result1, -1))
+            )
+
+        def transform_result2(self, result2):
+            return result2
+
+    compound_model = SampleCompoundModel(model, model2)
+    degirum_tools.attach_analyzers(compound_model, red_analyzer)
+    result = compound_model(data)
+    assert hasattr(result, "mycolor") and red in result.mycolor
+    assert np.array_equal(result.image_overlay[0, 0], red)
