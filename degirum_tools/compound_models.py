@@ -64,7 +64,7 @@ class ModelLike(ABC):
         return self.predict(data)
 
 
-class _FrameInfo:
+class FrameInfo:
     """Class to hold frame info"""
 
     def __init__(self, result1, sub_result):
@@ -269,7 +269,7 @@ class CombiningCompoundModel(CompoundModelBase):
         Args:
             result1: prediction result of the first model
         """
-        self.queue.put((result1.image, _FrameInfo(result1, -1)))
+        self.queue.put((result1.image, FrameInfo(result1, -1)))
 
     def transform_result2(self, result2):
         """
@@ -359,7 +359,7 @@ class CroppingCompoundModel(CompoundModelBase):
         if len(result1.results) == 0 or "bbox" not in result1.results[0]:
             # no bbox detected: put black image into the queue to keep things going
             self.queue.put(
-                (np.zeros((2, 2, 3), dtype=np.uint8), _FrameInfo(result1, -1))
+                (np.zeros((2, 2, 3), dtype=np.uint8), FrameInfo(result1, -1))
             )
         else:
             image_size = self.image_size(result1.image)
@@ -372,7 +372,7 @@ class CroppingCompoundModel(CompoundModelBase):
                     cropped_img = result1.image[
                         adj_bbox[1] : adj_bbox[3], adj_bbox[0] : adj_bbox[2]
                     ]
-                self.queue.put((cropped_img, _FrameInfo(result1, idx)))
+                self.queue.put((cropped_img, FrameInfo(result1, idx)))
 
     def transform_result2(self, result2):
         """

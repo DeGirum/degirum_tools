@@ -97,7 +97,7 @@ def test_attach_analyzers():
 
         def queue_result1(self, result1):
             self.queue.put(
-                (result1.image, degirum_tools.compound_models._FrameInfo(result1, -1))
+                (result1.image, degirum_tools.compound_models.FrameInfo(result1, -1))
             )
 
         def transform_result2(self, result2):
