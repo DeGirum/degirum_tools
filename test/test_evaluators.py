@@ -129,19 +129,12 @@ def test_ObjectDetectionModelEvaluator():
             os.remove(predictions_file)
 
 
-def test_ImageClassificationModelEvaluator():
+def test_ImageClassificationModelEvaluator(classification_model):
     """Test for ImageClassificationModelEvaluator class"""
 
-    import degirum_tools, degirum as dg
-    import os, io, json
+    import degirum_tools, io, json
 
-    cur_dir = os.path.dirname(os.path.abspath(__file__))
-
-    # load classification model
-    model_name = "mobilenet_v2_generic_object--224x224_quant_n2x_cpu_1"
-    model_path = f"{cur_dir}/model-zoo/{model_name}/{model_name}.json"
-    zoo = dg.connect(dg.LOCAL, model_path)
-    model = zoo.load_model(model_name)
+    model = classification_model
 
     #
     # test evaluator creation
