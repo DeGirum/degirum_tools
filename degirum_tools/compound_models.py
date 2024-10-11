@@ -103,6 +103,7 @@ class CompoundModelBase(ModelLike):
         """
         self.model1 = model1
         self.model2 = model2
+        self._master_model = model2
         self.queue = CompoundModelBase.NonBlockingQueue()
         # soft limit for the queue size
         self._queue_soft_limit = model1.frame_queue_depth
@@ -246,9 +247,27 @@ class CompoundModelBase(ModelLike):
             else (analyzers if isinstance(analyzers, list) else [analyzers])
         )
 
-    # fallback all getters of model-like attributes to the first model
+    # fallback all getters of model-like attributes to the master model
     def __getattr__(self, attr):
-        return getattr(self.model1, attr)
+        return getattr(self._master_model, attr)
+
+    # fallback all setters of model-like attributes to the master model if it is defined
+    def __setattr__(self, name, value):
+        if "_master_model" not in self.__dict__:
+            return super().__setattr__(name, value)
+
+        model_class = self._master_model.__class__
+        is_model_class_attr = hasattr(model_class, name)
+        if not is_model_class_attr and not hasattr(self._master_model, name):
+            # this is to set attributes of the compound model itself
+            return super().__setattr__(name, value)
+
+        if is_model_class_attr:
+            attr = getattr(model_class, name)
+            if isinstance(attr, property) and attr.fset:
+                return attr.fset(self._master_model, value)
+
+        setattr(self._master_model, name, value)
 
 
 class CombiningCompoundModel(CompoundModelBase):
@@ -487,6 +506,7 @@ class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
 
         super().__init__(model1, model2, crop_extent, crop_extent_option)
         self._current_result = None
+        self._master_model = model1  # because we yield results of the first model
 
     def transform_result2(self, result2):
         """
@@ -753,7 +773,7 @@ class RegionExtractionPseudoModel(ModelLike):
     def custom_postprocessor(self, val: type):
         self._custom_postprocessor = val
 
-    # fallback all getters of model-like attributes to the first model
+    # fallback all getters of model-like attributes to the second model
     def __getattr__(self, attr):
         return getattr(self._model2, attr)
 
