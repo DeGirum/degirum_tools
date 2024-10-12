@@ -16,8 +16,6 @@ def test_ObjectDetectionModelEvaluator(zoo_dir):
     import degirum_tools, degirum as dg
     import os, io, json
 
-    cur_dir = os.path.dirname(os.path.abspath(__file__))
-
     # load COCO detection and segmentation models
     object_detection_model = dg.load_model(
         "mobilenet_v2_ssd_coco--300x300_quant_n2x_cpu_1", dg.LOCAL, zoo_dir
@@ -202,7 +200,7 @@ def test_ImageRegressionModelEvaluator(zoo_dir):
     """Test for ImageRegressionModelEvaluator class"""
 
     import degirum_tools, degirum as dg
-    import os, io
+    import io
 
     # load regression model
     model = dg.load_model(
