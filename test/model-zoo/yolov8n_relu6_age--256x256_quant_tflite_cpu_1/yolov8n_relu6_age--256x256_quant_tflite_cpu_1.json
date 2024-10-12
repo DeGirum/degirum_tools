@@ -1,6 +1,6 @@
 {
     "ConfigVersion": 6,
-    "Checksum": "",
+    "Checksum": "1234",
     "DEVICE": [
         {
             "DeviceType": "CPU",

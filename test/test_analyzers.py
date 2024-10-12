@@ -10,7 +10,7 @@
 import numpy as np
 
 
-def test_attach_analyzers():
+def test_attach_analyzers(zoo_dir):
     """Test for attach_analyzers() function"""
 
     import degirum_tools, degirum as dg
@@ -31,7 +31,7 @@ def test_attach_analyzers():
             image[self.mylevel, self.mylevel] = self.mycolor
             return image
 
-    model = dg.connect(dg.LOCAL, "test/model-zoo/dummy/dummy.json").load_model("dummy")
+    model = dg.load_model("dummy", dg.LOCAL, zoo_dir)
     model._model_parameters.SimulateParams = True
     model.output_postprocess_type = "Classification"
 
@@ -89,7 +89,7 @@ def test_attach_analyzers():
     assert np.array_equal(result.image_overlay[1, 1], black)
 
     # check that compound model can have analyzers
-    model2 = dg.connect(dg.LOCAL, "test/model-zoo/dummy/dummy.json").load_model("dummy")
+    model2 = dg.load_model("dummy", dg.LOCAL, zoo_dir)
     model2._model_parameters.SimulateParams = True
     model2.output_postprocess_type = "Classification"
 
