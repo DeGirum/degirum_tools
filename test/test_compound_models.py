@@ -50,3 +50,24 @@ def test_compound_model_properties(zoo_dir, detection_model, classification_mode
     # CroppingAndClassifyingCompoundModel
     # CroppingAndDetectingCompoundModel
     # RegionExtractionPseudoModel
+
+
+def test_combining_compound_model(zoo_dir, detection_model, short_video):
+    """Test for CombiningCompoundModel class"""
+
+    import degirum_tools
+
+    roi = [[1, 2, 30, 40]]
+    extractor = degirum_tools.RegionExtractionPseudoModel(roi, detection_model)
+    model = degirum_tools.CombiningCompoundModel(extractor, detection_model)
+
+    roi_class_label = "ROI0"
+    detected_classes: set = set()
+
+    with degirum_tools.open_video_stream(short_video) as stream:
+        for res in model.predict_batch(degirum_tools.video_source(stream)):
+            bboxes = {r["label"]: r["bbox"] for r in res.results}
+            assert roi_class_label in bboxes and bboxes[roi_class_label] == roi[0]
+            detected_classes |= bboxes.keys()
+
+    assert "Car" in detected_classes and roi_class_label in detected_classes
