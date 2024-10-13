@@ -500,6 +500,7 @@ class VideoSourceGizmo(Gizmo):
     key_frame_height = "frame_height"  # frame height
     key_fps = "fps"  # stream frame rate
     key_frame_count = "frame_count"  # total stream frame count
+    key_frame_id = "frame_id"  # frame index
 
     def __init__(self, video_source=None, *, stop_composition_on_end: bool = False):
         """Constructor.
@@ -531,8 +532,10 @@ class VideoSourceGizmo(Gizmo):
                 if not ret:
                     break
                 else:
+                    meta2 = copy.copy(meta)
+                    meta2[self.key_frame_id] = self.result_cnt
                     self.send_result(
-                        StreamData(data, StreamMeta(meta, self.get_tags()))
+                        StreamData(data, StreamMeta(meta2, self.get_tags()))
                     )
 
             if self._stop_composition_on_end:

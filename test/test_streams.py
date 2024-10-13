@@ -98,7 +98,7 @@ def test_streams_video_source(short_video):
     assert streams.tag_video in source.get_tags()
     assert sink.frames_cnt == frame_count
 
-    for frame in sink.frames:
+    for i, frame in enumerate(sink.frames):
         assert frame.data.shape == (frame_height, frame_width, 3)
         video_meta = frame.meta.find_last(streams.tag_video)
         assert video_meta is not None
@@ -106,6 +106,7 @@ def test_streams_video_source(short_video):
         assert video_meta[source.key_frame_height] == frame_height
         assert video_meta[source.key_fps] == fps
         assert video_meta[source.key_frame_count] == frame_count
+        assert video_meta[source.key_frame_id] == i
 
 
 def test_streams_video_display(short_video):
