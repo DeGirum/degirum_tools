@@ -348,8 +348,8 @@ class CroppingCompoundModel(CompoundModelBase):
         self,
         model1,
         model2,
-        crop_extent=0,
-        crop_extent_option=CropExtentOptions.ASPECT_RATIO_NO_ADJUSTMENT,
+        crop_extent: float = 0.0,
+        crop_extent_option: CropExtentOptions = CropExtentOptions.ASPECT_RATIO_NO_ADJUSTMENT,
     ):
         """
         Constructor.
@@ -486,8 +486,8 @@ class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
         self,
         model1,
         model2,
-        crop_extent=0,
-        crop_extent_option=CropExtentOptions.ASPECT_RATIO_NO_ADJUSTMENT,
+        crop_extent: float = 0.0,
+        crop_extent_option: CropExtentOptions = CropExtentOptions.ASPECT_RATIO_NO_ADJUSTMENT,
     ):
         """
         Constructor.
@@ -528,9 +528,16 @@ class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
 
         if idx >= 0:
             # patch bbox label with recognized class label and adjust probability
-            result1.results[idx]["label"] = result2.results[0]["label"]
-            result1.results[idx]["score"] = result2.results[0]["score"]
-            result1.results[idx]["category_id"] = result2.results[0]["category_id"]
+            r = result2.results[0]
+            label = r.get("label")
+            if label is not None:
+                result1.results[idx]["label"] = label
+            score = r.get("score")
+            if score is not None:
+                result1.results[idx]["score"] = score
+            category_id = r.get("category_id")
+            if category_id is not None:
+                result1.results[idx]["category_id"] = category_id
 
         # return result when frame changes
         ret = None
@@ -589,9 +596,9 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
         model1,
         model2,
         *,
-        crop_extent=0,
-        crop_extent_option=CropExtentOptions.ASPECT_RATIO_NO_ADJUSTMENT,
-        add_model1_results=False,
+        crop_extent: float = 0.0,
+        crop_extent_option: CropExtentOptions = CropExtentOptions.ASPECT_RATIO_NO_ADJUSTMENT,
+        add_model1_results: bool = False,
         nms_options: Optional[NmsOptions] = None,
     ):
         """
