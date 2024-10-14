@@ -1,7 +1,7 @@
 #
 # streams.py: streaming toolkit for PySDK samples
 #
-# Copyright DeGirum Corporation 2023
+# Copyright DeGirum Corporation 2024
 # All rights reserved
 #
 # Please refer to `dgstreams_demo.ipynb` PySDKExamples notebook for examples of toolkit usage.
@@ -293,7 +293,8 @@ class Gizmo(ABC):
         - data: a tuple containing raw data object as a first element, and meta info object as a second element.
         When None is passed, all outputs will be closed.
         """
-        self.result_cnt += 1
+        if data != Stream._poison:
+            self.result_cnt += 1
         for out in self._output_refs:
             if data == Stream._poison or data is None:
                 out.close()
@@ -489,6 +490,15 @@ class Composition:
         """Signal abort to all registered gizmos and wait until all threads stopped"""
 
         self.request_stop()
+        self.wait()
+
+    def __enter__(self):
+        """Context manager enter handler: start composition but do not wait for completion"""
+        self.start(wait=False)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit handler: wait for composition completion"""
         self.wait()
 
 
@@ -1083,3 +1093,31 @@ class AiAnalyzerGizmo(Gizmo):
                 for analyzer in self._analyzers:
                     analyzer.analyze(inference_meta)
             self.send_result(data)
+
+
+class SinkGizmo(Gizmo):
+    """Gizmo to receive results and accumulate them in the queue. This queue can be used as a
+    generator source for further processing in the main thread."""
+
+    def __init__(
+        self,
+        *,
+        stream_depth: int = 10,
+        allow_drop: bool = False,
+    ):
+        """Constructor.
+
+        - stream_depth: input stream depth
+        - allow_drop: allow dropping frames from input stream on overflow
+        """
+
+        super().__init__([(stream_depth, allow_drop)])
+
+    def run(self):
+        """Run gizmo"""
+        # return immediately to not to consume thread resources
+        return
+
+    def __call__(self):
+        """Return input queue. To be used in for-loops to get results"""
+        return self._inputs[0]

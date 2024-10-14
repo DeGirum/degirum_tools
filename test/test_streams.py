@@ -8,6 +8,7 @@
 #
 
 import time
+import os
 import pytest
 import degirum_tools
 import degirum_tools.streams as streams
@@ -437,3 +438,25 @@ def test_streams_error_handling():
         streams.Composition(src2 >> dst2).start()
 
     assert dst2.n == src2.limit  # type: ignore[attr-defined]
+
+
+def test_streams_sink(short_video):
+    """Test for SinkGizmo"""
+
+    try:
+        # disable test mode to avoid wait in composition start
+        os.environ[degirum_tools.var_TestMode] = ""
+
+        source = streams.VideoSourceGizmo(short_video)
+        sink = streams.SinkGizmo()
+
+        with streams.Composition(source >> sink):
+            nresults = 0
+            for r in sink():
+                assert r.meta.find_last(streams.tag_video) is not None
+                nresults += 1
+
+            assert nresults == source.result_cnt
+
+    finally:
+        os.environ[degirum_tools.var_TestMode] = "1"
