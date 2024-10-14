@@ -45,12 +45,6 @@ def test_compound_model_properties(zoo_dir, detection_model, classification_mode
     assert model._master_model.input_pad_method == "stretch"
     assert classification_model.input_pad_method == "letterbox"
 
-    # TODO:
-    # CombiningCompoundModel
-    # CroppingAndClassifyingCompoundModel
-    # CroppingAndDetectingCompoundModel
-    # RegionExtractionPseudoModel
-
 
 def test_combining_compound_model(zoo_dir, detection_model, short_video):
     """Test for CombiningCompoundModel class"""
@@ -71,3 +65,49 @@ def test_combining_compound_model(zoo_dir, detection_model, short_video):
             detected_classes |= bboxes.keys()
 
     assert "Car" in detected_classes and roi_class_label in detected_classes
+
+
+def test_cropping_compound_models(
+    zoo_dir, detection_model, classification_model, short_video
+):
+    """Test for CroppingAndClassifyingCompoundModel and CroppingAndDetectingCompoundModel classes"""
+
+    import degirum_tools
+
+    model1 = degirum_tools.CroppingAndClassifyingCompoundModel(
+        detection_model, classification_model
+    )
+
+    with degirum_tools.open_video_stream(short_video) as stream:
+        detection_results = list(
+            detection_model.predict_batch(degirum_tools.video_source(stream))
+        )
+
+    with degirum_tools.open_video_stream(short_video) as stream:
+        compound_results1 = list(
+            model1.predict_batch(degirum_tools.video_source(stream))
+        )
+
+    assert len(detection_results) == len(compound_results1)
+    for d, c in zip(detection_results, compound_results1):
+        assert len(d.results) == len(c.results)
+        for dr, cr in zip(d.results, c.results):
+            assert dr["label"] == cr["label"]
+            assert [round(x) for x in dr["bbox"]] == cr["bbox"]
+            assert dr["score"] != cr["score"]
+            assert dr["category_id"] != cr["category_id"]
+
+    tiler = degirum_tools.RegionExtractionPseudoModel(
+        [[0, 0, 640, 720], [640, 0, 1280, 720]], detection_model
+    )
+    model2 = degirum_tools.CroppingAndDetectingCompoundModel(tiler, detection_model)
+
+    with degirum_tools.open_video_stream(short_video) as stream:
+        compound_results2 = list(
+            model2.predict_batch(degirum_tools.video_source(stream))
+        )
+
+    assert len(detection_results) == len(compound_results2)
+    for d, c in zip(detection_results, compound_results2):
+        assert len(d.results) <= len(c.results)
+        assert all(cr["label"] == "Car" for cr in c.results)

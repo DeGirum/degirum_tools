@@ -527,18 +527,10 @@ class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
         idx = result2.info.sub_result
 
         if idx >= 0:
-            # patch bbox label with recognized class label
-            label = (
-                result2.results[0]["label"] if self.model2.overlay_show_labels else ""
-            )
-            if self.model2.overlay_show_probabilities:
-                score = result2.results[0]["score"]
-                score_str = f"{score:.2f}" if isinstance(score, float) else str(score)
-                result1.results[idx]["label"] = (
-                    label + (": " if label else "") + score_str
-                )
-            else:
-                result1.results[idx]["label"] = label
+            # patch bbox label with recognized class label and adjust probability
+            result1.results[idx]["label"] = result2.results[0]["label"]
+            result1.results[idx]["score"] = result2.results[0]["score"]
+            result1.results[idx]["category_id"] = result2.results[0]["category_id"]
 
         # return result when frame changes
         ret = None
