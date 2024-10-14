@@ -98,7 +98,7 @@ def test_streams_video_source(short_video):
     assert streams.tag_video in source.get_tags()
     assert sink.frames_cnt == frame_count
 
-    for frame in sink.frames:
+    for i, frame in enumerate(sink.frames):
         assert frame.data.shape == (frame_height, frame_width, 3)
         video_meta = frame.meta.find_last(streams.tag_video)
         assert video_meta is not None
@@ -106,6 +106,7 @@ def test_streams_video_source(short_video):
         assert video_meta[source.key_frame_height] == frame_height
         assert video_meta[source.key_fps] == fps
         assert video_meta[source.key_frame_count] == frame_count
+        assert video_meta[source.key_frame_id] == i
 
 
 def test_streams_video_display(short_video):
@@ -173,14 +174,12 @@ def test_streams_resizer(short_video):
         assert frame.data.shape == (h, w, 3)
 
 
-def test_streams_simple_ai(short_video, zoo_dir):
+def test_streams_simple_ai(short_video, classification_model):
     """Test for AiSimpleGizmo"""
 
     import degirum as dg
 
-    model = dg.load_model(
-        "mobilenet_v2_generic_object--224x224_quant_n2x_cpu_1", dg.LOCAL, zoo_dir
-    )
+    model = classification_model
 
     source = streams.VideoSourceGizmo(short_video)
     ai = streams.AiSimpleGizmo(model)
@@ -197,14 +196,12 @@ def test_streams_simple_ai(short_video, zoo_dir):
         assert ai_meta.info.find_last(streams.tag_inference) == ai_meta
 
 
-def test_streams_cropping_ai(short_video, zoo_dir):
+def test_streams_cropping_ai(short_video, detection_model):
     """Test for AiObjectDetectionCroppingGizmo"""
 
     import degirum as dg
 
-    model = dg.load_model(
-        "yolov5nu_relu6_car--128x128_float_n2x_cpu_1", dg.LOCAL, zoo_dir
-    )
+    model = detection_model
 
     source = streams.VideoSourceGizmo(short_video)
     ai = streams.AiSimpleGizmo(model)
@@ -254,16 +251,14 @@ def test_streams_cropping_ai(short_video, zoo_dir):
             assert crop_meta[cropper.key_cropped_result] is None
 
 
-def test_streams_combining_ai(short_video, zoo_dir):
+def test_streams_combining_ai(short_video, zoo_dir, detection_model_name):
     """Test for AiResultCombiningGizmo"""
 
     import degirum as dg
 
     N = 3
     zoo = dg.connect(dg.LOCAL, zoo_dir)
-    models = [
-        zoo.load_model("yolov5nu_relu6_car--128x128_float_n2x_cpu_1") for _ in range(N)
-    ]
+    models = [zoo.load_model(detection_model_name) for _ in range(N)]
 
     source = streams.VideoSourceGizmo(short_video)
     ai = [streams.AiSimpleGizmo(models[i]) for i in range(N)]
@@ -287,18 +282,13 @@ def test_streams_combining_ai(short_video, zoo_dir):
             )
 
 
-def test_streams_preprocess_ai(short_video, zoo_dir):
+def test_streams_preprocess_ai(short_video, classification_model):
     """Test for AiPreprocessGizmo"""
 
-    import degirum as dg, numpy as np
+    import numpy as np
 
-    model = dg.load_model(
-        "mobilenet_v2_generic_object--224x224_quant_n2x_cpu_1",
-        dg.LOCAL,
-        zoo_dir,
-        save_model_image=True,
-    )
-
+    model = classification_model
+    model.save_model_image = True
     source = streams.VideoSourceGizmo(short_video)
     preprocessor = streams.AiPreprocessGizmo(model)
     sink = VideoSink()
@@ -329,14 +319,10 @@ def test_streams_preprocess_ai(short_video, zoo_dir):
         assert image_result.shape == model_shape
 
 
-def test_streams_analyzer_ai(short_video, zoo_dir):
+def test_streams_analyzer_ai(short_video, classification_model):
     """Test for AiAnalyzerGizmo"""
 
-    import degirum as dg
-
-    model = dg.load_model(
-        "mobilenet_v2_generic_object--224x224_quant_n2x_cpu_1", dg.LOCAL, zoo_dir
-    )
+    model = classification_model
 
     class TestAnalyzer(degirum_tools.ResultAnalyzerBase):
 

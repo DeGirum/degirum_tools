@@ -13,6 +13,7 @@ from contextlib import ExitStack
 from pathlib import Path
 from typing import Union, List, Optional
 from dataclasses import dataclass
+from .compound_models import CompoundModelBase
 from .video_support import (
     open_video_stream,
     get_video_stream_properties,
@@ -149,7 +150,7 @@ def _create_analyzing_postprocessor_class(
 
 
 def attach_analyzers(
-    model: dg.model.Model,
+    model: Union[dg.model.Model, CompoundModelBase],
     analyzers: Union[ResultAnalyzerBase, List[ResultAnalyzerBase], None],
 ):
     """
@@ -164,24 +165,31 @@ def attach_analyzers(
         Model object with attached analyzers
     """
 
-    analyzing_postprocessor = _create_analyzing_postprocessor_class(analyzers, model)
-
-    if analyzers:
-        # attach custom postprocessor to model
-        model._custom_postprocessor = analyzing_postprocessor
+    if isinstance(model, CompoundModelBase):
+        model.attach_analyzers(analyzers)
     else:
-        # remove analyzing custom postprocessor from model if any
-        if (
-            model._custom_postprocessor is not None
-            and isinstance(model._custom_postprocessor, type)
-            and model._custom_postprocessor.__name__ == analyzing_postprocessor.__name__
-        ):
-            if model._custom_postprocessor._was_custom:
-                model._custom_postprocessor = (
-                    model._custom_postprocessor._postprocessor_type
-                )
-            else:
-                model._custom_postprocessor = None
+
+        analyzing_postprocessor = _create_analyzing_postprocessor_class(
+            analyzers, model
+        )
+
+        if analyzers:
+            # attach custom postprocessor to model
+            model._custom_postprocessor = analyzing_postprocessor
+        else:
+            # remove analyzing custom postprocessor from model if any
+            if (
+                model._custom_postprocessor is not None
+                and isinstance(model._custom_postprocessor, type)
+                and model._custom_postprocessor.__name__
+                == analyzing_postprocessor.__name__
+            ):
+                if model._custom_postprocessor._was_custom:
+                    model._custom_postprocessor = (
+                        model._custom_postprocessor._postprocessor_type
+                    )
+                else:
+                    model._custom_postprocessor = None
 
     return model
 
