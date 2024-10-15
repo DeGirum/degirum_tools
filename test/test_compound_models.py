@@ -46,7 +46,7 @@ def test_compound_model_properties(zoo_dir, detection_model, classification_mode
     assert classification_model.input_pad_method == "letterbox"
 
 
-def test_combining_compound_model(zoo_dir, detection_model, short_video):
+def test_compound_model_combining(zoo_dir, detection_model, short_video):
     """Test for CombiningCompoundModel class"""
 
     import degirum_tools
@@ -67,7 +67,7 @@ def test_combining_compound_model(zoo_dir, detection_model, short_video):
     assert "Car" in detected_classes and roi_class_label in detected_classes
 
 
-def test_cropping_compound_models(
+def test_compound_model_cropping(
     zoo_dir, detection_model, classification_model, short_video
 ):
     """Test for CroppingAndClassifyingCompoundModel and CroppingAndDetectingCompoundModel classes"""

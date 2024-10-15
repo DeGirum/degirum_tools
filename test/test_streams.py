@@ -8,10 +8,10 @@
 #
 
 import time
-import os
 import pytest
 import degirum_tools
 import degirum_tools.streams as streams
+import degirum as dg
 import cv2
 
 
@@ -110,20 +110,6 @@ def test_streams_video_source(short_video):
         assert video_meta[source.key_frame_id] == i
 
 
-def test_streams_video_display(short_video):
-    """Test for VideoDisplayGizmo"""
-
-    source = streams.VideoSourceGizmo(short_video)
-    display = streams.VideoDisplayGizmo()
-    sink = VideoSink()
-    streams.Composition(source >> display, source >> sink).start()
-
-    assert all(
-        (display._frames[i].data == sink.frames[i].data).all()
-        for i in range(sink.frames_cnt)
-    )
-
-
 def test_streams_video_saver(short_video, temp_dir):
     """Test for VideoSaverGizmo"""
 
@@ -178,8 +164,6 @@ def test_streams_resizer(short_video):
 def test_streams_simple_ai(short_video, classification_model):
     """Test for AiSimpleGizmo"""
 
-    import degirum as dg
-
     model = classification_model
 
     source = streams.VideoSourceGizmo(short_video)
@@ -199,8 +183,6 @@ def test_streams_simple_ai(short_video, classification_model):
 
 def test_streams_cropping_ai(short_video, detection_model):
     """Test for AiObjectDetectionCroppingGizmo"""
-
-    import degirum as dg
 
     model = detection_model
 
@@ -254,8 +236,6 @@ def test_streams_cropping_ai(short_video, detection_model):
 
 def test_streams_combining_ai(short_video, zoo_dir, detection_model_name):
     """Test for AiResultCombiningGizmo"""
-
-    import degirum as dg
 
     N = 3
     zoo = dg.connect(dg.LOCAL, zoo_dir)
@@ -443,20 +423,53 @@ def test_streams_error_handling():
 def test_streams_sink(short_video):
     """Test for SinkGizmo"""
 
-    try:
-        # disable test mode to avoid wait in composition start
-        os.environ[degirum_tools.var_TestMode] = ""
+    source = streams.VideoSourceGizmo(short_video)
+    sink = streams.SinkGizmo()
 
-        source = streams.VideoSourceGizmo(short_video)
-        sink = streams.SinkGizmo()
+    with streams.Composition(source >> sink):
+        nresults = 0
+        for r in sink():
+            assert r.meta.find_last(streams.tag_video) is not None
+            nresults += 1
 
-        with streams.Composition(source >> sink):
-            nresults = 0
-            for r in sink():
-                assert r.meta.find_last(streams.tag_video) is not None
-                nresults += 1
+        assert nresults == source.result_cnt
 
-            assert nresults == source.result_cnt
 
-    finally:
-        os.environ[degirum_tools.var_TestMode] = "1"
+def test_streams_crop_combining_classification(
+    short_video, detection_model, classification_model
+):
+    """Test for ClassificationCropCombiningGizmo"""
+
+    obj_label = "Car"
+    source = streams.VideoSourceGizmo(short_video)
+    detector = streams.AiSimpleGizmo(detection_model)
+    crop = streams.AiObjectDetectionCroppingGizmo([obj_label])
+    classifier = streams.AiSimpleGizmo(classification_model)
+    combiner = streams.ClassificationCropCombiningGizmo()
+    sink = VideoSink()
+
+    streams.Composition(
+        source >> detector >> crop >> classifier >> combiner[0] >> sink,
+        source >> combiner[1],
+    ).start()
+
+    nframes = source.result_cnt
+    assert (
+        detector.result_cnt == nframes
+        and crop.result_cnt > nframes
+        and classifier.result_cnt > nframes
+        and combiner.result_cnt == nframes
+        and sink.frames_cnt == nframes
+    )
+
+    cat_id = next(
+        k for k, v in classification_model.label_dictionary.items() if v == obj_label
+    )
+
+    for frame in sink.frames:
+        ai_meta = frame.meta.find_last(streams.tag_inference)
+        if ai_meta is not None:
+            assert isinstance(ai_meta, dg.postprocessor.DetectionResults)
+            for r in ai_meta.results:
+                assert r["label"] == obj_label
+                assert r["category_id"] == cat_id

@@ -13,6 +13,7 @@ import copy
 import time
 import cv2
 import numpy
+import degirum as dg
 
 from abc import ABC, abstractmethod
 from typing import Optional, Any, List, Dict, Union, Iterator
@@ -100,6 +101,18 @@ class StreamMeta:
     def get(self, idx: int) -> Any:
         """Get metainfo object by index"""
         return self._meta_list[idx]
+
+    def remove_last(self, tag: str):
+        """Remove last metainfo object by tag
+
+        - tag: tag to search for
+        """
+
+        tag_indexes = self._tags.get(tag)
+        if tag_indexes:
+            del tag_indexes[-1]
+            if not tag_indexes:
+                del self._tags[tag]
 
 
 class StreamData:
@@ -592,7 +605,6 @@ class VideoDisplayGizmo(Gizmo):
         if multiplex and allow_drop:
             raise Exception("Frame multiplexing with frame dropping is not supported")
         self._multiplex = multiplex
-        self._frames: list = []  # saved frames for tests
 
     def run(self):
         """Run gizmo"""
@@ -641,8 +653,6 @@ class VideoDisplayGizmo(Gizmo):
                                 img = inference_meta.image_overlay
 
                         displays[di].show(img)
-                        if test_mode:
-                            self._frames.append(data)
 
                         if first_run[di] and not displays[di]._no_gui:
                             cv2.setWindowProperty(
@@ -810,12 +820,13 @@ class AiGizmoBase(Gizmo):
         """Run gizmo"""
 
         def source():
-            while True:
+            has_data = True
+            while has_data:
                 # get data from all inputs
                 for inp in self.get_inputs():
                     d = inp.get()
                     if d == Stream._poison:
-                        self._abort = True
+                        has_data = False
                         break
                     yield (d.data, d.meta)
 
@@ -847,8 +858,7 @@ class AiGizmoBase(Gizmo):
                                 ]
 
             self.on_result(result)
-            # finish processing all frames for tests
-            if self._abort and not get_test_mode():
+            if self._abort:
                 break
 
     @abstractmethod
@@ -895,20 +905,20 @@ class AiObjectDetectionCroppingGizmo(Gizmo):
     key_original_result = "original_result"  # original AI object detection result
     key_cropped_result = "cropped_result"  # sub-result for particular crop
     key_cropped_index = "cropped_index"  # the number of that sub-result
-    key_is_last_crop = (
-        "is_last_crop"  # the flag indicating that this is the last crop in the frame
-    )
+    key_is_last_crop = "is_last_crop"  # 'last crop in the frame' flag
 
     def __init__(
         self,
         labels: List[str],
         *,
+        send_original_on_no_objects: bool = True,
         stream_depth: int = 10,
         allow_drop: bool = False,
     ):
         """Constructor.
 
         - labels: list of class labels to process
+        - send_original_on_no_objects: send original frame when no objects detected
         - stream_depth: input stream depth
         - allow_drop: allow dropping frames from input stream on overflow
         """
@@ -917,6 +927,7 @@ class AiObjectDetectionCroppingGizmo(Gizmo):
         super().__init__([(0, allow_drop), (stream_depth, allow_drop)])
 
         self._labels = labels
+        self._send_original_on_no_objects = send_original_on_no_objects
 
     def get_tags(self) -> List[str]:
         """Get list of tags assigned to this gizmo"""
@@ -951,10 +962,12 @@ class AiObjectDetectionCroppingGizmo(Gizmo):
                     crop_meta[self.key_cropped_result] = r
                     crop_meta[self.key_cropped_index] = i
                     crop_meta[self.key_is_last_crop] = i == nresults - 1
-                    data.meta.append(crop_meta, self.get_tags())
-                    self.send_result(StreamData(crop, data.meta))
+                    new_meta = data.meta.clone()
+                    new_meta.append(crop_meta, self.get_tags())
+                    self.send_result(StreamData(crop, new_meta))
 
-            else:  # no objects detected: send just original result
+            elif self._send_original_on_no_objects:
+                # no objects detected: send original result
                 crop_meta = {}
                 crop_meta[self.key_original_result] = result
                 crop_meta[self.key_cropped_result] = None
@@ -962,6 +975,150 @@ class AiObjectDetectionCroppingGizmo(Gizmo):
                 crop_meta[self.key_is_last_crop] = True
                 data.meta.append(crop_meta, self.get_tags())
                 self.send_result(StreamData(img, data.meta))
+
+
+class CropCombiningGizmoBase(Gizmo):
+    """Gizmo to combine results coming after cropping gizmo, AiObjectDetectionCroppingGizmo.
+    It has two inputs: one for a stream of cropped and AI-processed results, and
+    another for a stream of original frames. It combines results from the first stream
+    and attaches them to the original frames.
+    """
+
+    def __init__(
+        self,
+        *,
+        stream_depth: int = 10,
+    ):
+        """Constructor.
+
+        - stream_depth: input stream depth for input 0
+        """
+
+        # input 0 is for crops, input 1 is for original frames
+        super().__init__([(stream_depth, False), (0, False)])
+
+    def run(self):
+        """Run gizmo"""
+
+        crop_input = self.get_input(0)
+        frame_input = self.get_input(1)
+
+        crop: Optional[StreamData] = None
+        combined_meta: Optional[StreamMeta] = None
+
+        for full_frame in frame_input:
+            if self._abort:
+                break
+
+            frame_id = full_frame.meta.find_last(tag_video)[
+                VideoSourceGizmo.key_frame_id
+            ]
+
+            # collect all crops for this frame
+            while True:
+                if crop is None:
+                    crop = crop_input.get()
+                    if crop == Stream._poison:
+                        self._abort = True
+                        break
+
+                assert crop is not None
+
+                crop_frame_id = crop.meta.find_last(tag_video)[
+                    VideoSourceGizmo.key_frame_id
+                ]
+
+                if crop_frame_id > frame_id:
+                    # crop is for the next frame: send full frame
+                    self.send_result(full_frame)
+                    break
+
+                if crop_frame_id < frame_id:
+                    # crop is for the previous frame: skip it
+                    crop = None
+                    continue
+
+                crop_meta = crop.meta.find_last(tag_crop)
+                if crop_meta is None:
+                    raise Exception(
+                        "Crop meta not found: you need to connect AiObjectDetectionCroppingGizmo to input 0"
+                    )
+
+                combined_meta = self.combine(crop.meta, crop_meta, combined_meta)
+                crop = None
+
+                if crop_meta[AiObjectDetectionCroppingGizmo.key_is_last_crop]:
+                    # last crop in the frame: send full frame
+                    self.send_result(StreamData(full_frame.data, combined_meta))
+                    combined_meta = None
+                    break
+
+    @abstractmethod
+    def combine(
+        self, meta: StreamMeta, crop_meta: dict, combined_meta: Optional[StreamMeta]
+    ) -> StreamMeta:
+        """Combine crop meta info into combined meta info.
+        To be implemented in derived classes.
+
+        - meta: meta info to combine
+        - crop_meta: crop meta info taken from `meta`; contains AiObjectDetectionCroppingGizmo meta
+        - combined_meta: meta info of combined frame; None for first crop in frame.
+        It is up to the implementer, what info combined meta will have.
+
+        Returns `combined_meta` with `meta` merged into it
+        """
+
+
+class ClassificationCropCombiningGizmo(CropCombiningGizmoBase):
+    """Gizmo to combine classification results coming after AiObjectDetectionCroppingGizmo cropping gizmo
+    and subsequent classification model AiGizmo."""
+
+    def combine(
+        self, meta: StreamMeta, crop_meta: dict, combined_meta: Optional[StreamMeta]
+    ) -> StreamMeta:
+        """Combine crop meta info into combined meta info.
+
+        - meta: meta info to combine
+        - crop_meta: crop meta info taken from `meta`; contains AiObjectDetectionCroppingGizmo meta
+        - combined_meta: meta info of combined frame; None for first crop in frame.
+
+        Returns `combined_meta` which contains original object detection result, where
+        labels, scores, and category IDs are replaced with classification results.
+        """
+
+        # last inference meta should be classification result
+        classification_meta = meta.find_last(tag_inference)
+        if classification_meta is None or not isinstance(
+            classification_meta, dg.postprocessor.ClassificationResults
+        ):
+            raise Exception(
+                "Classification meta not found: you need to connect AI gizmo with classification model to input 0"
+            )
+        classification_result = classification_meta.results[0]
+
+        # patch object detection result with classification results
+        object_detection_result = crop_meta[
+            AiObjectDetectionCroppingGizmo.key_cropped_result
+        ]
+        if object_detection_result is not None:
+            label = classification_result.get("label")
+            if label is not None:
+                object_detection_result["label"] = label
+            score = classification_result.get("score")
+            if score is not None:
+                object_detection_result["score"] = score
+            category_id = classification_result.get("category_id")
+            if category_id is not None:
+                object_detection_result["category_id"] = category_id
+
+        # create combined meta if not done yet
+        if combined_meta is None:
+            combined_meta = meta.clone()
+            # remove all crop-related metas
+            combined_meta.remove_last(tag_crop)
+            combined_meta.remove_last(tag_inference)
+
+        return combined_meta
 
 
 class AiResultCombiningGizmo(Gizmo):
@@ -972,16 +1129,14 @@ class AiResultCombiningGizmo(Gizmo):
         inp_cnt: int,
         *,
         stream_depth: int = 10,
-        allow_drop: bool = False,
     ):
         """Constructor.
 
         - inp_cnt: number of inputs to combine
         - stream_depth: input stream depth
-        - allow_drop: allow dropping frames from input stream on overflow
         """
         self._inp_cnt = inp_cnt
-        super().__init__([(stream_depth, allow_drop)] * inp_cnt)
+        super().__init__([(stream_depth, False)] * inp_cnt)
 
     def run(self):
         """Run gizmo"""
