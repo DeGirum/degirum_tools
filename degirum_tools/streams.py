@@ -21,6 +21,7 @@ from contextlib import ExitStack
 from .environment import get_test_mode
 from .video_support import open_video_stream, open_video_writer
 from .ui_support import Display
+from .result_analyzer_base import image_overlay_substitute
 
 #
 # predefined meta tags
@@ -1244,9 +1245,12 @@ class AiAnalyzerGizmo(Gizmo):
                 break
 
             inference_meta = data.meta.find_last(tag_inference)
-            if inference_meta is not None:
+            if inference_meta is not None and isinstance(
+                inference_meta, dg.postprocessor.InferenceResults
+            ):
                 for analyzer in self._analyzers:
                     analyzer.analyze(inference_meta)
+                image_overlay_substitute(inference_meta, self._analyzers)
             self.send_result(data)
 
 

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import Union, Optional, List
 from .image_tools import detect_motion
 from .math_support import nms, NmsBoxSelectionPolicy
-from .result_analyzer_base import ResultAnalyzerBase
+from .result_analyzer_base import ResultAnalyzerBase, image_overlay_substitute
 from enum import Enum
 
 
@@ -162,26 +162,7 @@ class CompoundModelBase(ModelLike):
                 for analyzer in self._analyzers:
                     analyzer.analyze(transformed_result2)
 
-                def analyzer_image_overlay(self):
-                    """Image overlay method with all analyzer annotations applied"""
-                    image = self._orig_image_overlay
-                    for analyzer in self._analyzers:
-                        image = analyzer.annotate(self, image)
-                    return image
-
-                # redefine `image_overlay` property to `analyzer_image_overlay` function so
-                # that it will be called instead of the original one to annotate the image with analyzer results;
-                # preserve original `image_overlay` property as `_orig_image_overlay` property;
-                # assign analyzer list to `_analyzers` attribute
-                transformed_result2.__class__ = type(
-                    transformed_result2.__class__.__name__ + "_custom",
-                    (transformed_result2.__class__,),
-                    {
-                        "image_overlay": property(analyzer_image_overlay),
-                        "_orig_image_overlay": transformed_result2.__class__.image_overlay,
-                    },
-                )
-                setattr(transformed_result2, "_analyzers", self._analyzers)
+                image_overlay_substitute(transformed_result2, self._analyzers)
 
             return transformed_result2
 

@@ -13,6 +13,7 @@ import degirum_tools
 import degirum_tools.streams as streams
 import degirum as dg
 import cv2
+import numpy as np
 
 
 class VideoSink(streams.Gizmo):
@@ -307,15 +308,19 @@ def test_streams_analyzer_ai(short_video, classification_model):
 
     class TestAnalyzer(degirum_tools.ResultAnalyzerBase):
 
-        def __init__(self, attribute: str):
-            self.attribute = attribute
+        def __init__(self, level: int):
+            self.level = level
 
         def analyze(self, result):
-            setattr(result, self.attribute, 1)
+            setattr(result, f"attr{self.level}", 1)
             return result
 
+        def annotate(self, result, image):
+            image[self.level, self.level] = (self.level, 0, 0)
+            return image
+
     N = 3
-    analyzers = [TestAnalyzer(f"attr{i}") for i in range(N)]
+    analyzers = [TestAnalyzer(i) for i in range(N)]
 
     source = streams.VideoSourceGizmo(short_video)
     ai = streams.AiSimpleGizmo(model)
@@ -327,8 +332,10 @@ def test_streams_analyzer_ai(short_video, classification_model):
     for frame in sink.frames:
         ai_meta = frame.meta.find_last(streams.tag_inference)
         assert ai_meta is not None
+        img = ai_meta.image_overlay
         for i in range(N):
             assert hasattr(ai_meta, f"attr{i}") and getattr(ai_meta, f"attr{i}") == 1
+            assert np.array_equal(img[i, i], [i, 0, 0])
 
 
 def test_streams_error_handling():

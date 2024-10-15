@@ -54,3 +54,33 @@ class ResultAnalyzerBase(ABC):
         """
         self.analyze(result)
         return self.annotate(result, image)
+
+
+def image_overlay_substitute(result, analyzers: list[ResultAnalyzerBase]):
+    """Substitutes the `image_overlay` property of the given `result` object with a new one
+    that overlays the original image with the analyzer annotations.
+
+    - result: PySDK model result object
+    - analyzers: list of analyzers to apply to the result
+    """
+
+    def analyzer_image_overlay(self):
+        """Image overlay method with all analyzer annotations applied"""
+        image = self._orig_image_overlay
+        for analyzer in self._analyzers:
+            image = analyzer.annotate(self, image)
+        return image
+
+    # redefine `image_overlay` property to `analyzer_image_overlay` function so
+    # that it will be called instead of the original one to annotate the image with analyzer results;
+    # preserve original `image_overlay` property as `_orig_image_overlay` property;
+    # assign analyzer list to `_analyzers` attribute
+    result.__class__ = type(
+        result.__class__.__name__ + "_custom",
+        (result.__class__,),
+        {
+            "image_overlay": property(analyzer_image_overlay),
+            "_orig_image_overlay": result.__class__.image_overlay,
+        },
+    )
+    setattr(result, "_analyzers", analyzers)
