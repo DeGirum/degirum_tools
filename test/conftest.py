@@ -62,3 +62,16 @@ def classification_model(zoo_dir, classification_model_name):
     """Load classification model from local zoo"""
     with dg.load_model(classification_model_name, dg.LOCAL, zoo_dir) as model:
         yield model
+
+
+@pytest.fixture()
+def regression_model_name():
+    """Regression model name"""
+    return "yolov8n_relu6_age--256x256_quant_tflite_cpu_1"
+
+
+@pytest.fixture()
+def regression_model(zoo_dir, regression_model_name):
+    """Load regression model from local zoo"""
+    with dg.load_model(regression_model_name, dg.LOCAL, zoo_dir) as model:
+        yield model

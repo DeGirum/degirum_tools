@@ -21,7 +21,9 @@ from contextlib import ExitStack
 from .environment import get_test_mode
 from .video_support import open_video_stream, open_video_writer
 from .ui_support import Display
+from .image_tools import crop_image, image_size
 from .result_analyzer_base import image_overlay_substitute
+from .crop_extent import CropExtentOptions, extend_bbox
 
 #
 # predefined meta tags
@@ -900,6 +902,9 @@ class AiObjectDetectionCroppingGizmo(Gizmo):
     - "cropped_index": the number of that sub-result
     - "is_last_crop": the flag indicating that this is the last crop in the frame
     The last two key are present only if at least one object is detected in a frame.
+
+    The validate_bbox() method can be overloaded in derived classes to filter out
+    undesirable objects.
     """
 
     # meta keys
@@ -913,6 +918,9 @@ class AiObjectDetectionCroppingGizmo(Gizmo):
         labels: List[str],
         *,
         send_original_on_no_objects: bool = True,
+        crop_extent: float = 0.0,
+        crop_extent_option: CropExtentOptions = CropExtentOptions.ASPECT_RATIO_NO_ADJUSTMENT,
+        crop_aspect_ratio: float = 1.0,
         stream_depth: int = 10,
         allow_drop: bool = False,
     ):
@@ -920,15 +928,21 @@ class AiObjectDetectionCroppingGizmo(Gizmo):
 
         - labels: list of class labels to process
         - send_original_on_no_objects: send original frame when no objects detected
+        - crop_extent: extent of cropping in percent of bbox size
+        - crop_extent_option: method of applying extending crop to the input image
+        - crop_aspect_ratio: desired aspect ratio of the cropped image (W/H)
         - stream_depth: input stream depth
         - allow_drop: allow dropping frames from input stream on overflow
         """
 
         # we use unlimited frame queue #0 to not block any source gizmo
-        super().__init__([(0, allow_drop), (stream_depth, allow_drop)])
+        super().__init__([(stream_depth, allow_drop)])
 
         self._labels = labels
         self._send_original_on_no_objects = send_original_on_no_objects
+        self._crop_extent = crop_extent
+        self._crop_extent_option = crop_extent_option
+        self._crop_aspect_ratio = crop_aspect_ratio
 
     def get_tags(self) -> List[str]:
         """Get list of tags assigned to this gizmo"""
@@ -948,86 +962,138 @@ class AiObjectDetectionCroppingGizmo(Gizmo):
                 continue
 
             nresults = len(result.results)
-
-            if nresults > 0:
+            has_results = nresults > 0
+            if has_results:
+                has_results = False
                 for i in range(nresults):
                     r = result.results[i]
                     bbox = r.get("bbox")
                     label = r.get("label")
                     if not bbox or not label or label not in self._labels:
                         continue
-                    crop = Display.crop(result.image, bbox)
 
-                    crop_meta = {}
-                    crop_meta[self.key_original_result] = result
-                    crop_meta[self.key_cropped_result] = r
-                    crop_meta[self.key_cropped_index] = i
-                    crop_meta[self.key_is_last_crop] = i == nresults - 1
+                    # discard objects which do not pass validation
+                    if not self.validate_bbox(result, i):
+                        continue
+
+                    # apply crop extent
+                    ext_bbox = extend_bbox(
+                        bbox,
+                        self._crop_extent_option,
+                        self._crop_extent,
+                        self._crop_aspect_ratio,
+                        image_size(result.image),
+                    )
+                    r["bbox"] = ext_bbox  # patch bbox in the result with extended bbox
+
+                    crop = crop_image(result.image, ext_bbox)
+
+                    crop_meta = {
+                        self.key_original_result: result,
+                        self.key_cropped_result: r,
+                        self.key_cropped_index: i,
+                        self.key_is_last_crop: i == nresults - 1,
+                    }
                     new_meta = data.meta.clone()
                     new_meta.append(crop_meta, self.get_tags())
                     self.send_result(StreamData(crop, new_meta))
+                    has_results = True
 
-            elif self._send_original_on_no_objects:
+            if not has_results and self._send_original_on_no_objects:
                 # no objects detected: send original result
-                crop_meta = {}
-                crop_meta[self.key_original_result] = result
-                crop_meta[self.key_cropped_result] = None
-                crop_meta[self.key_cropped_index] = -1
-                crop_meta[self.key_is_last_crop] = True
+                crop_meta = {
+                    self.key_original_result: result,
+                    self.key_cropped_result: None,
+                    self.key_cropped_index: -1,
+                    self.key_is_last_crop: True,
+                }
                 data.meta.append(crop_meta, self.get_tags())
                 self.send_result(StreamData(img, data.meta))
 
+    def validate_bbox(
+        self, result: dg.postprocessor.InferenceResults, idx: int
+    ) -> bool:
+        """Validate detected object. To be overloaded in derived classes.
 
-class CropCombiningGizmoBase(Gizmo):
-    """Gizmo to combine results coming after cropping gizmo, AiObjectDetectionCroppingGizmo.
-    It has two inputs: one for a stream of cropped and AI-processed results, and
-    another for a stream of original frames. It combines results from the first stream
+        - result: inference result
+        - idx: index of object within `result.results[]` list to validate
+
+        Returns True if object is accepted to be used for crop, False otherwise
+        """
+        return True
+
+
+class CropCombiningGizmo(Gizmo):
+    """Gizmo to combine results coming after AiObjectDetectionCroppingGizmo cropping gizmo(s).
+    It has N+1 inputs: one for a stream of original frames, and N other inputs for streams of cropped
+    and AI-processed results. It combines results from all crop streams
     and attaches them to the original frames.
     """
 
+    key_extra_results = (
+        "extra_results"  # key for extra results list in inference detection results
+    )
+
     def __init__(
         self,
+        crop_inputs_num: int = 1,
         *,
         stream_depth: int = 10,
     ):
         """Constructor.
 
-        - stream_depth: input stream depth for input 0
+        - crop_inputs_num: number of crop inputs
+        - stream_depth: input stream depth for crop inputs
         """
 
-        # input 0 is for crops, input 1 is for original frames
-        super().__init__([(stream_depth, False), (0, False)])
+        # input 0 is for original frames, it should be unlimited depth
+        # we never drop frames in combiner to avoid mis-synchronization between original and crop streams
+        input_def = [(0, False)] + [(stream_depth, False)] * crop_inputs_num
+        super().__init__(input_def)
 
     def run(self):
         """Run gizmo"""
 
-        crop_input = self.get_input(0)
-        frame_input = self.get_input(1)
-
-        crop: Optional[StreamData] = None
+        frame_input = self.get_input(0)
+        crops: list[StreamData] = []
         combined_meta: Optional[StreamMeta] = None
 
         for full_frame in frame_input:
             if self._abort:
                 break
 
-            frame_id = full_frame.meta.find_last(tag_video)[
-                VideoSourceGizmo.key_frame_id
-            ]
+            # get index of full frame
+            video_meta = full_frame.meta.find_last(tag_video)
+            if video_meta is None:
+                raise Exception(
+                    f"Video meta not found: you need to have {VideoSourceGizmo.__class__.__name__} in upstream of input 0"
+                )
+            frame_id = video_meta[VideoSourceGizmo.key_frame_id]
 
             # collect all crops for this frame
             while True:
-                if crop is None:
-                    crop = crop_input.get()
-                    if crop == Stream._poison:
+                if not crops:
+                    # read all crop inputs
+                    crops = [inp.get() for inp in self.get_inputs()[1:]]
+                    if Stream._poison in crops:
                         self._abort = True
                         break
 
-                assert crop is not None
-
-                crop_frame_id = crop.meta.find_last(tag_video)[
-                    VideoSourceGizmo.key_frame_id
+                # get index of cropped frame
+                video_metas = [crop.meta.find_last(tag_video) for crop in crops]
+                if None in video_metas:
+                    raise Exception(
+                        f"Video meta not found: you need to have {VideoSourceGizmo.__class__.__name__} in upstream of all crop inputs"
+                    )
+                crop_frame_ids = [
+                    meta[VideoSourceGizmo.key_frame_id] for meta in video_metas if meta
                 ]
+
+                if len(set(crop_frame_ids)) != 1:
+                    raise Exception(
+                        "Crop frame IDs are not synchronized. Make sure all crop inputs have the same {AiObjectDetectionCroppingGizmo.__class__.__name__} in upstream"
+                    )
+                crop_frame_id = crop_frame_ids[0]
 
                 if crop_frame_id > frame_id:
                     # crop is for the next frame: send full frame
@@ -1036,90 +1102,67 @@ class CropCombiningGizmoBase(Gizmo):
 
                 if crop_frame_id < frame_id:
                     # crop is for the previous frame: skip it
-                    crop = None
+                    crops = []
                     continue
 
-                crop_meta = crop.meta.find_last(tag_crop)
-                if crop_meta is None:
+                crop_metas = [crop.meta.find_last(tag_crop) for crop in crops]
+                if None in crop_metas:
                     raise Exception(
-                        "Crop meta not found: you need to connect AiObjectDetectionCroppingGizmo to input 0"
+                        f"Crop meta(s) not found: you need to have {AiObjectDetectionCroppingGizmo.__class__.__name__} in upstream of all crop inputs"
                     )
 
-                combined_meta = self.combine(crop.meta, crop_meta, combined_meta)
-                crop = None
+                crop_meta = crop_metas[0]
+                assert crop_meta
+
+                if not all(crop_meta == cm for cm in crop_metas[1:]):
+                    raise Exception(
+                        "Crop metas are not synchronized. Make sure all crop inputs have the same {AiObjectDetectionCroppingGizmo.__class__.__name__} in upstream"
+                    )
+
+                inference_metas = [crop.meta.find_last(tag_inference) for crop in crops]
+                if None in inference_metas:
+                    raise Exception(
+                        "Inference meta(s) not found: you need to have some inference-type gizmo in upstream of all crop inputs"
+                    )
+
+                # create combined meta if not done yet
+                if combined_meta is None:
+                    combined_meta = crops[0].meta.clone()
+                    # remove all crop-related metas
+                    combined_meta.remove_last(tag_crop)
+                    combined_meta.remove_last(tag_inference)
+                    # append original object detection result clone
+                    combined_meta.append(
+                        self._clone_result(
+                            crop_meta[
+                                AiObjectDetectionCroppingGizmo.key_original_result
+                            ]
+                        ),
+                        tag_inference,
+                    )
+
+                # append all crop inference results to the combined meta
+                ri = crop_meta[AiObjectDetectionCroppingGizmo.key_cropped_index]
+                if ri >= 0:
+                    result = combined_meta.find_last(tag_inference)
+                    assert result is not None
+                    result._inference_results[ri][
+                        self.key_extra_results
+                    ] = inference_metas
+
+                crops = []  # mark crops as processed
 
                 if crop_meta[AiObjectDetectionCroppingGizmo.key_is_last_crop]:
                     # last crop in the frame: send full frame
                     self.send_result(StreamData(full_frame.data, combined_meta))
-                    combined_meta = None
+                    combined_meta = None  # mark combined_meta as processed
                     break
 
-    @abstractmethod
-    def combine(
-        self, meta: StreamMeta, crop_meta: dict, combined_meta: Optional[StreamMeta]
-    ) -> StreamMeta:
-        """Combine crop meta info into combined meta info.
-        To be implemented in derived classes.
-
-        - meta: meta info to combine
-        - crop_meta: crop meta info taken from `meta`; contains AiObjectDetectionCroppingGizmo meta
-        - combined_meta: meta info of combined frame; None for first crop in frame.
-        It is up to the implementer, what info combined meta will have.
-
-        Returns `combined_meta` with `meta` merged into it
-        """
-
-
-class ClassificationCropCombiningGizmo(CropCombiningGizmoBase):
-    """Gizmo to combine classification results coming after AiObjectDetectionCroppingGizmo cropping gizmo
-    and subsequent classification model AiGizmo."""
-
-    def combine(
-        self, meta: StreamMeta, crop_meta: dict, combined_meta: Optional[StreamMeta]
-    ) -> StreamMeta:
-        """Combine crop meta info into combined meta info.
-
-        - meta: meta info to combine
-        - crop_meta: crop meta info taken from `meta`; contains AiObjectDetectionCroppingGizmo meta
-        - combined_meta: meta info of combined frame; None for first crop in frame.
-
-        Returns `combined_meta` which contains original object detection result, where
-        labels, scores, and category IDs are replaced with classification results.
-        """
-
-        # last inference meta should be classification result
-        classification_meta = meta.find_last(tag_inference)
-        if classification_meta is None or not isinstance(
-            classification_meta, dg.postprocessor.ClassificationResults
-        ):
-            raise Exception(
-                "Classification meta not found: you need to connect AI gizmo with classification model to input 0"
-            )
-        classification_result = classification_meta.results[0]
-
-        # patch object detection result with classification results
-        object_detection_result = crop_meta[
-            AiObjectDetectionCroppingGizmo.key_cropped_result
-        ]
-        if object_detection_result is not None:
-            label = classification_result.get("label")
-            if label is not None:
-                object_detection_result["label"] = label
-            score = classification_result.get("score")
-            if score is not None:
-                object_detection_result["score"] = score
-            category_id = classification_result.get("category_id")
-            if category_id is not None:
-                object_detection_result["category_id"] = category_id
-
-        # create combined meta if not done yet
-        if combined_meta is None:
-            combined_meta = meta.clone()
-            # remove all crop-related metas
-            combined_meta.remove_last(tag_crop)
-            combined_meta.remove_last(tag_inference)
-
-        return combined_meta
+    def _clone_result(self, result):
+        """Clone inference result object with deepcopy of `_inference_results` list"""
+        clone = copy.copy(result)
+        clone._inference_results = copy.deepcopy(result._inference_results)
+        return clone
 
 
 class AiResultCombiningGizmo(Gizmo):

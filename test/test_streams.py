@@ -234,6 +234,28 @@ def test_streams_cropping_ai(short_video, detection_model):
             assert crop_meta[cropper.key_cropped_index] == -1
             assert crop_meta[cropper.key_cropped_result] is None
 
+    # test for validate_bbox()
+
+    class NoValidCropsGizmo(streams.AiObjectDetectionCroppingGizmo):
+        def validate_bbox(
+            self, result: dg.postprocessor.InferenceResults, idx: int
+        ) -> bool:
+            return False
+
+    source = streams.VideoSourceGizmo(short_video)
+    ai = streams.AiSimpleGizmo(model)
+    non_valid_cropper = NoValidCropsGizmo(["Car"], send_original_on_no_objects=False)
+    sink = VideoSink()
+    streams.Composition(source >> ai >> non_valid_cropper >> sink).start()
+    assert sink.frames_cnt == 0
+
+    source = streams.VideoSourceGizmo(short_video)
+    ai = streams.AiSimpleGizmo(model)
+    non_valid_cropper = NoValidCropsGizmo(["Car"], send_original_on_no_objects=True)
+    sink = VideoSink()
+    streams.Composition(source >> ai >> non_valid_cropper >> sink).start()
+    assert sink.frames_cnt == source.result_cnt
+
 
 def test_streams_combining_ai(short_video, zoo_dir, detection_model_name):
     """Test for AiResultCombiningGizmo"""
@@ -442,35 +464,36 @@ def test_streams_sink(short_video):
         assert nresults == source.result_cnt
 
 
-def test_streams_crop_combining_classification(
-    short_video, detection_model, classification_model
+def test_streams_crop_combining(
+    short_video, detection_model, classification_model, regression_model
 ):
-    """Test for ClassificationCropCombiningGizmo"""
+    """Test for CropCombiningGizmo"""
 
     obj_label = "Car"
     source = streams.VideoSourceGizmo(short_video)
     detector = streams.AiSimpleGizmo(detection_model)
     crop = streams.AiObjectDetectionCroppingGizmo([obj_label])
-    classifier = streams.AiSimpleGizmo(classification_model)
-    combiner = streams.ClassificationCropCombiningGizmo()
+    classifier1 = streams.AiSimpleGizmo(classification_model)
+    classifier2 = streams.AiSimpleGizmo(regression_model)
+    combiner = streams.CropCombiningGizmo(2)
     sink = VideoSink()
 
     streams.Composition(
-        source >> detector >> crop >> classifier >> combiner[0] >> sink,
-        source >> combiner[1],
+        source >> detector >> crop,
+        source >> combiner[0],
+        crop >> classifier1 >> combiner[1],
+        crop >> classifier2 >> combiner[2],
+        combiner >> sink,
     ).start()
 
     nframes = source.result_cnt
     assert (
         detector.result_cnt == nframes
         and crop.result_cnt > nframes
-        and classifier.result_cnt > nframes
+        and classifier1.result_cnt > nframes
+        and classifier2.result_cnt > nframes
         and combiner.result_cnt == nframes
         and sink.frames_cnt == nframes
-    )
-
-    cat_id = next(
-        k for k, v in classification_model.label_dictionary.items() if v == obj_label
     )
 
     for frame in sink.frames:
@@ -478,5 +501,12 @@ def test_streams_crop_combining_classification(
         if ai_meta is not None:
             assert isinstance(ai_meta, dg.postprocessor.DetectionResults)
             for r in ai_meta.results:
-                assert r["label"] == obj_label
-                assert r["category_id"] == cat_id
+                assert streams.CropCombiningGizmo.key_extra_results in r
+                extra_results = r[streams.CropCombiningGizmo.key_extra_results]
+                assert len(extra_results) == 2
+                assert all(
+                    isinstance(r, dg.postprocessor.ClassificationResults)
+                    for r in extra_results
+                )
+                assert extra_results[0].results[0]["label"] == obj_label
+                assert extra_results[1].results[0]["label"] == "Age"
