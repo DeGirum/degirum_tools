@@ -522,7 +522,7 @@ class Display:
                 # PIL image: convert to OpenCV format
                 img = np.array(img)[:, :, ::-1]
             if not isinstance(img, np.ndarray):
-                raise Exception("Unsupported image type")
+                raise Exception(f"Display: unsupported image type {type(img)}")
             return img
 
         orig_img = img

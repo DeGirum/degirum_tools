@@ -64,23 +64,23 @@ def image_overlay_substitute(result, analyzers: list[ResultAnalyzerBase]):
     - analyzers: list of analyzers to apply to the result
     """
 
-    def analyzer_image_overlay(self):
+    def _overlay_analyzer_annotations(self):
         """Image overlay method with all analyzer annotations applied"""
-        image = self._orig_image_overlay
+        image = self._orig_image_overlay_analyzer_annotations
         for analyzer in self._analyzers:
             image = analyzer.annotate(self, image)
         return image
 
-    # redefine `image_overlay` property to `analyzer_image_overlay` function so
+    # redefine `image_overlay` property to `_overlay_analyzer_annotations` function so
     # that it will be called instead of the original one to annotate the image with analyzer results;
-    # preserve original `image_overlay` property as `_orig_image_overlay` property;
+    # preserve original `image_overlay` property as `_orig_image_overlay_analyzer_annotations` property;
     # assign analyzer list to `_analyzers` attribute
     result.__class__ = type(
-        result.__class__.__name__ + "_custom",
+        result.__class__.__name__ + "_overlay_analyzer_annotations",
         (result.__class__,),
         {
-            "image_overlay": property(analyzer_image_overlay),
-            "_orig_image_overlay": result.__class__.image_overlay,
+            "image_overlay": property(_overlay_analyzer_annotations),
+            "_orig_image_overlay_analyzer_annotations": result.__class__.image_overlay,
         },
     )
     setattr(result, "_analyzers", analyzers)

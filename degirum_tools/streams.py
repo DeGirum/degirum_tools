@@ -958,8 +958,9 @@ class AiObjectDetectionCroppingGizmo(Gizmo):
             img = data.data
             result = data.meta.find_last(tag_inference)
             if result is None:
-                self.send_result(data)
-                continue
+                raise Exception(
+                    f"{self.__class__.__name__}: inference meta not found: you need to have object detection gizmo in upstream"
+                )
 
             nresults = len(result.results)
             has_results = nresults > 0
@@ -968,8 +969,7 @@ class AiObjectDetectionCroppingGizmo(Gizmo):
                 for i in range(nresults):
                     r = result.results[i]
                     bbox = r.get("bbox")
-                    label = r.get("label")
-                    if not bbox or not label or label not in self._labels:
+                    if not bbox:
                         continue
 
                     # discard objects which do not pass validation
@@ -1030,9 +1030,8 @@ class CropCombiningGizmo(Gizmo):
     and attaches them to the original frames.
     """
 
-    key_extra_results = (
-        "extra_results"  # key for extra results list in inference detection results
-    )
+    # key for extra results list in inference detection results
+    key_extra_results = "extra_results"
 
     def __init__(
         self,
@@ -1066,7 +1065,7 @@ class CropCombiningGizmo(Gizmo):
             video_meta = full_frame.meta.find_last(tag_video)
             if video_meta is None:
                 raise Exception(
-                    f"Video meta not found: you need to have {VideoSourceGizmo.__class__.__name__} in upstream of input 0"
+                    f"{self.__class__.__name__}: video meta not found: you need to have {VideoSourceGizmo.__class__.__name__} in upstream of input 0"
                 )
             frame_id = video_meta[VideoSourceGizmo.key_frame_id]
 
@@ -1083,7 +1082,7 @@ class CropCombiningGizmo(Gizmo):
                 video_metas = [crop.meta.find_last(tag_video) for crop in crops]
                 if None in video_metas:
                     raise Exception(
-                        f"Video meta not found: you need to have {VideoSourceGizmo.__class__.__name__} in upstream of all crop inputs"
+                        f"{self.__class__.__name__}: video meta not found: you need to have {VideoSourceGizmo.__class__.__name__} in upstream of all crop inputs"
                     )
                 crop_frame_ids = [
                     meta[VideoSourceGizmo.key_frame_id] for meta in video_metas if meta
@@ -1091,7 +1090,7 @@ class CropCombiningGizmo(Gizmo):
 
                 if len(set(crop_frame_ids)) != 1:
                     raise Exception(
-                        "Crop frame IDs are not synchronized. Make sure all crop inputs have the same {AiObjectDetectionCroppingGizmo.__class__.__name__} in upstream"
+                        f"{self.__class__.__name__}: crop frame IDs are not synchronized. Make sure all crop inputs have the same {AiObjectDetectionCroppingGizmo.__class__.__name__} in upstream"
                     )
                 crop_frame_id = crop_frame_ids[0]
 
@@ -1105,10 +1104,14 @@ class CropCombiningGizmo(Gizmo):
                     crops = []
                     continue
 
+                # at this point we do have both crop and after-crop inference metas for the current frame
+                # even if there are no real crops (cropped_index==-1), because we just checked that
+                # all crop_frame_ids are equal to frame_id, so crop inference was not skipped
+
                 crop_metas = [crop.meta.find_last(tag_crop) for crop in crops]
                 if None in crop_metas:
                     raise Exception(
-                        f"Crop meta(s) not found: you need to have {AiObjectDetectionCroppingGizmo.__class__.__name__} in upstream of all crop inputs"
+                        f"{self.__class__.__name__}: crop meta(s) not found: you need to have {AiObjectDetectionCroppingGizmo.__class__.__name__} in upstream of all crop inputs"
                     )
 
                 crop_meta = crop_metas[0]
@@ -1116,14 +1119,13 @@ class CropCombiningGizmo(Gizmo):
 
                 if not all(crop_meta == cm for cm in crop_metas[1:]):
                     raise Exception(
-                        "Crop metas are not synchronized. Make sure all crop inputs have the same {AiObjectDetectionCroppingGizmo.__class__.__name__} in upstream"
+                        f"{self.__class__.__name__}: crop metas are not synchronized. Make sure all crop inputs have the same {AiObjectDetectionCroppingGizmo.__class__.__name__} in upstream"
                     )
 
-                inference_metas = [crop.meta.find_last(tag_inference) for crop in crops]
-                if None in inference_metas:
-                    raise Exception(
-                        "Inference meta(s) not found: you need to have some inference-type gizmo in upstream of all crop inputs"
-                    )
+                orig_result = crop_meta[
+                    AiObjectDetectionCroppingGizmo.key_original_result
+                ]
+                bbox_idx = crop_meta[AiObjectDetectionCroppingGizmo.key_cropped_index]
 
                 # create combined meta if not done yet
                 if combined_meta is None:
@@ -1132,23 +1134,24 @@ class CropCombiningGizmo(Gizmo):
                     combined_meta.remove_last(tag_crop)
                     combined_meta.remove_last(tag_inference)
                     # append original object detection result clone
-                    combined_meta.append(
-                        self._clone_result(
-                            crop_meta[
-                                AiObjectDetectionCroppingGizmo.key_original_result
-                            ]
-                        ),
-                        tag_inference,
-                    )
+                    combined_meta.append(self._clone_result(orig_result), tag_inference)
 
                 # append all crop inference results to the combined meta
-                ri = crop_meta[AiObjectDetectionCroppingGizmo.key_cropped_index]
-                if ri >= 0:
+                if bbox_idx >= 0:
+
+                    inference_metas = [
+                        crop.meta.find_last(tag_inference) for crop in crops
+                    ]
+                    if any(im is orig_result for im in inference_metas):
+                        raise Exception(
+                            f"{self.__class__.__name__}: after-crop inference meta(s) not found: you need to have some inference-type gizmo in upstream of all crop inputs"
+                        )
+
                     result = combined_meta.find_last(tag_inference)
                     assert result is not None
-                    result._inference_results[ri][
-                        self.key_extra_results
-                    ] = inference_metas
+                    result._inference_results[bbox_idx][self.key_extra_results] = (
+                        self._adjust_results(result, bbox_idx, inference_metas)
+                    )
 
                 crops = []  # mark crops as processed
 
@@ -1158,10 +1161,62 @@ class CropCombiningGizmo(Gizmo):
                     combined_meta = None  # mark combined_meta as processed
                     break
 
+    def _adjust_results(self, result, bbox_idx: int, cropped_results: list) -> list:
+        """Adjust inference results for the crop: recalculates bbox coordinates to original image,
+        attach original image to the result, and return the list of adjusted results"""
+
+        bbox = result._inference_results[bbox_idx].get("bbox")
+        assert bbox
+        tl = bbox[:2]
+
+        for cr in cropped_results:
+            # attach original image to the result
+            cr._input_image = result._input_image
+            # adjust all found coordinates to original image
+            for r in cr._inference_results:
+                if "bbox" in r:
+                    r["bbox"][:] = [a + b for a, b in zip(r["bbox"], tl + tl)]
+                if "landmarks" in r:
+                    for lm_list in r["landmarks"]:
+                        lm = lm_list["landmark"]
+                        lm[:2] = [lm[0] + tl[0], lm[1] + tl[1]]
+
+        return cropped_results
+
     def _clone_result(self, result):
         """Clone inference result object with deepcopy of `_inference_results` list"""
+
+        def _overlay_extra_results(result):
+            """Produce image overlay with drawing all extra results"""
+
+            orig_image = result._input_image
+            overlay_image = result._orig_image_overlay_extra_results
+
+            for res in result._inference_results:
+                if self.key_extra_results in res:
+                    bbox = res.get("bbox")
+                    if bbox:
+                        for extra_res in res[self.key_extra_results]:
+                            extra_res._input_image = overlay_image
+                            overlay_image = extra_res.image_overlay
+                            extra_res._input_image = orig_image
+            return overlay_image
+
         clone = copy.copy(result)
         clone._inference_results = copy.deepcopy(result._inference_results)
+
+        # redefine `image_overlay` property to `_overlay_extra_results` function so
+        # that it will be called instead of the original one to annotate the image with extra results;
+        # preserve original `image_overlay` property as `_orig_image_overlay_extra_results` property;
+        clone.__class__ = type(
+            clone.__class__.__name__ + "_overlay_extra_results",
+            (clone.__class__,),
+            {
+                "image_overlay": property(_overlay_extra_results),
+                "_orig_image_overlay_extra_results": clone.__class__.image_overlay,
+            },
+        )
+
         return clone
 
 

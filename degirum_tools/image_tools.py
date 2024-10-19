@@ -41,13 +41,31 @@ def crop_image(img: ImageType, bbox: list):
     """Crop and return PIL/OpenCV image to given bbox
 
     Args:
-        img: OpenCV image
-        bbox (list): bounding box in format [x0, y0, x1, y1]
+        img: image
+        bbox: bounding box in format [x0, y0, x1, y1]
     """
     if isinstance(img, PILImage):
         return img.crop(tuple(bbox))
     else:
         return img[int(bbox[1]) : int(bbox[3]), int(bbox[0]) : int(bbox[2])]
+
+
+def paste_image(img: ImageType, crop: ImageType, bbox: list):
+    """Paste given crop image into bigger image into specified bbox
+
+    Args:
+        img: image to paste into
+        crop: crop image to use for pasting
+        bbox: bounding box to paste into in format [x0, y0, x1, y1]
+    """
+    if isinstance(img, PILImage) and isinstance(crop, PILImage):
+        img.paste(crop, (bbox[0], bbox[1]))
+    elif isinstance(img, np.ndarray) and isinstance(crop, np.ndarray):
+        img[round(bbox[1]) : round(bbox[3]), round(bbox[0]) : round(bbox[2])] = crop
+    else:
+        raise ValueError(
+            f"paste_image: image types {type(img)} and {type(crop)} do not match"
+        )
 
 
 def detect_motion(base_img: Optional[np.ndarray], img: ImageType) -> tuple:
