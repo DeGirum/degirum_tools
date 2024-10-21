@@ -1479,17 +1479,24 @@ class AiAnalyzerGizmo(Gizmo):
         self,
         analyzers: list,
         *,
+        filters: Optional[set] = None,
         stream_depth: int = 10,
         allow_drop: bool = False,
     ):
         """Constructor.
 
         - analyzers: list of analyzer objects
+        - filters: a set of event names or notifications. When filters are specified, only results, which have
+            at least one of the specified events and/or notifications, are passed through, other results are discarded.
+            Event names are specified in the configuration of `EventDetector` analyzers, and notification names are
+            specified in the configuration of `EventNotifier` analyzers. Filtering feature is useful when you need to
+            suppress unwanted results to reduce the load on the downstream gizmos.
         - stream_depth: input stream depth
         - allow_drop: allow dropping frames from input stream on overflow
         """
 
         self._analyzers = analyzers
+        self._filters = filters
         super().__init__([(stream_depth, allow_drop)])
 
     def run(self):
@@ -1499,6 +1506,7 @@ class AiAnalyzerGizmo(Gizmo):
             if self._abort:
                 break
 
+            filter_ok = True
             inference_meta = data.meta.find_last(tag_inference)
             if inference_meta is not None and isinstance(
                 inference_meta, dg.postprocessor.InferenceResults
@@ -1506,7 +1514,19 @@ class AiAnalyzerGizmo(Gizmo):
                 for analyzer in self._analyzers:
                     analyzer.analyze(inference_meta)
                 image_overlay_substitute(inference_meta, self._analyzers)
-            self.send_result(data)
+
+                if self._filters:
+                    if not (
+                        hasattr(inference_meta, "notifications")
+                        and (self._filters & inference_meta.notifications)
+                    ) and not (
+                        hasattr(inference_meta, "events_detected")
+                        and (self._filters & inference_meta.events_detected)
+                    ):
+                        filter_ok = False
+
+            if filter_ok:
+                self.send_result(data)
 
 
 class SinkGizmo(Gizmo):

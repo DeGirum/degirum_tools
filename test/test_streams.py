@@ -163,10 +163,10 @@ def test_streams_resizer(short_video):
         assert frame.data.shape == (h, w, 3)
 
 
-def test_streams_simple_ai(short_video, classification_model):
+def test_streams_simple_ai(short_video, detection_model):
     """Test for AiSimpleGizmo"""
 
-    model = classification_model
+    model = degirum_tools.RegionExtractionPseudoModel([[0, 0, 10, 20]], detection_model)
 
     source = streams.VideoSourceGizmo(short_video)
     ai = streams.AiSimpleGizmo(model)
@@ -258,12 +258,16 @@ def test_streams_cropping_ai(short_video, detection_model):
     assert sink.frames_cnt == source.result_cnt
 
 
-def test_streams_combining_ai(short_video, zoo_dir, detection_model_name):
+def test_streams_combining_ai(short_video, zoo_dir, detection_model):
     """Test for AiResultCombiningGizmo"""
 
     N = 3
-    zoo = dg.connect(dg.LOCAL, zoo_dir)
-    models = [zoo.load_model(detection_model_name) for _ in range(N)]
+    bboxes = [[0, 0, 10 * i, 10 * i] for i in range(1, N + 1)]
+
+    models = [
+        degirum_tools.RegionExtractionPseudoModel([bboxes[i]], detection_model)
+        for i in range(N)
+    ]
 
     source = streams.VideoSourceGizmo(short_video)
     ai = [streams.AiSimpleGizmo(models[i]) for i in range(N)]
@@ -279,12 +283,9 @@ def test_streams_combining_ai(short_video, zoo_dir, detection_model_name):
         ai_meta = frame.meta.find_last(streams.tag_inference)
         assert ai_meta is not None
         L = len(ai_meta.results)
-        assert L % N == 0
-        for i in range(1, N):
-            assert (
-                ai_meta.results[i * L // N : (i + 1) * L // N]
-                == ai_meta.results[0 : L // N]
-            )
+        assert L == N
+        for i, r in enumerate(ai_meta.results):
+            assert r["bbox"] == bboxes[i]
 
 
 def test_streams_preprocess_ai(short_video, classification_model):
@@ -324,18 +325,24 @@ def test_streams_preprocess_ai(short_video, classification_model):
         assert image_result.shape == model_shape
 
 
-def test_streams_analyzer_ai(short_video, classification_model):
+def test_streams_analyzer_ai(short_video, detection_model):
     """Test for AiAnalyzerGizmo"""
 
-    model = classification_model
+    model = degirum_tools.RegionExtractionPseudoModel([[0, 0, 10, 10]], detection_model)
 
     class TestAnalyzer(degirum_tools.ResultAnalyzerBase):
 
-        def __init__(self, level: int):
+        def __init__(self, level: int, *, event: str = "", notification: str = ""):
             self.level = level
+            self.event = event
+            self.notification = notification
 
         def analyze(self, result):
             setattr(result, f"attr{self.level}", 1)
+            if self.event:
+                result.events_detected = {self.event}
+            if self.notification:
+                result.notifications = {self.notification}
             return result
 
         def annotate(self, result, image):
@@ -359,6 +366,35 @@ def test_streams_analyzer_ai(short_video, classification_model):
         for i in range(N):
             assert hasattr(ai_meta, f"attr{i}") and getattr(ai_meta, f"attr{i}") == 1
             assert np.array_equal(img[i, i], [i, 0, 0])
+
+    stream_size = sink.frames_cnt
+
+    #
+    # test filters
+    #
+    event_name = "event1"
+    notification_name = "notification1"
+
+    def check_filters(
+        generate_event_name, generate_notification_name, expected_result_cnt
+    ):
+        analyzers = [
+            TestAnalyzer(
+                0, event=generate_event_name, notification=generate_notification_name
+            )
+        ]
+        source = streams.VideoSourceGizmo(short_video)
+        ai = streams.AiSimpleGizmo(model)
+        analyzer = streams.AiAnalyzerGizmo(
+            analyzers, filters={event_name, notification_name}
+        )
+        sink = VideoSink()
+        streams.Composition(source >> ai >> analyzer >> sink).start()
+        assert sink.frames_cnt == expected_result_cnt
+
+    check_filters("", "", 0)
+    check_filters(event_name, "", stream_size)
+    check_filters("", notification_name, stream_size)
 
 
 def test_streams_error_handling():
