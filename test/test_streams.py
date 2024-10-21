@@ -8,6 +8,7 @@
 #
 
 import time
+import os
 import pytest
 import degirum_tools
 import degirum_tools.streams as streams
@@ -510,3 +511,133 @@ def test_streams_crop_combining(
                 )
                 assert extra_results[0].results[0]["label"] == obj_label
                 assert extra_results[1].results[0]["label"] == "Age"
+
+
+def test_streams_load_composition():
+    """Test for load_composition"""
+
+    import tempfile, yaml, json
+
+    txt = """
+    gizmos:
+        source:
+            class: VideoSourceGizmo
+        resizer:
+            class: ResizingGizmo
+            params:
+                w: 320
+                h: 240
+                pad_method: "stretch"
+        display:
+            class: VideoDisplayGizmo
+            params:
+                window_titles: ["Original", "Resized"]
+                show_fps: True
+
+    connections:
+        - [source, [display, 0]]
+        - [source, resizer, [display, 1]]
+    """
+
+    def check(desc):
+        c = streams.load_composition(desc)
+        assert c is not None
+        assert len(c._gizmos) == 3
+        gizmo_classes = [g.__class__ for g in c._gizmos]
+        assert streams.VideoSourceGizmo is gizmo_classes[0]
+        assert streams.ResizingGizmo is gizmo_classes[1]
+        assert streams.VideoDisplayGizmo is gizmo_classes[2]
+
+        assert len(c._gizmos[0]._output_refs) == 2
+        assert len(c._gizmos[1]._output_refs) == 1
+        assert len(c._gizmos[2]._output_refs) == 0
+        assert c._gizmos[0]._output_refs[0] is c._gizmos[2].get_input(0)
+        assert c._gizmos[0]._output_refs[1] is c._gizmos[1].get_input(0)
+        assert c._gizmos[1]._output_refs[0] is c._gizmos[2].get_input(1)
+
+    # check YAML text
+    check(txt)
+
+    # check Python dict
+    check(yaml.safe_load(txt))
+
+    fname = ""
+
+    # check YAML file
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".yaml", delete=False
+        ) as yaml_file:
+            yaml_file.write(txt)
+            fname = yaml_file.name
+        check(fname)
+    finally:
+        os.unlink(fname)
+
+    # check JSON file
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".json", delete=False
+        ) as json_file:
+            json_file.write(json.dumps(yaml.safe_load(txt), indent=2))
+            fname = json_file.name
+        check(fname)
+    finally:
+        os.unlink(fname)
+
+    # check for gizmos in context
+    class MyGizmo(streams.Gizmo):
+        def __init__(self):
+            super().__init__([(0, False)])
+
+        def run(self):
+            pass
+
+    txt2 = """
+    gizmos:
+        source:
+            class: VideoSourceGizmo
+        mygizmo:
+            class: MyGizmo
+
+    connections:
+        - [source, mygizmo]
+    """
+
+    c = streams.load_composition(txt2, locals())
+    assert len(c._gizmos) == 2
+    assert MyGizmo is c._gizmos[1].__class__
+
+    # check for custom YAML constructors
+
+    class MyGizmo2(streams.Gizmo):
+        def __init__(
+            self, crop_extent: streams.CropExtentOptions, cv2_interpolation: int
+        ):
+            super().__init__([(0, False)])
+            self.crop_extent = crop_extent
+            self.cv2_interpolation = cv2_interpolation
+
+        def run(self):
+            pass
+
+    txt2 = """
+    gizmos:
+        source:
+            class: VideoSourceGizmo
+        mygizmo:
+            class: MyGizmo2
+            params:
+                crop_extent: !CropExtentOptions ASPECT_RATIO_ADJUSTMENT_BY_AREA
+                cv2_interpolation: !OpenCV INTER_LINEAR
+
+    connections:
+        - [source, mygizmo]
+    """
+
+    c = streams.load_composition(txt2, locals())
+    assert len(c._gizmos) == 2
+    g2 = c._gizmos[1]
+    assert isinstance(g2, MyGizmo2)
+    assert g2.crop_extent == streams.CropExtentOptions.ASPECT_RATIO_ADJUSTMENT_BY_AREA
+    assert g2.cv2_interpolation == cv2.INTER_LINEAR
