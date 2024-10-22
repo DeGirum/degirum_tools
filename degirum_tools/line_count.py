@@ -114,6 +114,9 @@ class LineCounter(ResultAnalyzerBase):
     Additionally, if `per_class_display` constructor parameter is set to True, the per-class counts are
     stored in the `for_class` dictionary of the `LineCounts` or `VectorCounts` object.
 
+    Also updates each element of `result.results[]` list by adding the "cross_line" key containing
+    the list of boolean flags, one per line, which are True for lines which are crossed and False otherwise.
+
     This class works in conjunction with `ObjectTracker` class that should be used to track object trails.
 
     """
@@ -142,7 +145,7 @@ class LineCounter(ResultAnalyzerBase):
             whole_trail (bool, optional): when True, last and first points of trail are used to determine if
                 trail intersects a line; when False, last and second-to-last points of trail are used
             count_first_crossing (bool, optional): when True, count only first time a trail intersects a line;
-                when False, count all times when trail interstects a line
+                when False, count all times when trail intersects a line
             absolute_directions (bool, optional): when True, direction of trail is calculated relative to coordinate
                 system of image, and four directions are updated; when False, direction of trail is calculated
                 relative to coordinate system defined by line that it intersects, and two directions are updated
@@ -207,6 +210,8 @@ class LineCounter(ResultAnalyzerBase):
             result.line_counts = deepcopy(self._line_counts)
             return
 
+        lines_cnt = len(self._lines)
+
         new_trails = set(result.trails.keys())
         new_trails_list = [new_trails for _ in self._counted_trails_list]
         if self._count_first_crossing:
@@ -249,7 +254,12 @@ class LineCounter(ResultAnalyzerBase):
         if not self._accumulate:
             self._line_counts = [self._count_type() for _ in self._lines]
 
-        for new_trails, counted_trails, total_count, line, line_vector in zip(
+        crossed_tids: Dict[int, list] = (
+            {}
+        )  # map of track IDs to crossed line boolean flags
+
+        for li, new_trails, counted_trails, total_count, line, line_vector in zip(
+            range(lines_cnt),
             new_trails_list,
             self._counted_trails_list,
             self._line_counts,
@@ -267,6 +277,7 @@ class LineCounter(ResultAnalyzerBase):
                         trail_start.tolist() + trail_end.tolist()
                     )
                     if intersect(line[:2], line[2:], trail_start, trail_end):
+                        crossed_tids.setdefault(tid, [False] * lines_cnt)[li] = True
                         if self._count_first_crossing:
                             counted_trails.add(tid)
                         increment = count_increment(trail_vector, line_vector)
@@ -286,6 +297,16 @@ class LineCounter(ResultAnalyzerBase):
                             class_count += increment
 
         result.line_counts = deepcopy(self._line_counts)
+
+        for obj in result.results:
+            tid = obj.get("track_id")
+            if tid is not None:
+                flags = crossed_tids.get(tid)
+                if flags is not None:
+                    obj["cross_line"] = flags
+                    continue
+
+            obj["cross_line"] = [False] * lines_cnt
 
     def annotate(self, result, image: np.ndarray) -> np.ndarray:
         """
