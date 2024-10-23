@@ -633,11 +633,11 @@ def test_line_counter():
             )
 
             obj_list = case["res"][i][1]
-            assert len(result.results) == len(obj_list) and all(
-                r1 == r2 for r1, r2 in zip(result.results, obj_list)
+            assert len(result.results) == len(obj_list) and all(  # type: ignore[attr-defined]
+                r1 == r2 for r1, r2 in zip(result.results, obj_list)  # type: ignore[attr-defined]
             ), (
                 f"Case `{case['case']}` failed at step {i}: "
-                + f"number of objects `{len(result.results)}` "
+                + f"number of objects `{len(result.results)}` "  # type: ignore[attr-defined]
                 + f"do not match expected `{len(obj_list)}`."
                 + f"\nConfig: {case['params']}"
             )
