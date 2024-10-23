@@ -50,6 +50,19 @@ def crop_image(img: ImageType, bbox: list):
         return img[int(bbox[1]) : int(bbox[3]), int(bbox[0]) : int(bbox[2])]
 
 
+def resize_image(img: ImageType, w: int, h: int):
+    """Resize and return PIL/OpenCV image to given size
+
+    Args:
+        img: image
+        w, h: new width and height
+    """
+    if isinstance(img, PILImage):
+        return img.resize((w, h))
+    else:
+        return cv2.resize(img, (w, h))
+
+
 def paste_image(img: ImageType, crop: ImageType, bbox: list):
     """Paste given crop image into bigger image into specified bbox
 
@@ -66,6 +79,14 @@ def paste_image(img: ImageType, crop: ImageType, bbox: list):
         raise ValueError(
             f"paste_image: image types {type(img)} and {type(crop)} do not match"
         )
+
+
+def to_opencv(img: ImageType) -> np.ndarray:
+    """Convert any image to OpenCV image"""
+
+    if isinstance(img, PILImage):
+        return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+    return img
 
 
 def detect_motion(base_img: Optional[np.ndarray], img: ImageType) -> tuple:
