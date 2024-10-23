@@ -141,7 +141,7 @@ def test_streams_resizer(short_video):
     w = 320
     h = 240
     pad_method = "stretch"
-    resize_method = cv2.INTER_NEAREST
+    resize_method = "nearest"
     source = streams.VideoSourceGizmo(short_video)
     resizer = streams.ResizingGizmo(
         w, h, pad_method=pad_method, resize_method=resize_method

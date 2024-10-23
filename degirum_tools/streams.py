@@ -899,15 +899,15 @@ class ResizingGizmo(Gizmo):
         w: int,
         h: int,
         pad_method: str = "letterbox",
-        resize_method: int = cv2.INTER_LINEAR,
+        resize_method: str = "bilinear",
         stream_depth: int = 10,
         allow_drop: bool = False,
     ):
         """Constructor.
 
         - w, h: resulting image width/height
-        - pad_method: padding method - one of 'stretch', 'letterbox'
-        - resize_method: resampling method - one of cv2.INTER_xxx constants
+        - pad_method: padding method - one of "stretch", "letterbox", "crop-first", "crop-last"
+        - resize_method: resampling method - one of "nearest", "bilinear", "area", "bicubic", "lanczos"
         - stream_depth: input stream depth
         - allow_drop: allow dropping frames from input stream on overflow
         """
@@ -922,34 +922,23 @@ class ResizingGizmo(Gizmo):
         return [self.name, tag_resize]
 
     def _resize(self, image):
-        dx = dy = 0  # offset of left top corner of original image in resized image
+        is_opencv = isinstance(image, numpy.ndarray)
+        mparams = dg.aiclient.ModelParams()
+        mparams.InputRawDataType = ["DG_UINT8"]
+        mparams.InputImgFmt = ["RAW"]
+        mparams.InputW = [self._w]
+        mparams.InputH = [self._h]
+        mparams.InputColorSpace = ["BGR" if is_opencv else "RGB"]
 
-        image_ret = image
-        if image.shape[1] != self._w or image.shape[0] != self._h:
-            if self._pad_method == "stretch":
-                image_ret = cv2.resize(
-                    image, (self._w, self._h), interpolation=self._resize_method
-                )
-            elif self._pad_method == "letterbox":
-                iw = image.shape[1]
-                ih = image.shape[0]
-                scale = min(self._w / iw, self._h / ih)
-                nw = int(iw * scale)
-                nh = int(ih * scale)
+        pp = dg._preprocessor.create_image_preprocessor(
+            model_params=mparams,
+            resize_method=self._resize_method,
+            pad_method=self._pad_method,
+            image_backend="opencv" if is_opencv else "pil",
+        )
+        pp.generate_image_result = True
 
-                # resize preserving aspect ratio
-                scaled_image = cv2.resize(
-                    image, (nw, nh), interpolation=self._resize_method
-                )
-
-                # create new canvas image and paste into it
-                image_ret = numpy.zeros((self._h, self._w, 3), image.dtype)
-
-                dx = (self._w - nw) // 2
-                dy = (self._h - nh) // 2
-                image_ret[dy : dy + nh, dx : dx + nw, :] = scaled_image
-
-        return image_ret
+        return pp.forward(image)["image_result"]
 
     def run(self):
         """Run gizmo"""
