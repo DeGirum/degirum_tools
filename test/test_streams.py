@@ -166,7 +166,8 @@ def test_streams_resizer(short_video):
 def test_streams_simple_ai(short_video, detection_model):
     """Test for AiSimpleGizmo"""
 
-    model = degirum_tools.RegionExtractionPseudoModel([[0, 0, 10, 20]], detection_model)
+    bboxes = [[0, 0, 10, 20], [20, 30, 100, 200]]
+    model = degirum_tools.RegionExtractionPseudoModel(bboxes, detection_model)
 
     source = streams.VideoSourceGizmo(short_video)
     ai = streams.AiSimpleGizmo(model)
@@ -178,9 +179,10 @@ def test_streams_simple_ai(short_video, detection_model):
         ai_meta = frame.meta.find_last(streams.tag_inference)
         assert ai_meta is not None
         assert isinstance(ai_meta, dg.postprocessor.InferenceResults)
-        # expect meta in frame info
-        assert isinstance(ai_meta.info, streams.StreamMeta)
-        assert ai_meta.info.find_last(streams.tag_inference) == ai_meta
+        orig_meta = ai_meta.info
+        assert isinstance(orig_meta, streams.StreamMeta)
+        assert not (orig_meta is ai_meta)
+        assert all(bbox == obj["bbox"] for bbox, obj in zip(bboxes, ai_meta.results))
 
 
 def test_streams_cropping_ai(short_video, detection_model):
@@ -190,7 +192,7 @@ def test_streams_cropping_ai(short_video, detection_model):
 
     source = streams.VideoSourceGizmo(short_video)
     ai = streams.AiSimpleGizmo(model)
-    cropper = streams.AiObjectDetectionCroppingGizmo(["Car"])
+    cropper = streams.AiObjectDetectionCroppingGizmo(["Car"], crop_extent=10.0)
     sink = VideoSink()
 
     streams.Composition(source >> ai >> cropper >> sink).start()
@@ -227,7 +229,7 @@ def test_streams_cropping_ai(short_video, detection_model):
                 int(bbox[2]) - int(bbox[0]),
                 3,
             )
-            assert r == ai_meta.results[i]
+            assert r != ai_meta.results[i]
 
             expected_crops -= 1
         else:
@@ -256,6 +258,24 @@ def test_streams_cropping_ai(short_video, detection_model):
     sink = VideoSink()
     streams.Composition(source >> ai >> non_valid_cropper >> sink).start()
     assert sink.frames_cnt == source.result_cnt
+
+    class SomeValidCropsGizmo(streams.AiObjectDetectionCroppingGizmo):
+        def validate_bbox(
+            self, result: dg.postprocessor.InferenceResults, idx: int
+        ) -> bool:
+            return idx == 0
+
+    source = streams.VideoSourceGizmo(short_video)
+    ai = streams.AiSimpleGizmo(model)
+    valid_cropper = SomeValidCropsGizmo(["Car"], send_original_on_no_objects=False)
+    sink = VideoSink()
+    streams.Composition(source >> ai >> valid_cropper >> sink).start()
+    assert sink.frames_cnt > 0 and sink.frames_cnt < source.result_cnt
+    for frame in sink.frames:
+        crop_meta = frame.meta.find_last(streams.tag_crop)
+        assert crop_meta is not None
+        assert crop_meta[valid_cropper.key_cropped_index] == 0
+        assert crop_meta[valid_cropper.key_is_last_crop]
 
 
 def test_streams_combining_ai(short_video, zoo_dir, detection_model):

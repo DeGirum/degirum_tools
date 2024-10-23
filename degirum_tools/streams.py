@@ -22,7 +22,7 @@ from contextlib import ExitStack
 from .environment import get_test_mode
 from .video_support import open_video_stream, open_video_writer
 from .ui_support import Display
-from .image_tools import crop_image, image_size
+from .image_tools import crop_image, resize_image, image_size, to_opencv
 from .result_analyzer_base import image_overlay_substitute
 from .crop_extent import CropExtentOptions, extend_bbox
 
@@ -34,6 +34,7 @@ tag_resize = "resize"  # tag for resizer result
 tag_inference = "inference"  # tag for inference result
 tag_preprocess = "preprocess"  # tag for preprocessor result
 tag_crop = "crop"  # tag for cropping result
+tag_analyzer = "analyzer"  # tag for analyzer result
 
 
 class StreamMeta:
@@ -42,6 +43,9 @@ class StreamMeta:
     Keeps a list of metainfo objects, which are produced by Gizmos in the pipeline.
     A gizmo appends its own metainfo to the end of the list tagging it with a set of tags.
     Tags are used to find metainfo objects by a specific tag combination.
+
+    CAUTION: never modify received metainfo object, always do clone() before modifying it
+    to avoid side effects in upstream gizmos.
 
     """
 
@@ -193,6 +197,13 @@ class Stream(queue.Queue):
         self.put(self._poison)
 
 
+def clone_result(result):
+    """Create a clone of PySDK result object. Clone inherits image references, but duplicates inference results."""
+    clone = copy.copy(result)
+    clone._inference_results = copy.deepcopy(result._inference_results)
+    return clone
+
+
 class Gizmo(ABC):
     """Base class for all gizmos: streaming pipeline processing blocks.
     Each gizmo owns zero of more input streams, which are used to deliver
@@ -316,8 +327,7 @@ class Gizmo(ABC):
             if data == Stream._poison or data is None:
                 out.close()
             else:
-                # clone meta to avoid cross-modifications by downstream gizmos in tree-like pipelines
-                out.put(StreamData(data.data, data.meta.clone()))
+                out.put(data)
 
     @abstractmethod
     def run(self):
@@ -850,15 +860,23 @@ class VideoSaverGizmo(Gizmo):
     def run(self):
         """Run gizmo"""
 
-        def get_img(data):
+        h = w = 0
+
+        def get_img(data: StreamData) -> numpy.ndarray:
+            frame = data.data
             if self._show_ai_overlay:
                 inference_meta = data.meta.find_last(tag_inference)
                 if inference_meta:
-                    return inference_meta.image_overlay
-            return data.data
+                    frame = inference_meta.image_overlay
+
+            w1, h1 = image_size(frame)
+            if w != 0 and h != 0 and (w1 != w or h1 != h):
+                frame = resize_image(frame, w, h)
+            return to_opencv(frame)
 
         img = get_img(self.get_input(0).get())
-        with open_video_writer(self._filename, img.shape[1], img.shape[0]) as writer:
+        w, h = image_size(img)
+        with open_video_writer(self._filename, w, h) as writer:
             self.result_cnt += 1
             writer.write(img)
             for data in self.get_input(0):
@@ -936,7 +954,7 @@ class ResizingGizmo(Gizmo):
     def run(self):
         """Run gizmo"""
 
-        meta = {
+        my_meta = {
             self.key_frame_width: self._w,
             self.key_frame_height: self._h,
             self.key_pad_method: self._pad_method,
@@ -947,8 +965,9 @@ class ResizingGizmo(Gizmo):
             if self._abort:
                 break
             resized = self._resize(data.data)
-            data.meta.append(meta, self.get_tags())
-            self.send_result(StreamData(resized, data.meta))
+            new_meta = data.meta.clone()
+            new_meta.append(my_meta, self.get_tags())
+            self.send_result(StreamData(resized, new_meta))
 
 
 class AiGizmoBase(Gizmo):
@@ -1033,18 +1052,14 @@ class AiSimpleGizmo(AiGizmoBase):
     """AI inference gizmo with no result processing: it passes through input frames
     attaching inference results as meta info"""
 
-    def get_tags(self) -> List[str]:
-        """Get list of tags assigned to this gizmo"""
-        return [self.name, tag_inference]
-
     def on_result(self, result):
         """Result handler to be overloaded in derived classes.
 
         - result: inference result; result.info contains reference to data frame used for inference
         """
-        meta = result.info
-        meta.append(result, self.get_tags())
-        self.send_result(StreamData(result.image, meta))
+        new_meta = result.info.clone()
+        new_meta.append(result, self.get_tags())
+        self.send_result(StreamData(result.image, new_meta))
 
 
 class AiObjectDetectionCroppingGizmo(Gizmo):
@@ -1119,44 +1134,51 @@ class AiObjectDetectionCroppingGizmo(Gizmo):
                     f"{self.__class__.__name__}: inference meta not found: you need to have object detection gizmo in upstream"
                 )
 
-            nresults = len(result.results)
-            has_results = nresults > 0
-            if has_results:
-                has_results = False
-                for i in range(nresults):
-                    r = result.results[i]
-                    bbox = r.get("bbox")
-                    if not bbox:
-                        continue
+            # prepare all crops
+            crops = []
+            crop_metas = []
+            for i, r in enumerate(result.results):
 
-                    # discard objects which do not pass validation
-                    if not self.validate_bbox(result, i):
-                        continue
+                bbox = r.get("bbox")
+                if not bbox:
+                    continue
 
-                    # apply crop extent
-                    ext_bbox = extend_bbox(
-                        bbox,
-                        self._crop_extent_option,
-                        self._crop_extent,
-                        self._crop_aspect_ratio,
-                        image_size(result.image),
-                    )
-                    r["bbox"] = ext_bbox  # patch bbox in the result with extended bbox
+                # discard objects which do not pass validation
+                if not self.validate_bbox(result, i):
+                    continue
 
-                    crop = crop_image(result.image, ext_bbox)
+                # apply crop extent
+                ext_bbox = extend_bbox(
+                    bbox,
+                    self._crop_extent_option,
+                    self._crop_extent,
+                    self._crop_aspect_ratio,
+                    image_size(result.image),
+                )
 
-                    crop_meta = {
-                        self.key_original_result: result,
-                        self.key_cropped_result: r,
-                        self.key_cropped_index: i,
-                        self.key_is_last_crop: i == nresults - 1,
-                    }
-                    new_meta = data.meta.clone()
-                    new_meta.append(crop_meta, self.get_tags())
-                    self.send_result(StreamData(crop, new_meta))
-                    has_results = True
+                crops.append(crop_image(result.image, ext_bbox))
 
-            if not has_results and self._send_original_on_no_objects:
+                cropped_obj = copy.deepcopy(r)
+                cropped_obj["bbox"] = ext_bbox
+
+                crop_meta = {
+                    self.key_original_result: result,
+                    self.key_cropped_result: cropped_obj,
+                    self.key_cropped_index: i,
+                    self.key_is_last_crop: False,  # will adjust later
+                }
+                new_meta = data.meta.clone()
+                new_meta.append(crop_meta, self.get_tags())
+                crop_metas.append(new_meta)
+
+            if crop_metas:
+                # adjust last crop flag
+                crop_metas[-1].find_last(tag_crop)[self.key_is_last_crop] = True
+                # and send all croped results
+                for crop, meta in zip(crops, crop_metas):
+                    self.send_result(StreamData(crop, meta))
+
+            elif self._send_original_on_no_objects:
                 # no objects detected: send original result
                 crop_meta = {
                     self.key_original_result: result,
@@ -1164,8 +1186,9 @@ class AiObjectDetectionCroppingGizmo(Gizmo):
                     self.key_cropped_index: -1,
                     self.key_is_last_crop: True,
                 }
-                data.meta.append(crop_meta, self.get_tags())
-                self.send_result(StreamData(img, data.meta))
+                new_meta = data.meta.clone()
+                new_meta.append(crop_meta, self.get_tags())
+                self.send_result(StreamData(img, new_meta))
 
     def validate_bbox(
         self, result: dg.postprocessor.InferenceResults, idx: int
@@ -1230,10 +1253,16 @@ class CropCombiningGizmo(Gizmo):
             while True:
                 if not crops:
                     # read all crop inputs
-                    crops = [inp.get() for inp in self.get_inputs()[1:]]
-                    if Stream._poison in crops:
-                        self._abort = True
-                        break
+                    crops = []
+                    for inp in self.get_inputs()[1:]:
+                        crop = inp.get()
+                        if crop == Stream._poison:
+                            self._abort = True
+                            break
+                        crops.append(crop)
+
+                if self._abort:
+                    break
 
                 # get index of cropped frame
                 video_metas = [crop.meta.find_last(tag_video) for crop in crops]
@@ -1318,17 +1347,21 @@ class CropCombiningGizmo(Gizmo):
                     combined_meta = None  # mark combined_meta as processed
                     break
 
-    def _adjust_results(self, result, bbox_idx: int, cropped_results: list) -> list:
+    def _adjust_results(
+        self, orig_result, bbox_idx: int, cropped_results: list
+    ) -> list:
         """Adjust inference results for the crop: recalculates bbox coordinates to original image,
         attach original image to the result, and return the list of adjusted results"""
 
-        bbox = result._inference_results[bbox_idx].get("bbox")
+        bbox = orig_result._inference_results[bbox_idx].get("bbox")
         assert bbox
         tl = bbox[:2]
 
-        for cr in cropped_results:
+        ret = []
+        for crop_res in cropped_results:
+            cr = clone_result(crop_res)
             # attach original image to the result
-            cr._input_image = result._input_image
+            cr._input_image = orig_result._input_image
             # adjust all found coordinates to original image
             for r in cr._inference_results:
                 if "bbox" in r:
@@ -1337,8 +1370,9 @@ class CropCombiningGizmo(Gizmo):
                     for lm_list in r["landmarks"]:
                         lm = lm_list["landmark"]
                         lm[:2] = [lm[0] + tl[0], lm[1] + tl[1]]
+            ret.append(cr)
 
-        return cropped_results
+        return ret
 
     def _clone_result(self, result):
         """Clone inference result object with deepcopy of `_inference_results` list"""
@@ -1359,8 +1393,7 @@ class CropCombiningGizmo(Gizmo):
                             extra_res._input_image = orig_image
             return overlay_image
 
-        clone = copy.copy(result)
-        clone._inference_results = copy.deepcopy(result._inference_results)
+        clone = clone_result(result)
 
         # redefine `image_overlay` property to `_overlay_extra_results` function so
         # that it will be called instead of the original one to annotate the image with extra results;
@@ -1394,6 +1427,10 @@ class AiResultCombiningGizmo(Gizmo):
         self._inp_cnt = inp_cnt
         super().__init__([(stream_depth, False)] * inp_cnt)
 
+    def get_tags(self) -> List[str]:
+        """Get list of tags assigned to this gizmo"""
+        return [self.name, tag_inference]
+
     def run(self):
         """Run gizmo"""
 
@@ -1411,21 +1448,24 @@ class AiResultCombiningGizmo(Gizmo):
                 break
 
             base_data: Optional[StreamData] = None
-            base_result: Optional[list] = None
+            base_result: Optional[dg.postprocessor.InferenceResults] = None
             for d in all_data:
                 inference_meta = d.meta.find_last(tag_inference)
                 if inference_meta is None:
                     continue  # no inference results
-                sub_result = inference_meta._inference_results
 
-                if base_data is None:
+                if base_result is None:
                     base_data = d
-                    base_result = sub_result
+                    base_result = clone_result(inference_meta)
                 else:
-                    base_result += sub_result
+                    base_result._inference_results += copy.deepcopy(
+                        inference_meta._inference_results
+                    )
 
             assert base_data is not None
-            self.send_result(base_data)
+            new_meta = base_data.meta.clone()
+            new_meta.append(base_result, self.get_tags())
+            self.send_result(StreamData(base_data.data, new_meta))
 
 
 class AiPreprocessGizmo(Gizmo):
@@ -1468,8 +1508,9 @@ class AiPreprocessGizmo(Gizmo):
                 break
 
             res = self._preprocessor.forward(data.data)
-            data.meta.append(res[1], self.get_tags())
-            self.send_result(StreamData(res[0], data.meta))
+            new_meta = data.meta.clone()
+            new_meta.append(res[1], self.get_tags())
+            self.send_result(StreamData(res[0], new_meta))
 
 
 class AiAnalyzerGizmo(Gizmo):
@@ -1499,6 +1540,10 @@ class AiAnalyzerGizmo(Gizmo):
         self._filters = filters
         super().__init__([(stream_depth, allow_drop)])
 
+    def get_tags(self) -> List[str]:
+        """Get list of tags assigned to this gizmo"""
+        return [self.name, tag_inference, tag_analyzer]
+
     def run(self):
         """Run gizmo"""
 
@@ -1507,26 +1552,29 @@ class AiAnalyzerGizmo(Gizmo):
                 break
 
             filter_ok = True
-            inference_meta = data.meta.find_last(tag_inference)
+            new_meta = data.meta.clone()
+            inference_meta = new_meta.find_last(tag_inference)
             if inference_meta is not None and isinstance(
                 inference_meta, dg.postprocessor.InferenceResults
             ):
+                inference_clone = clone_result(inference_meta)
                 for analyzer in self._analyzers:
-                    analyzer.analyze(inference_meta)
-                image_overlay_substitute(inference_meta, self._analyzers)
+                    analyzer.analyze(inference_clone)
+                image_overlay_substitute(inference_clone, self._analyzers)
+                new_meta.append(inference_clone, self.get_tags())
 
                 if self._filters:
                     if not (
-                        hasattr(inference_meta, "notifications")
-                        and (self._filters & inference_meta.notifications)
+                        hasattr(inference_clone, "notifications")
+                        and (self._filters & inference_clone.notifications)
                     ) and not (
-                        hasattr(inference_meta, "events_detected")
-                        and (self._filters & inference_meta.events_detected)
+                        hasattr(inference_clone, "events_detected")
+                        and (self._filters & inference_clone.events_detected)
                     ):
                         filter_ok = False
 
             if filter_ok:
-                self.send_result(data)
+                self.send_result(StreamData(data.data, new_meta))
 
 
 class SinkGizmo(Gizmo):
