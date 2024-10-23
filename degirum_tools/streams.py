@@ -694,6 +694,7 @@ class VideoSourceGizmo(Gizmo):
     key_fps = "fps"  # stream frame rate
     key_frame_count = "frame_count"  # total stream frame count
     key_frame_id = "frame_id"  # frame index
+    key_timestamp = "timestamp"  # frame timestamp
 
     def __init__(self, video_source=None, *, stop_composition_on_end: bool = False):
         """Constructor.
@@ -727,6 +728,7 @@ class VideoSourceGizmo(Gizmo):
                 else:
                     meta2 = copy.copy(meta)
                     meta2[self.key_frame_id] = self.result_cnt
+                    meta2[self.key_timestamp] = time.time()
                     self.send_result(
                         StreamData(data, StreamMeta(meta2, self.get_tags()))
                     )
@@ -1349,8 +1351,6 @@ class CropCombiningGizmo(Gizmo):
         ret = []
         for crop_res in cropped_results:
             cr = clone_result(crop_res)
-            # attach original image to the result
-            cr._input_image = orig_result._input_image
             # adjust all found coordinates to original image
             for r in cr._inference_results:
                 if "bbox" in r:
@@ -1369,7 +1369,6 @@ class CropCombiningGizmo(Gizmo):
         def _overlay_extra_results(result):
             """Produce image overlay with drawing all extra results"""
 
-            orig_image = result._input_image
             overlay_image = result._orig_image_overlay_extra_results
 
             for res in result._inference_results:
@@ -1377,6 +1376,7 @@ class CropCombiningGizmo(Gizmo):
                     bbox = res.get("bbox")
                     if bbox:
                         for extra_res in res[self.key_extra_results]:
+                            orig_image = extra_res._input_image
                             extra_res._input_image = overlay_image
                             overlay_image = extra_res.image_overlay
                             extra_res._input_image = orig_image
