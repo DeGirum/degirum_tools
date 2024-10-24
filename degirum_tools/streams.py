@@ -405,14 +405,9 @@ class Composition:
         """Operator synonym for add()"""
         return self.add(gizmo)
 
-    def start(self, *, wait: bool = True, detect_bottlenecks: bool = False):
-        """Start gizmo animation: launch run() method of every registered gizmo in a separate thread.
-
-        Args:
-            wait: True to wait until all gizmos finished.
-            detect_bottlenecks: True to switch all streams into dropping mode to detect bottlenecks.
-            Use get_bottlenecks() method to return list of gizmos-bottlenecks
-        """
+    def _do_start(self):
+        """Start gizmo animation (internal method):
+        launch run() method of every registered gizmo in a separate thread."""
 
         if len(self._threads) > 0:
             raise Exception("Composition already started")
@@ -420,9 +415,6 @@ class Composition:
         def gizmo_run(gizmo):
             try:
                 gizmo.result_cnt = 0
-                if detect_bottlenecks:
-                    for i in gizmo.get_inputs():
-                        i.allow_drop = True
                 gizmo.start_time_s = time.time()
                 gizmo.run()
                 gizmo.elapsed_s = time.time() - gizmo.start_time_s
@@ -442,6 +434,22 @@ class Composition:
 
         for t in self._threads:
             t.start()
+
+    def start(self, *, wait: bool = True, detect_bottlenecks: bool = False):
+        """Start gizmo animation: launch run() method of every registered gizmo in a separate thread.
+
+        Args:
+            wait: True to wait until all gizmos finished.
+            detect_bottlenecks: True to switch all streams into dropping mode to detect bottlenecks.
+            Use get_bottlenecks() method to return list of gizmos-bottlenecks
+        """
+
+        if detect_bottlenecks:
+            for gizmo in self._gizmos:
+                for i in gizmo.get_inputs():
+                    i.allow_drop = True
+
+        self._do_start()
 
         if wait or get_test_mode():
             self.wait()
@@ -521,7 +529,7 @@ class Composition:
 
     def __enter__(self):
         """Context manager enter handler: start composition but do not wait for completion"""
-        self.start(wait=False)
+        self._do_start()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
