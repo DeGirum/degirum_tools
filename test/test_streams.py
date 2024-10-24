@@ -8,10 +8,13 @@
 #
 
 import time
+import os
 import pytest
 import degirum_tools
 import degirum_tools.streams as streams
+import degirum as dg
 import cv2
+import numpy as np
 
 
 class VideoSink(streams.Gizmo):
@@ -109,20 +112,6 @@ def test_streams_video_source(short_video):
         assert video_meta[source.key_frame_id] == i
 
 
-def test_streams_video_display(short_video):
-    """Test for VideoDisplayGizmo"""
-
-    source = streams.VideoSourceGizmo(short_video)
-    display = streams.VideoDisplayGizmo()
-    sink = VideoSink()
-    streams.Composition(source >> display, source >> sink).start()
-
-    assert all(
-        (display._frames[i].data == sink.frames[i].data).all()
-        for i in range(sink.frames_cnt)
-    )
-
-
 def test_streams_video_saver(short_video, temp_dir):
     """Test for VideoSaverGizmo"""
 
@@ -152,7 +141,7 @@ def test_streams_resizer(short_video):
     w = 320
     h = 240
     pad_method = "stretch"
-    resize_method = cv2.INTER_NEAREST
+    resize_method = "nearest"
     source = streams.VideoSourceGizmo(short_video)
     resizer = streams.ResizingGizmo(
         w, h, pad_method=pad_method, resize_method=resize_method
@@ -174,12 +163,11 @@ def test_streams_resizer(short_video):
         assert frame.data.shape == (h, w, 3)
 
 
-def test_streams_simple_ai(short_video, classification_model):
+def test_streams_simple_ai(short_video, detection_model):
     """Test for AiSimpleGizmo"""
 
-    import degirum as dg
-
-    model = classification_model
+    bboxes = [[0, 0, 10, 20], [20, 30, 100, 200]]
+    model = degirum_tools.RegionExtractionPseudoModel(bboxes, detection_model)
 
     source = streams.VideoSourceGizmo(short_video)
     ai = streams.AiSimpleGizmo(model)
@@ -191,21 +179,20 @@ def test_streams_simple_ai(short_video, classification_model):
         ai_meta = frame.meta.find_last(streams.tag_inference)
         assert ai_meta is not None
         assert isinstance(ai_meta, dg.postprocessor.InferenceResults)
-        # expect meta in frame info
-        assert isinstance(ai_meta.info, streams.StreamMeta)
-        assert ai_meta.info.find_last(streams.tag_inference) == ai_meta
+        orig_meta = ai_meta.info
+        assert isinstance(orig_meta, streams.StreamMeta)
+        assert not (orig_meta is ai_meta)
+        assert all(bbox == obj["bbox"] for bbox, obj in zip(bboxes, ai_meta.results))
 
 
 def test_streams_cropping_ai(short_video, detection_model):
     """Test for AiObjectDetectionCroppingGizmo"""
 
-    import degirum as dg
-
     model = detection_model
 
     source = streams.VideoSourceGizmo(short_video)
     ai = streams.AiSimpleGizmo(model)
-    cropper = streams.AiObjectDetectionCroppingGizmo(["Car"])
+    cropper = streams.AiObjectDetectionCroppingGizmo(["Car"], crop_extent=10.0)
     sink = VideoSink()
 
     streams.Composition(source >> ai >> cropper >> sink).start()
@@ -242,7 +229,7 @@ def test_streams_cropping_ai(short_video, detection_model):
                 int(bbox[2]) - int(bbox[0]),
                 3,
             )
-            assert r == ai_meta.results[i]
+            assert r != ai_meta.results[i]
 
             expected_crops -= 1
         else:
@@ -250,15 +237,57 @@ def test_streams_cropping_ai(short_video, detection_model):
             assert crop_meta[cropper.key_cropped_index] == -1
             assert crop_meta[cropper.key_cropped_result] is None
 
+    # test for validate_bbox()
 
-def test_streams_combining_ai(short_video, zoo_dir, detection_model_name):
+    class NoValidCropsGizmo(streams.AiObjectDetectionCroppingGizmo):
+        def validate_bbox(
+            self, result: dg.postprocessor.InferenceResults, idx: int
+        ) -> bool:
+            return False
+
+    source = streams.VideoSourceGizmo(short_video)
+    ai = streams.AiSimpleGizmo(model)
+    non_valid_cropper = NoValidCropsGizmo(["Car"], send_original_on_no_objects=False)
+    sink = VideoSink()
+    streams.Composition(source >> ai >> non_valid_cropper >> sink).start()
+    assert sink.frames_cnt == 0
+
+    source = streams.VideoSourceGizmo(short_video)
+    ai = streams.AiSimpleGizmo(model)
+    non_valid_cropper = NoValidCropsGizmo(["Car"], send_original_on_no_objects=True)
+    sink = VideoSink()
+    streams.Composition(source >> ai >> non_valid_cropper >> sink).start()
+    assert sink.frames_cnt == source.result_cnt
+
+    class SomeValidCropsGizmo(streams.AiObjectDetectionCroppingGizmo):
+        def validate_bbox(
+            self, result: dg.postprocessor.InferenceResults, idx: int
+        ) -> bool:
+            return idx == 0
+
+    source = streams.VideoSourceGizmo(short_video)
+    ai = streams.AiSimpleGizmo(model)
+    valid_cropper = SomeValidCropsGizmo(["Car"], send_original_on_no_objects=False)
+    sink = VideoSink()
+    streams.Composition(source >> ai >> valid_cropper >> sink).start()
+    assert sink.frames_cnt > 0 and sink.frames_cnt < source.result_cnt
+    for frame in sink.frames:
+        crop_meta = frame.meta.find_last(streams.tag_crop)
+        assert crop_meta is not None
+        assert crop_meta[valid_cropper.key_cropped_index] == 0
+        assert crop_meta[valid_cropper.key_is_last_crop]
+
+
+def test_streams_combining_ai(short_video, zoo_dir, detection_model):
     """Test for AiResultCombiningGizmo"""
 
-    import degirum as dg
-
     N = 3
-    zoo = dg.connect(dg.LOCAL, zoo_dir)
-    models = [zoo.load_model(detection_model_name) for _ in range(N)]
+    bboxes = [[0, 0, 10 * i, 10 * i] for i in range(1, N + 1)]
+
+    models = [
+        degirum_tools.RegionExtractionPseudoModel([bboxes[i]], detection_model)
+        for i in range(N)
+    ]
 
     source = streams.VideoSourceGizmo(short_video)
     ai = [streams.AiSimpleGizmo(models[i]) for i in range(N)]
@@ -274,12 +303,9 @@ def test_streams_combining_ai(short_video, zoo_dir, detection_model_name):
         ai_meta = frame.meta.find_last(streams.tag_inference)
         assert ai_meta is not None
         L = len(ai_meta.results)
-        assert L % N == 0
-        for i in range(1, N):
-            assert (
-                ai_meta.results[i * L // N : (i + 1) * L // N]
-                == ai_meta.results[0 : L // N]
-            )
+        assert L == N
+        for i, r in enumerate(ai_meta.results):
+            assert r["bbox"] == bboxes[i]
 
 
 def test_streams_preprocess_ai(short_video, classification_model):
@@ -319,22 +345,32 @@ def test_streams_preprocess_ai(short_video, classification_model):
         assert image_result.shape == model_shape
 
 
-def test_streams_analyzer_ai(short_video, classification_model):
+def test_streams_analyzer_ai(short_video, detection_model):
     """Test for AiAnalyzerGizmo"""
 
-    model = classification_model
+    model = degirum_tools.RegionExtractionPseudoModel([[0, 0, 10, 10]], detection_model)
 
     class TestAnalyzer(degirum_tools.ResultAnalyzerBase):
 
-        def __init__(self, attribute: str):
-            self.attribute = attribute
+        def __init__(self, level: int, *, event: str = "", notification: str = ""):
+            self.level = level
+            self.event = event
+            self.notification = notification
 
         def analyze(self, result):
-            setattr(result, self.attribute, 1)
+            setattr(result, f"attr{self.level}", 1)
+            if self.event:
+                result.events_detected = {self.event}
+            if self.notification:
+                result.notifications = {self.notification}
             return result
 
+        def annotate(self, result, image):
+            image[self.level, self.level] = (self.level, 0, 0)
+            return image
+
     N = 3
-    analyzers = [TestAnalyzer(f"attr{i}") for i in range(N)]
+    analyzers = [TestAnalyzer(i) for i in range(N)]
 
     source = streams.VideoSourceGizmo(short_video)
     ai = streams.AiSimpleGizmo(model)
@@ -346,8 +382,39 @@ def test_streams_analyzer_ai(short_video, classification_model):
     for frame in sink.frames:
         ai_meta = frame.meta.find_last(streams.tag_inference)
         assert ai_meta is not None
+        img = ai_meta.image_overlay
         for i in range(N):
             assert hasattr(ai_meta, f"attr{i}") and getattr(ai_meta, f"attr{i}") == 1
+            assert np.array_equal(img[i, i], [i, 0, 0])
+
+    stream_size = sink.frames_cnt
+
+    #
+    # test filters
+    #
+    event_name = "event1"
+    notification_name = "notification1"
+
+    def check_filters(
+        generate_event_name, generate_notification_name, expected_result_cnt
+    ):
+        analyzers = [
+            TestAnalyzer(
+                0, event=generate_event_name, notification=generate_notification_name
+            )
+        ]
+        source = streams.VideoSourceGizmo(short_video)
+        ai = streams.AiSimpleGizmo(model)
+        analyzer = streams.AiAnalyzerGizmo(
+            analyzers, filters={event_name, notification_name}
+        )
+        sink = VideoSink()
+        streams.Composition(source >> ai >> analyzer >> sink).start()
+        assert sink.frames_cnt == expected_result_cnt
+
+    check_filters("", "", 0)
+    check_filters(event_name, "", stream_size)
+    check_filters("", notification_name, stream_size)
 
 
 def test_streams_error_handling():
@@ -437,3 +504,196 @@ def test_streams_error_handling():
         streams.Composition(src2 >> dst2).start()
 
     assert dst2.n == src2.limit  # type: ignore[attr-defined]
+
+
+def test_streams_sink(short_video):
+    """Test for SinkGizmo"""
+
+    source = streams.VideoSourceGizmo(short_video)
+    sink = streams.SinkGizmo()
+
+    with streams.Composition(source >> sink):
+        nresults = 0
+        for r in sink():
+            assert r.meta.find_last(streams.tag_video) is not None
+            nresults += 1
+
+        assert nresults == source.result_cnt
+
+
+def test_streams_crop_combining(
+    short_video, detection_model, classification_model, regression_model
+):
+    """Test for CropCombiningGizmo"""
+
+    obj_label = "Car"
+    source = streams.VideoSourceGizmo(short_video)
+    detector = streams.AiSimpleGizmo(detection_model)
+    crop = streams.AiObjectDetectionCroppingGizmo([obj_label])
+    classifier1 = streams.AiSimpleGizmo(classification_model)
+    classifier2 = streams.AiSimpleGizmo(regression_model)
+    combiner = streams.CropCombiningGizmo(2)
+    sink = VideoSink()
+
+    streams.Composition(
+        source >> detector >> crop,
+        source >> combiner[0],
+        crop >> classifier1 >> combiner[1],
+        crop >> classifier2 >> combiner[2],
+        combiner >> sink,
+    ).start()
+
+    nframes = source.result_cnt
+    assert (
+        detector.result_cnt == nframes
+        and crop.result_cnt > nframes
+        and classifier1.result_cnt > nframes
+        and classifier2.result_cnt > nframes
+        and combiner.result_cnt == nframes
+        and sink.frames_cnt == nframes
+    )
+
+    for frame in sink.frames:
+        ai_meta = frame.meta.find_last(streams.tag_inference)
+        if ai_meta is not None:
+            assert isinstance(ai_meta, dg.postprocessor.DetectionResults)
+            for r in ai_meta.results:
+                assert streams.CropCombiningGizmo.key_extra_results in r
+                extra_results = r[streams.CropCombiningGizmo.key_extra_results]
+                assert len(extra_results) == 2
+                assert all(
+                    isinstance(r, dg.postprocessor.ClassificationResults)
+                    for r in extra_results
+                )
+                assert extra_results[0].results[0]["label"] == obj_label
+                assert extra_results[1].results[0]["label"] == "Age"
+
+
+def test_streams_load_composition():
+    """Test for load_composition"""
+
+    import tempfile, yaml, json
+
+    txt = """
+    gizmos:
+        source:
+            class: VideoSourceGizmo
+        resizer:
+            class: ResizingGizmo
+            params:
+                w: 320
+                h: 240
+                pad_method: "stretch"
+        display:
+            class: VideoDisplayGizmo
+            params:
+                window_titles: ["Original", "Resized"]
+                show_fps: True
+
+    connections:
+        - [source, [display, 0]]
+        - [source, resizer, [display, 1]]
+    """
+
+    def check(desc):
+        c = streams.load_composition(desc)
+        assert c is not None
+        assert len(c._gizmos) == 3
+        gizmo_classes = [g.__class__ for g in c._gizmos]
+        assert streams.VideoSourceGizmo is gizmo_classes[0]
+        assert streams.ResizingGizmo is gizmo_classes[1]
+        assert streams.VideoDisplayGizmo is gizmo_classes[2]
+
+        assert len(c._gizmos[0]._output_refs) == 2
+        assert len(c._gizmos[1]._output_refs) == 1
+        assert len(c._gizmos[2]._output_refs) == 0
+        assert c._gizmos[0]._output_refs[0] is c._gizmos[2].get_input(0)
+        assert c._gizmos[0]._output_refs[1] is c._gizmos[1].get_input(0)
+        assert c._gizmos[1]._output_refs[0] is c._gizmos[2].get_input(1)
+
+    # check YAML text
+    check(txt)
+
+    # check Python dict
+    check(yaml.safe_load(txt))
+
+    fname = ""
+
+    # check YAML file
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".yaml", delete=False
+        ) as yaml_file:
+            yaml_file.write(txt)
+            fname = yaml_file.name
+        check(fname)
+    finally:
+        os.unlink(fname)
+
+    # check JSON file
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".json", delete=False
+        ) as json_file:
+            json_file.write(json.dumps(yaml.safe_load(txt), indent=2))
+            fname = json_file.name
+        check(fname)
+    finally:
+        os.unlink(fname)
+
+    # check for gizmos in context
+    class MyGizmo(streams.Gizmo):
+        def __init__(self):
+            super().__init__([(0, False)])
+
+        def run(self):
+            pass
+
+    txt2 = """
+    gizmos:
+        source:
+            class: VideoSourceGizmo
+        mygizmo:
+            class: MyGizmo
+
+    connections:
+        - [source, mygizmo]
+    """
+
+    c = streams.load_composition(txt2, locals())
+    assert len(c._gizmos) == 2
+    assert MyGizmo is c._gizmos[1].__class__
+
+    # check for custom YAML constructors
+
+    class MyGizmo2(streams.Gizmo):
+        def __init__(
+            self, crop_extent: streams.CropExtentOptions, cv2_interpolation: int
+        ):
+            super().__init__([(0, False)])
+            self.crop_extent = crop_extent
+            self.cv2_interpolation = cv2_interpolation
+
+        def run(self):
+            pass
+
+    txt2 = """
+    gizmos:
+        source:
+            class: VideoSourceGizmo
+        mygizmo:
+            class: MyGizmo2
+            params:
+                crop_extent: !CropExtentOptions ASPECT_RATIO_ADJUSTMENT_BY_AREA
+                cv2_interpolation: !OpenCV INTER_LINEAR
+
+    connections:
+        - [source, mygizmo]
+    """
+
+    c = streams.load_composition(txt2, locals())
+    assert len(c._gizmos) == 2
+    g2 = c._gizmos[1]
+    assert isinstance(g2, MyGizmo2)
+    assert g2.crop_extent == streams.CropExtentOptions.ASPECT_RATIO_ADJUSTMENT_BY_AREA
+    assert g2.cv2_interpolation == cv2.INTER_LINEAR

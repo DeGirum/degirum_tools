@@ -13,8 +13,9 @@ from dataclasses import dataclass
 from typing import Union, Optional, List
 from .image_tools import detect_motion
 from .math_support import nms, NmsBoxSelectionPolicy
-from .result_analyzer_base import ResultAnalyzerBase
-from enum import Enum
+from .result_analyzer_base import ResultAnalyzerBase, image_overlay_substitute
+from .crop_extent import CropExtentOptions, extend_bbox
+from .image_tools import crop_image, image_size
 
 
 class ModelLike(ABC):
@@ -162,26 +163,7 @@ class CompoundModelBase(ModelLike):
                 for analyzer in self._analyzers:
                     analyzer.analyze(transformed_result2)
 
-                def analyzer_image_overlay(self):
-                    """Image overlay method with all analyzer annotations applied"""
-                    image = self._orig_image_overlay
-                    for analyzer in self._analyzers:
-                        image = analyzer.annotate(self, image)
-                    return image
-
-                # redefine `image_overlay` property to `analyzer_image_overlay` function so
-                # that it will be called instead of the original one to annotate the image with analyzer results;
-                # preserve original `image_overlay` property as `_orig_image_overlay` property;
-                # assign analyzer list to `_analyzers` attribute
-                transformed_result2.__class__ = type(
-                    transformed_result2.__class__.__name__ + "_custom",
-                    (transformed_result2.__class__,),
-                    {
-                        "image_overlay": property(analyzer_image_overlay),
-                        "_orig_image_overlay": transformed_result2.__class__.image_overlay,
-                    },
-                )
-                setattr(transformed_result2, "_analyzers", self._analyzers)
+                image_overlay_substitute(transformed_result2, self._analyzers)
 
             return transformed_result2
 
@@ -306,35 +288,6 @@ class CombiningCompoundModel(CompoundModelBase):
         return result2
 
 
-class CropExtentOptions(Enum):
-    """
-    Options for applying extending crop to the input image.
-    """
-
-    ASPECT_RATIO_NO_ADJUSTMENT = 1
-    """
-    Each dimension of the bounding box is extended by 'crop_extent' parameter
-    """
-
-    ASPECT_RATIO_ADJUSTMENT_BY_LONG_SIDE = 2
-    """
-    The longer dimension of the bounding box is extended by 'crop_extent' parameter, and the other side is
-    calculated as new_bbox_h * aspect_ratio (if the longer dimension is the height of the bounding box)
-    or new_bbox_w / aspect_ratio (if the longer dimension is the width of the bounding box),
-    aspect_ratio is defined as the ratio of model2's input width to model2's input height
-    """
-
-    ASPECT_RATIO_ADJUSTMENT_BY_AREA = 3
-    """
-    The bounding box is extended by an area factor of ('crop_extent' * 0.01 + 1) ^ 2; the new height
-    is determined from the desired area and aspect ratio, and is adjusted to be at least as long as
-    the original bounding box height; the new width is calculated as new_bbox_h * aspect_ratio, where
-    aspect_ratio is defined as the ratio of model2's input width to model2's input height,
-    and then adjusted to be at least as long as the original bounding box width; the new
-    height is then adjusted as new_bbox_w / aspect_ratio
-    """
-
-
 class CroppingCompoundModel(CompoundModelBase):
     """
     Compound model class which crops original image according to results of the first model
@@ -381,16 +334,13 @@ class CroppingCompoundModel(CompoundModelBase):
                 (np.zeros((2, 2, 3), dtype=np.uint8), FrameInfo(result1, -1))
             )
         else:
-            image_size = self.image_size(result1.image)
+            image_sz = image_size(result1.image)
             for idx, obj in enumerate(result1.results):
-                adj_bbox = self._adjust_bbox(obj["bbox"], image_size)
+                adj_bbox = self._adjust_bbox(obj["bbox"], image_sz)
+                # patch bbox in the result with extended bbox
                 obj["bbox"] = adj_bbox
-                if hasattr(result1.image, "crop"):
-                    cropped_img = result1.image.crop(adj_bbox)
-                else:
-                    cropped_img = result1.image[
-                        adj_bbox[1] : adj_bbox[3], adj_bbox[0] : adj_bbox[2]
-                    ]
+
+                cropped_img = crop_image(result1.image, adj_bbox)
                 self.queue.put((cropped_img, FrameInfo(result1, idx)))
 
     def transform_result2(self, result2):
@@ -407,67 +357,23 @@ class CroppingCompoundModel(CompoundModelBase):
         """
         return result2
 
-    def image_size(self, image):
-        """Get image size in (width, height) format"""
-        if hasattr(image, "shape"):
-            return (image.shape[1], image.shape[0])
-        elif hasattr(image, "size"):
-            return image.size
-        else:
-            raise Exception("Unsupported image type")
-
-    def _adjust_bbox(self, bbox, image_size):
+    def _adjust_bbox(self, bbox, image_sz):
         """
         Inflate bbox coordinates to crop extent according to chosen crop extent approach
         and adjust to image size
 
         Args:
             bbox: bbox coordinates in [x1, y1, x2, y2] format
-            image_size: image size in (width, height) format
+            image_sz: image size in (width, height) format
         """
-        bbox_w, bbox_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
 
-        if self._crop_extent_option == CropExtentOptions.ASPECT_RATIO_NO_ADJUSTMENT:
-            scale = self._crop_extent * 0.01 * 0.5
-            dx = bbox_w * scale
-            dy = bbox_h * scale
-
-        elif (
-            self._crop_extent_option
-            == CropExtentOptions.ASPECT_RATIO_ADJUSTMENT_BY_LONG_SIDE
-        ):
-            scale = self._crop_extent * 0.01 + 1.0
-            aspect_ratio = (
-                self.model2.model_info.InputW[0] / self.model2.model_info.InputH[0]
-            )
-            if bbox_h > bbox_w:
-                new_bbox_h = bbox_h * scale
-                new_bbox_w = new_bbox_h * aspect_ratio
-            else:
-                new_bbox_w = bbox_w * scale
-                new_bbox_h = new_bbox_w / aspect_ratio
-            dx = (new_bbox_w - bbox_w) / 2
-            dy = (new_bbox_h - bbox_h) / 2
-
-        elif (
-            self._crop_extent_option
-            == CropExtentOptions.ASPECT_RATIO_ADJUSTMENT_BY_AREA
-        ):
-            expansion_factor = np.power(self._crop_extent * 0.01 + 1, 2)
-            aspect_ratio = (
-                self.model2.model_info.InputW[0] / self.model2.model_info.InputH[0]
-            )
-            new_bbox_h = np.sqrt(bbox_w * bbox_h * expansion_factor / aspect_ratio)
-            new_bbox_h = max(new_bbox_h, bbox_h)
-            new_bbox_w = new_bbox_h * aspect_ratio
-            new_bbox_w = max(new_bbox_w, bbox_w)
-            new_bbox_h = new_bbox_w / aspect_ratio
-            dx = (new_bbox_w - bbox_w) / 2
-            dy = (new_bbox_h - bbox_h) / 2
-
-        maxval = [image_size[0], image_size[1], image_size[0], image_size[1]]
-        adjust = [-dx, -dy, dx, dy]
-        return [min(maxval[i], max(0, round(bbox[i] + adjust[i]))) for i in range(4)]
+        return extend_bbox(
+            bbox,
+            self._crop_extent_option,
+            self._crop_extent,
+            self.model2.model_info.InputW[0] / self.model2.model_info.InputH[0],
+            image_sz,
+        )
 
 
 class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):

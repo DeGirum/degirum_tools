@@ -9,9 +9,7 @@ import sys, os, tempfile, pytest, pathlib
 # add current directory to sys.path to debug tests locally without package installation
 sys.path.insert(0, os.getcwd())
 
-import degirum_tools, degirum as dg
-
-os.environ[degirum_tools.var_TestMode] = "1"  # enable test mode
+import degirum as dg
 
 
 @pytest.fixture(scope="session")
@@ -23,9 +21,7 @@ def image_dir():
 @pytest.fixture(scope="session")
 def short_video(image_dir):
     """Path to test short video"""
-    file = os.path.join(image_dir, "Traffic2_short.mp4")
-    os.environ[degirum_tools.var_VideoSource] = file
-    return file
+    return os.path.join(image_dir, "Traffic2_short.mp4")
 
 
 @pytest.fixture
@@ -65,4 +61,17 @@ def classification_model_name():
 def classification_model(zoo_dir, classification_model_name):
     """Load classification model from local zoo"""
     with dg.load_model(classification_model_name, dg.LOCAL, zoo_dir) as model:
+        yield model
+
+
+@pytest.fixture()
+def regression_model_name():
+    """Regression model name"""
+    return "yolov8n_relu6_age--256x256_quant_tflite_cpu_1"
+
+
+@pytest.fixture()
+def regression_model(zoo_dir, regression_model_name):
+    """Load regression model from local zoo"""
+    with dg.load_model(regression_model_name, dg.LOCAL, zoo_dir) as model:
         yield model
