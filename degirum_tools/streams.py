@@ -583,7 +583,9 @@ composition_definition_schema = yaml.safe_load(composition_definition_schema_tex
 
 
 def load_composition(
-    description: Union[str, dict], context: Optional[dict] = None
+    description: Union[str, dict],
+    global_context: Optional[dict] = None,
+    local_context: Optional[dict] = None,
 ) -> Composition:
     """Load composition from provided description of gizmos and connections.
     The description can be either JSON file, YAML file, YAML string, or Python dictionary
@@ -591,33 +593,23 @@ def load_composition(
 
     - description: text description of the composition in YAML format, or a file name with .json, .yaml, or .yml extension
       containing such text description, or Python dictionary with the same structure
-    - context: optional context to look for gizmo classes (like globals())
+    - global_context, local_context: optional contexts to use for expression evaluations (like globals(), locals())
 
     Returns: composition object
     """
 
     import json, jsonschema
 
-    # custom YAML constructors
+    # custom YAML constructor
+    def constructor_python_expression(loader, node):
+        expression = loader.construct_scalar(node)
+        try:
+            ret = eval(expression, global_context, local_context)
+            return ret
+        except Exception as e:
+            raise ValueError(f"Fail to evaluate expression: {expression}") from e
 
-    def constructor_CropExtentOptions(loader, node):
-        enum_name = loader.construct_scalar(node)
-        value = CropExtentOptions.__members__.get(enum_name)
-        if value is None:
-            raise ValueError(f"Unknown CropExtentOptions value: {enum_name}")
-        return CropExtentOptions(value)
-
-    def constructor_cv2_constants(loader, node):
-        const_name = loader.construct_scalar(node)
-        value = cv2.__dict__.get(const_name)
-        if value is None:
-            raise ValueError(f"Unknown OpenCV value: {const_name}")
-        return value
-
-    yaml.add_constructor(
-        "!CropExtentOptions", constructor_CropExtentOptions, yaml.SafeLoader
-    )
-    yaml.add_constructor("!OpenCV", constructor_cv2_constants, yaml.SafeLoader)
+    yaml.add_constructor("!Python", constructor_python_expression, yaml.SafeLoader)
 
     description_dict: dict = {}
     if isinstance(description, str):
@@ -644,8 +636,11 @@ def load_composition(
 
         gizmo_class = globals().get(gizmo_class_name)
         if gizmo_class is None:
-            if context is not None:
-                gizmo_class = context.get(gizmo_class_name)
+            if global_context is not None:
+                gizmo_class = global_context.get(gizmo_class_name)
+        if gizmo_class is None:
+            if local_context is not None:
+                gizmo_class = local_context.get(gizmo_class_name)
 
         if gizmo_class is None:
             raise ValueError(

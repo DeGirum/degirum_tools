@@ -569,7 +569,7 @@ def test_streams_crop_combining(
                 assert extra_results[1].results[0]["label"] == "Age"
 
 
-def test_streams_load_composition():
+def test_streams_load_composition(zoo_dir, detection_model_name):
     """Test for load_composition"""
 
     import tempfile, yaml, json
@@ -668,11 +668,12 @@ def test_streams_load_composition():
 
     class MyGizmo2(streams.Gizmo):
         def __init__(
-            self, crop_extent: streams.CropExtentOptions, cv2_interpolation: int
+            self, crop_extent: streams.CropExtentOptions, cv2_interpolation: int, model
         ):
             super().__init__([(0, False)])
             self.crop_extent = crop_extent
             self.cv2_interpolation = cv2_interpolation
+            self.model = model
 
         def run(self):
             pass
@@ -684,16 +685,21 @@ def test_streams_load_composition():
         mygizmo:
             class: MyGizmo2
             params:
-                crop_extent: !CropExtentOptions ASPECT_RATIO_ADJUSTMENT_BY_AREA
-                cv2_interpolation: !OpenCV INTER_LINEAR
+                crop_extent: !Python streams.CropExtentOptions.ASPECT_RATIO_ADJUSTMENT_BY_AREA
+                cv2_interpolation: !Python cv2.INTER_LINEAR
+                model: !Python dg.load_model(detection_model_name, dg.LOCAL, zoo_dir)
 
     connections:
         - [source, mygizmo]
     """
 
-    c = streams.load_composition(txt2, locals())
+    c = streams.load_composition(txt2, globals(), locals())
     assert len(c._gizmos) == 2
     g2 = c._gizmos[1]
     assert isinstance(g2, MyGizmo2)
     assert g2.crop_extent == streams.CropExtentOptions.ASPECT_RATIO_ADJUSTMENT_BY_AREA
     assert g2.cv2_interpolation == cv2.INTER_LINEAR
+    assert (
+        isinstance(g2.model, dg.model.Model)
+        and g2.model._model_name == detection_model_name
+    )
