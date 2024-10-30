@@ -31,8 +31,9 @@
 # SOFTWARE.
 
 
-import numpy as np, cv2
+import numpy as np, cv2, time
 from typing import Tuple, Optional, Dict, List, Union, Any
+from dataclasses import dataclass
 from .ui_support import put_text, color_complement, deduce_text_color, rgb_to_bgr
 from .result_analyzer_base import ResultAnalyzerBase
 from .math_support import (
@@ -42,6 +43,18 @@ from .math_support import (
     xywh2xyxy,
     tlbr2allcorners,
 )
+
+
+@dataclass
+class _ObjectState:
+    """
+    A class for tracking object state within a zone.
+    """
+
+    timeout_count: int  # number of frames to buffer when an object disappears from zone
+    object_label: str  # label of the object
+    presence_count: int  # number of frames the object is present in the zone
+    entering_time: float  # timestamp when the object entered the zone
 
 
 class _PolygonZone:
@@ -81,9 +94,8 @@ class _PolygonZone:
         )
         self.bounding_box_scale = bounding_box_scale
         self.iopa_threshold = iopa_threshold
-        self._timeout_count_dict: Dict[int, int] = {}
         self._timeout_count_initial = timeout_frames
-        self._object_label_dict: Dict[int, str] = {}
+        self._object_states: Dict[int, _ObjectState] = {}
 
         self.width, self.height = frame_resolution_wh
         self.mask = np.zeros((self.height + 1, self.width + 1))
@@ -149,8 +161,13 @@ class ZoneCounter(ResultAnalyzerBase):
     constructor parameter. Only objects belonging to the class list specified by the `class_list`
     constructor parameter are counted.
 
-    Updates each element of `result.results[]` list by adding the "in_zone" key containing
-    the index of the polygon zone where the corresponding is detected.
+    Updates detected objects in `result.results[]` list by adding the "in_zone" key containing
+    the list of boolean flags, one flag per zone, indicating if the object is detected in the corresponding zone.
+    If `use_tracking` option is enabled, only objects with track IDs are updated.
+    Additionally, when `use_tracking` option is enabled, "frames_in_zone" and "time_in_zone" keys are added to
+    objects with track IDs. The "frames_in_zone" value is the list containing the number of frames the object is
+    present in each zone. The "time_in_zone" value is the list containing the total time in seconds the object is
+    present in each zone.
 
     Adds `zone_counts` list of dictionaries to the `result` object - one element per polygon zone.
     Each dictionary contains the count of objects detected in the corresponding zone. The key is the
@@ -192,7 +209,7 @@ class ZoneCounter(ResultAnalyzerBase):
                 IoPA of bounding boxes greater than this threshold triggers the zone, otherwise this method is not used
             use_tracking (bool, optional): If True, use tracking information to select objects
                 (object tracker must precede this analyzer in the pipeline)
-            timeout_frames (int, optional): number of frames to buffer when an object disappears from zone
+            timeout_frames (int, optional): number of frames to tolerate temporary absence of the object when it disappears from zone
             window_name (str, optional): optional OpenCV window name to configure for interactive zone adjustment
             show_overlay: if True, annotate image; if False, send through original image
             annotation_color (tuple, optional): Color to use for annotations, None to use complement to result overlay color
@@ -226,16 +243,18 @@ class ZoneCounter(ResultAnalyzerBase):
         """
         Detect object bounding boxes in polygon zones.
 
-        Updates each result object `result.results[i]` by adding "in_zone" key to it,
-        when this object is in a zone and its class belongs to a class list specified
-        in a constructor. "in_zone" key value is the index of the zone where this object
-        is detected.
+        Updates detected objects in `result.results[]` list by adding the "in_zone" key containing
+        the list of boolean flags, one flag per zone, indicating if the object is detected in the corresponding zone.
+        If `use_tracking` option is enabled, only objects with track IDs are updated.
+        Additionally, when `use_tracking` option is enabled, "frames_in_zone" and "time_in_zone" keys are added to
+        objects with track IDs. The "frames_in_zone" value is the list containing the number of frames the object is
+        present in each zone. The "time_in_zone" value is the list containing the total time in seconds the object is
+        present in each zone.
 
         Adds `zone_counts` list of dictionaries to the `result` object - one element per polygon zone.
         Each dictionary contains the count of objects detected in the corresponding zone. The key is the
         class name and the value is the count of objects of this class detected in the zone.
         If the `per_class_display` constructor parameter is False, the dictionary contains only one key "total".
-
 
         Args:
             result: PySDK model result object
@@ -268,6 +287,7 @@ class ZoneCounter(ResultAnalyzerBase):
             and in_class_list(obj.get("label"))
             and (not self._use_tracking or "track_id" in obj)
         ]
+        # here `filtered_results` contains only objects with labels from the class list, having track IDs if tracking is used
 
         if self._use_tracking and hasattr(result, "trails"):
             active_tids = [obj["track_id"] for obj in filtered_results]
@@ -281,54 +301,97 @@ class ZoneCounter(ResultAnalyzerBase):
                 if tid not in active_tids and in_class_list(label)
             ]
             filtered_results.extend(lost_results)
+            # here `filtered_results` is extended with "lost" objects: objects that were not detected but still tracked
 
-        if len(filtered_results) == 0:
-            return
-
+        # initialize per-object results
         for obj in filtered_results:
-            obj["in_zone"] = [False for _ in self._zones]
+            nzones = len(self._zones)
+            obj["in_zone"] = [False] * nzones
+            if self._use_tracking:
+                obj["frames_in_zone"] = [0] * nzones
+                obj["time_in_zone"] = [0.0] * nzones
 
         bboxes = np.array([obj["bbox"] for obj in filtered_results])
+        time_now = time.time()
 
-        use_trails = self._use_tracking and self._timeout_frames > 0
+        def set_in_zone_and_increment_counts(obj, zi, zone_counts):
+            obj["in_zone"][zi] = True
+            zone_counts["total"] += 1
+            if self._per_class_display:
+                label = obj.get("label")
+                if label:
+                    zone_counts[label] += 1
+
+        def set_time_in_zone(obj, zi, obj_state):
+            obj["frames_in_zone"][zi] = obj_state.presence_count
+            obj["time_in_zone"][zi] = time_now - obj_state.entering_time
 
         for zi, zone in enumerate(self._zones):
-            triggers = zone.trigger(bboxes)  # detect object in zones
-            zone_counts = result.zone_counts[zi]
-            if use_trails:
-                all_tids_in_zone = []
+            # compute object-in-zone flags
+            triggers = zone.trigger(bboxes) if bboxes.size > 0 else np.array([], bool)
 
+            zone_counts = result.zone_counts[zi]
+            all_tids_in_zone = []
+
+            # iterate over all filtered objects
             for obj, flag in zip(filtered_results, triggers):
                 if flag:
-                    obj["in_zone"][zi] = True
-                    zone_counts["total"] += 1
-                    if self._per_class_display and "label" in obj:
-                        zone_counts[obj["label"]] += 1
-                    if use_trails:
-                        tid = obj["track_id"]
-                        zone._timeout_count_dict[tid] = zone._timeout_count_initial
-                        zone._object_label_dict[tid] = obj["label"]
-                        all_tids_in_zone.append(tid)
+                    # object is in zone
+                    set_in_zone_and_increment_counts(obj, zi, zone_counts)
 
-            if use_trails:
-                inactive_set = set(zone._timeout_count_dict.keys())
+                    if self._use_tracking:
+                        tid = obj["track_id"]
+                        obj_state = zone._object_states.get(tid)
+                        if obj_state:
+                            # object was already in zone before
+                            obj_state.timeout_count = zone._timeout_count_initial
+                            obj_state.presence_count += 1
+                        else:
+                            # fresh object, never seen in this zone
+                            zone._object_states[tid] = obj_state = _ObjectState(
+                                timeout_count=zone._timeout_count_initial,
+                                object_label=obj.get("label"),
+                                presence_count=1,
+                                entering_time=time_now,
+                            )
+
+                        set_time_in_zone(obj, zi, obj_state)
+                        all_tids_in_zone.append(tid)
+                else:
+                    # object is NOT in zone
+                    if self._use_tracking and self._timeout_frames > 0:
+                        tid = obj["track_id"]
+                        obj_state = zone._object_states.get(tid)
+                        if obj_state is not None:
+                            # object is not in zone, but still tracked
+                            obj_state.presence_count += 1
+                            set_in_zone_and_increment_counts(obj, zi, zone_counts)
+                            set_time_in_zone(obj, zi, obj_state)
+                            obj_state.timeout_count -= 1
+                            if obj_state.timeout_count > 0:
+                                all_tids_in_zone.append(tid)
+                            else:
+                                del zone._object_states[tid]
+
+            if self._use_tracking:
+                # process inactive objects: still tracked, but not detected on the current frame
+                inactive_set = set(zone._object_states.keys())
                 if len(all_tids_in_zone) > 0:
                     inactive_set -= set(all_tids_in_zone)
 
                 for tid in inactive_set:
-                    if zone._timeout_count_dict[tid] == 0:
-                        del (
-                            zone._timeout_count_dict[tid],
-                            zone._object_label_dict[tid],
-                        )
-                    else:
-                        zone._timeout_count_dict[tid] -= 1
-                        label = (
-                            zone._object_label_dict[tid]
-                            if self._per_class_display
-                            else "total"
-                        )
-                        zone_counts[label] = zone_counts.get(label, 0) + 1
+                    obj_state = zone._object_states[tid]
+
+                    if self._timeout_frames > 0:
+                        obj_state.presence_count += 1
+                        obj_state.timeout_count -= 1
+                        zone_counts["total"] += 1
+                        if self._per_class_display and obj_state.object_label:
+                            zone_counts[obj_state.object_label] += 1
+
+                    # here we delete both timed-out and lost objects (in case of zero timeout)
+                    if obj_state.timeout_count == 0:
+                        del zone._object_states[tid]
 
     def annotate(self, result, image: np.ndarray) -> np.ndarray:
         """

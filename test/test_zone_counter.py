@@ -409,7 +409,7 @@ def test_zone_counter():
             ],
         },
         {
-            "case": "One trigger, object disappears and appears again",
+            "case": "One trigger, object disappears and appears again (no timeout)",
             "params": {
                 "count_polygons": zones,
                 "triggering_position": AnchorPoint.TOP_RIGHT,
@@ -420,21 +420,18 @@ def test_zone_counter():
                     [
                         {"bbox": box_1_zone_1, "label": "label1", "track_id": 0},
                         {"bbox": box_2_zone_1, "label": "label2", "track_id": 1},
-                        {"bbox": box_1_zone_2, "label": "label3", "track_id": 2},
                     ],
                     [
                         {
                             0: [np.array(box_1_zone_1, dtype=np.int32)],
                             1: [np.array(box_2_zone_1, dtype=np.int32)],
-                            2: [np.array(box_1_zone_2, dtype=np.int32)],
                         }
                     ],
-                    [{0: "label1", 1: "label2", 2: "label3"}],
+                    [{0: "label1", 1: "label2"}],
                 ],
                 [
                     [
                         {"bbox": box_2_zone_1, "label": "label2", "track_id": 1},
-                        {"bbox": box_1_zone_2, "label": "label3", "track_id": 2},
                     ],
                     [
                         {
@@ -443,19 +440,14 @@ def test_zone_counter():
                                 np.array(box_2_zone_1, dtype=np.int32),
                                 np.array(box_2_zone_1, dtype=np.int32),
                             ],
-                            2: [
-                                np.array(box_1_zone_2, dtype=np.int32),
-                                np.array(box_1_zone_2, dtype=np.int32),
-                            ],
                         }
                     ],
-                    [{0: "label1", 1: "label2", 2: "label3"}],
+                    [{0: "label1", 1: "label2"}],
                 ],
                 [
                     [
                         {"bbox": box_1_zone_1, "label": "label1", "track_id": 0},
                         {"bbox": box_2_zone_1, "label": "label2", "track_id": 1},
-                        {"bbox": box_1_zone_2, "label": "label3", "track_id": 2},
                     ],
                     [
                         {
@@ -468,14 +460,9 @@ def test_zone_counter():
                                 np.array(box_2_zone_1, dtype=np.int32),
                                 np.array(box_2_zone_1, dtype=np.int32),
                             ],
-                            2: [
-                                np.array(box_1_zone_2, dtype=np.int32),
-                                np.array(box_1_zone_2, dtype=np.int32),
-                                np.array(box_1_zone_2, dtype=np.int32),
-                            ],
                         }
                     ],
-                    [{0: "label1", 1: "label2", 2: "label3"}],
+                    [{0: "label1", 1: "label2"}],
                 ],
             ],
             "res": [
@@ -486,18 +473,14 @@ def test_zone_counter():
                             "label": "label1",
                             "track_id": 0,
                             "in_zone": [True, False],
+                            "frames_in_zone": [1, 0],
                         },
                         {
                             "bbox": box_2_zone_1,
                             "label": "label2",
                             "track_id": 1,
                             "in_zone": [False, False],
-                        },
-                        {
-                            "bbox": box_1_zone_2,
-                            "label": "label3",
-                            "track_id": 2,
-                            "in_zone": [False, False],
+                            "frames_in_zone": [0, 0],
                         },
                     ],
                     [{"total": 1}, {"total": 0}],
@@ -509,12 +492,7 @@ def test_zone_counter():
                             "label": "label2",
                             "track_id": 1,
                             "in_zone": [False, False],
-                        },
-                        {
-                            "bbox": box_1_zone_2,
-                            "label": "label3",
-                            "track_id": 2,
-                            "in_zone": [False, False],
+                            "frames_in_zone": [0, 0],
                         },
                     ],
                     [{"total": 1}, {"total": 0}],
@@ -526,18 +504,140 @@ def test_zone_counter():
                             "label": "label1",
                             "track_id": 0,
                             "in_zone": [True, False],
+                            "frames_in_zone": [3, 0],
                         },
                         {
                             "bbox": box_2_zone_1,
                             "label": "label2",
                             "track_id": 1,
                             "in_zone": [False, False],
+                            "frames_in_zone": [0, 0],
+                        },
+                    ],
+                    [{"total": 1}, {"total": 0}],
+                ],
+            ],
+        },
+        {
+            "case": "One trigger, object leaves and re-enters zone (no timeout)",
+            "params": {
+                "count_polygons": zones,
+                "triggering_position": AnchorPoint.TOP_RIGHT,
+                "use_tracking": True,
+            },
+            "inp": [
+                [
+                    [
+                        {"bbox": box_1_zone_1, "label": "label1", "track_id": 0},
+                        {"bbox": box_2_zone_1, "label": "label2", "track_id": 1},
+                    ],
+                    [
+                        {
+                            0: [np.array(box_1_zone_1, dtype=np.int32)],
+                            1: [np.array(box_2_zone_1, dtype=np.int32)],
+                        }
+                    ],
+                    [{0: "label1", 1: "label2"}],
+                ],
+                [
+                    [
+                        {
+                            "bbox": box_1_zone_1_shifted,
+                            "label": "label1",
+                            "track_id": 0,
+                        },
+                        {"bbox": box_2_zone_1, "label": "label2", "track_id": 1},
+                    ],
+                    [
+                        {
+                            0: [
+                                np.array(box_1_zone_1, dtype=np.int32),
+                                np.array(box_1_zone_1_shifted, dtype=np.int32),
+                            ],
+                            1: [
+                                np.array(box_2_zone_1, dtype=np.int32),
+                                np.array(box_2_zone_1, dtype=np.int32),
+                            ],
+                        }
+                    ],
+                    [{0: "label1", 1: "label2"}],
+                ],
+                [
+                    [
+                        {"bbox": box_1_zone_1, "label": "label1", "track_id": 0},
+                        {"bbox": box_2_zone_1, "label": "label2", "track_id": 1},
+                    ],
+                    [
+                        {
+                            0: [
+                                np.array(box_1_zone_1, dtype=np.int32),
+                                np.array(box_1_zone_1_shifted, dtype=np.int32),
+                                np.array(box_1_zone_1, dtype=np.int32),
+                            ],
+                            1: [
+                                np.array(box_2_zone_1, dtype=np.int32),
+                                np.array(box_2_zone_1, dtype=np.int32),
+                                np.array(box_2_zone_1, dtype=np.int32),
+                            ],
+                        }
+                    ],
+                    [{0: "label1", 1: "label2"}],
+                ],
+            ],
+            "res": [
+                [
+                    [
+                        {
+                            "bbox": box_1_zone_1,
+                            "label": "label1",
+                            "track_id": 0,
+                            "in_zone": [True, False],
+                            "frames_in_zone": [1, 0],
                         },
                         {
-                            "bbox": box_1_zone_2,
-                            "label": "label3",
-                            "track_id": 2,
+                            "bbox": box_2_zone_1,
+                            "label": "label2",
+                            "track_id": 1,
                             "in_zone": [False, False],
+                            "frames_in_zone": [0, 0],
+                        },
+                    ],
+                    [{"total": 1}, {"total": 0}],
+                ],
+                [
+                    [
+                        {
+                            "bbox": box_1_zone_1_shifted,
+                            "label": "label1",
+                            "track_id": 0,
+                            "in_zone": [False, False],
+                            "frames_in_zone": [0, 0],
+                        },
+                        {
+                            "bbox": box_2_zone_1,
+                            "label": "label2",
+                            "track_id": 1,
+                            "in_zone": [False, False],
+                            "frames_in_zone": [0, 0],
+                        },
+                    ],
+                    [{"total": 0}, {"total": 0}],
+                ],
+                [
+                    [
+                        {
+                            "bbox": box_1_zone_1,
+                            "label": "label1",
+                            "track_id": 0,
+                            "in_zone": [True, False],
+                            "frames_in_zone": [1, 0],
+                        },
+                        {
+                            "bbox": box_2_zone_1,
+                            "label": "label2",
+                            "track_id": 1,
+                            "in_zone": [False, False],
+                            "frames_in_zone": [0, 0],
                         },
                     ],
                     [{"total": 1}, {"total": 0}],
@@ -632,18 +732,21 @@ def test_zone_counter():
                             "label": "label1",
                             "track_id": 0,
                             "in_zone": [True, False],
+                            "frames_in_zone": [1, 0],
                         },
                         {
                             "bbox": box_2_zone_1,
                             "label": "label2",
                             "track_id": 1,
                             "in_zone": [False, False],
+                            "frames_in_zone": [0, 0],
                         },
                         {
                             "bbox": box_1_zone_2,
                             "label": "label3",
                             "track_id": 2,
                             "in_zone": [False, False],
+                            "frames_in_zone": [0, 0],
                         },
                     ],
                     [{"total": 1}, {"total": 0}],
@@ -654,19 +757,22 @@ def test_zone_counter():
                             "bbox": box_1_zone_1_shifted,
                             "label": "label1",
                             "track_id": 0,
-                            "in_zone": [False, False],
+                            "in_zone": [True, False],
+                            "frames_in_zone": [2, 0],
                         },
                         {
                             "bbox": box_2_zone_1,
                             "label": "label2",
                             "track_id": 1,
                             "in_zone": [False, False],
+                            "frames_in_zone": [0, 0],
                         },
                         {
                             "bbox": box_1_zone_2,
                             "label": "label3",
                             "track_id": 2,
                             "in_zone": [False, False],
+                            "frames_in_zone": [0, 0],
                         },
                     ],
                     [{"total": 1}, {"total": 0}],
@@ -678,18 +784,21 @@ def test_zone_counter():
                             "label": "label1",
                             "track_id": 0,
                             "in_zone": [True, False],
+                            "frames_in_zone": [1, 0],
                         },
                         {
                             "bbox": box_2_zone_1,
                             "label": "label2",
                             "track_id": 1,
                             "in_zone": [False, False],
+                            "frames_in_zone": [0, 0],
                         },
                         {
                             "bbox": box_1_zone_2,
                             "label": "label3",
                             "track_id": 2,
                             "in_zone": [False, False],
+                            "frames_in_zone": [0, 0],
                         },
                     ],
                     [{"total": 1}, {"total": 0}],
@@ -818,18 +927,47 @@ def test_zone_counter():
                             "label": "label1",
                             "track_id": 0,
                             "in_zone": [True, False],
+                            "frames_in_zone": [1, 0],
                         },
                         {
                             "bbox": box_2_zone_1,
                             "label": "label2",
                             "track_id": 1,
                             "in_zone": [False, False],
+                            "frames_in_zone": [0, 0],
                         },
                         {
                             "bbox": box_1_zone_2,
                             "label": "label3",
                             "track_id": 2,
                             "in_zone": [False, False],
+                            "frames_in_zone": [0, 0],
+                        },
+                    ],
+                    [{"total": 1}, {"total": 0}],
+                ],
+                [
+                    [
+                        {
+                            "bbox": box_1_zone_1_shifted,
+                            "label": "label1",
+                            "track_id": 0,
+                            "in_zone": [True, False],
+                            "frames_in_zone": [2, 0],
+                        },
+                        {
+                            "bbox": box_2_zone_1,
+                            "label": "label2",
+                            "track_id": 1,
+                            "in_zone": [False, False],
+                            "frames_in_zone": [0, 0],
+                        },
+                        {
+                            "bbox": box_1_zone_2,
+                            "label": "label3",
+                            "track_id": 2,
+                            "in_zone": [False, False],
+                            "frames_in_zone": [0, 0],
                         },
                     ],
                     [{"total": 1}, {"total": 0}],
@@ -841,41 +979,21 @@ def test_zone_counter():
                             "label": "label1",
                             "track_id": 0,
                             "in_zone": [False, False],
+                            "frames_in_zone": [0, 0],
                         },
                         {
                             "bbox": box_2_zone_1,
                             "label": "label2",
                             "track_id": 1,
                             "in_zone": [False, False],
+                            "frames_in_zone": [0, 0],
                         },
                         {
                             "bbox": box_1_zone_2,
                             "label": "label3",
                             "track_id": 2,
                             "in_zone": [False, False],
-                        },
-                    ],
-                    [{"total": 1}, {"total": 0}],
-                ],
-                [
-                    [
-                        {
-                            "bbox": box_1_zone_1_shifted,
-                            "label": "label1",
-                            "track_id": 0,
-                            "in_zone": [False, False],
-                        },
-                        {
-                            "bbox": box_2_zone_1,
-                            "label": "label2",
-                            "track_id": 1,
-                            "in_zone": [False, False],
-                        },
-                        {
-                            "bbox": box_1_zone_2,
-                            "label": "label3",
-                            "track_id": 2,
-                            "in_zone": [False, False],
+                            "frames_in_zone": [0, 0],
                         },
                     ],
                     [{"total": 0}, {"total": 0}],
@@ -887,18 +1005,21 @@ def test_zone_counter():
                             "label": "label1",
                             "track_id": 0,
                             "in_zone": [True, False],
+                            "frames_in_zone": [1, 0],
                         },
                         {
                             "bbox": box_2_zone_1,
                             "label": "label2",
                             "track_id": 1,
                             "in_zone": [False, False],
+                            "frames_in_zone": [0, 0],
                         },
                         {
                             "bbox": box_1_zone_2,
                             "label": "label3",
                             "track_id": 2,
                             "in_zone": [False, False],
+                            "frames_in_zone": [0, 0],
                         },
                     ],
                     [{"total": 1}, {"total": 0}],
@@ -906,6 +1027,15 @@ def test_zone_counter():
             ],
         },
     ]
+
+    keys_to_ignore = ["time_in_zone"]
+
+    def cleanup_result(result):
+        for r in result._inference_results:
+            for key in keys_to_ignore:
+                if key in r:
+                    del r[key]
+        return result
 
     for case in test_cases:
         zone_counter = degirum_tools.ZoneCounter(**case["params"])
@@ -924,6 +1054,7 @@ def test_zone_counter():
                     result.trail_classes = input[2][0]
 
             zone_counter.analyze(result)
+            cleanup_result(result)
             assert result._inference_results == case["res"][i][0], (
                 f"Case `{case['case']}` failed at step {i}: "
                 + f"inference results `{result._inference_results}` "
