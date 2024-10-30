@@ -34,7 +34,13 @@
 import numpy as np, cv2, time
 from typing import Tuple, Optional, Dict, List, Union, Any
 from dataclasses import dataclass
-from .ui_support import put_text, color_complement, deduce_text_color, rgb_to_bgr
+from .ui_support import (
+    put_text,
+    color_complement,
+    deduce_text_color,
+    rgb_to_bgr,
+    CornerPosition,
+)
 from .result_analyzer_base import ResultAnalyzerBase
 from .math_support import (
     AnchorPoint,
@@ -176,6 +182,10 @@ class ZoneCounter(ResultAnalyzerBase):
 
     """
 
+    key_in_zone = "in_zone"
+    key_frames_in_zone = "frames_in_zone"
+    key_time_in_zone = "time_in_zone"
+
     def __init__(
         self,
         count_polygons: Union[np.ndarray, list],
@@ -191,6 +201,7 @@ class ZoneCounter(ResultAnalyzerBase):
         timeout_frames: int = 0,
         window_name: Optional[str] = None,
         show_overlay: bool = True,
+        show_inzone_counters: Optional[str] = None,
         annotation_color: Optional[tuple] = None,
         annotation_line_width: Optional[int] = None,
     ):
@@ -212,6 +223,7 @@ class ZoneCounter(ResultAnalyzerBase):
             timeout_frames (int, optional): number of frames to tolerate temporary absence of the object when it disappears from zone
             window_name (str, optional): optional OpenCV window name to configure for interactive zone adjustment
             show_overlay: if True, annotate image; if False, send through original image
+            show_inzone_counters: "time" to show time-in-zone, "frames" to show frames-in-zone, "all" to show both, None to show nothing
             annotation_color (tuple, optional): Color to use for annotations, None to use complement to result overlay color
             annotation_line_width (int, optional): Line width to use for annotations, None to use result overlay line width
         """
@@ -221,6 +233,7 @@ class ZoneCounter(ResultAnalyzerBase):
         self._win_name = window_name
         self._mouse_callback_installed = False
         self._class_list = [] if class_list is None else class_list
+
         self._per_class_display = per_class_display
         if class_list is None and per_class_display:
             raise ValueError(
@@ -228,14 +241,43 @@ class ZoneCounter(ResultAnalyzerBase):
             )
 
         self._triggering_position = triggering_position
+
         self._bounding_box_scale = bounding_box_scale
+        if self._bounding_box_scale <= 0.0 or self._bounding_box_scale > 1.0:
+            raise ValueError("bounding_box_scale must be from 0 to 1")
+
         self._iopa_threshold = iopa_threshold
+        if self._iopa_threshold <= 0 and self._triggering_position is None:
+            raise ValueError(
+                "iopa_threshold must be specified when triggering_position is None"
+            )
+
         self._use_tracking = use_tracking
         self._timeout_frames = timeout_frames
+        if self._timeout_frames > 0 and not self._use_tracking:
+            raise ValueError(
+                "timeout_frames can be used only when use_tracking is True"
+            )
+
         self._polygons = [
             np.array(polygon, dtype=np.int32) for polygon in count_polygons
         ]
+
         self._show_overlay = show_overlay
+        self._show_inzone_counters = show_inzone_counters
+        if self._show_inzone_counters not in [None, "time", "frames", "all"]:
+            raise ValueError(
+                "show_inzone_counters must be one of 'time', 'frames', 'all', or None"
+            )
+        if self._show_inzone_counters is not None and not self._show_overlay:
+            raise ValueError(
+                "show_inzone_counters can be used only when show_overlay is True"
+            )
+        if self._show_inzone_counters is not None and not self._use_tracking:
+            raise ValueError(
+                "show_inzone_counters can be used only when use_tracking is True"
+            )
+
         self._annotation_color = annotation_color
         self._annotation_line_width = annotation_line_width
 
@@ -306,16 +348,16 @@ class ZoneCounter(ResultAnalyzerBase):
         # initialize per-object results
         for obj in filtered_results:
             nzones = len(self._zones)
-            obj["in_zone"] = [False] * nzones
+            obj[self.key_in_zone] = [False] * nzones
             if self._use_tracking:
-                obj["frames_in_zone"] = [0] * nzones
-                obj["time_in_zone"] = [0.0] * nzones
+                obj[self.key_frames_in_zone] = [0] * nzones
+                obj[self.key_time_in_zone] = [0.0] * nzones
 
         bboxes = np.array([obj["bbox"] for obj in filtered_results])
         time_now = time.time()
 
         def set_in_zone_and_increment_counts(obj, zi, zone_counts):
-            obj["in_zone"][zi] = True
+            obj[self.key_in_zone][zi] = True
             zone_counts["total"] += 1
             if self._per_class_display:
                 label = obj.get("label")
@@ -323,8 +365,8 @@ class ZoneCounter(ResultAnalyzerBase):
                     zone_counts[label] += 1
 
         def set_time_in_zone(obj, zi, obj_state):
-            obj["frames_in_zone"][zi] = obj_state.presence_count
-            obj["time_in_zone"][zi] = time_now - obj_state.entering_time
+            obj[self.key_frames_in_zone][zi] = obj_state.presence_count
+            obj[self.key_time_in_zone][zi] = time_now - obj_state.entering_time
 
         for zi, zone in enumerate(self._zones):
             # compute object-in-zone flags
@@ -421,7 +463,42 @@ class ZoneCounter(ResultAnalyzerBase):
             else self._annotation_line_width
         )
 
-        # draw annotations
+        # draw object annotations
+        if self._show_inzone_counters:
+            for r in result.results:
+                if "in_zone" in r:
+                    text = ""
+                    for zi, in_zone in enumerate(r["in_zone"]):
+                        if in_zone:
+                            if text:
+                                text += "\n"
+                            if len(self._polygons) > 1:
+                                text += f"Z{zi}: "
+                            text += (
+                                f"{r['frames_in_zone'][zi]}#"
+                                if self._show_inzone_counters == "frames"
+                                else (
+                                    f"{r['time_in_zone'][zi]:.1f}s"
+                                    if self._show_inzone_counters == "time"
+                                    else f"{r['frames_in_zone'][zi]}#/{r['time_in_zone'][zi]:.1f}s"
+                                )
+                            )
+                    if text:
+                        xy = (
+                            np.array(r["bbox"][:2]).astype(int)
+                            + result.overlay_line_width
+                        )
+                        put_text(
+                            image,
+                            text,
+                            tuple(xy),
+                            corner_position=CornerPosition.TOP_LEFT,
+                            font_color=text_color,
+                            bg_color=line_color,
+                            font_scale=result.overlay_font_scale,
+                        )
+
+        # draw zone annotations
         for zi in range(len(self._polygons)):
             cv2.polylines(
                 image,
