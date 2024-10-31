@@ -516,7 +516,7 @@ class _ByteTrack:
 
         """ Add newly detected tracklets to tracked_stracks"""
         unconfirmed = []
-        tracked_stracks = []  # type: list[STrack]
+        tracked_stracks: List[STrack] = []
         for track in self._tracked_tracks:
             track.obj_idx = -1  # clear object index in advance
             if not track.is_activated:

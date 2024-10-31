@@ -10,6 +10,9 @@ on:
 jobs:
   lint:
     name: Linters/Type Checkers
+    strategy:
+      matrix:
+        python: [3.8, 3.12]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -18,7 +21,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: 3.9
+          python-version: ${{ matrix.python }}
       - name: Install
         run: pip install -e '.[linting]'
       - name: Run flake8
@@ -27,6 +30,9 @@ jobs:
         run: python3 -m mypy
   test:
     name: Unit Tests
+    strategy:
+      matrix:
+        python: [3.8, 3.12]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -35,7 +41,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: 3.9
+          python-version: ${{ matrix.python }}
       - name: Install
         run: |
           pip install -e '.[testing]'

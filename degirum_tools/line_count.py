@@ -8,7 +8,7 @@
 #
 
 import numpy as np, cv2
-from typing import List, Dict, Optional, Union, Any
+from typing import List, Dict, Optional, Union, Any, Type
 from copy import deepcopy
 from .ui_support import (
     put_text,
@@ -159,13 +159,13 @@ class LineCounter(ResultAnalyzerBase):
             window_name (str, optional): optional OpenCV window name to configure for interactive line adjustment
         """
 
-        self._lines = [list(line) for line in lines]
+        self._lines = [np.array(line).astype(int) for line in lines]
         self._line_vectors = [self._line_to_vector(line) for line in lines]
         self._anchor_point = anchor_point
         self._whole_trail = whole_trail
         self._count_first_crossing = count_first_crossing
         self._absolute_directions = absolute_directions
-        self._count_type: Union[type[LineCounts], type[VectorCounts]] = (
+        self._count_type: Union[Type[LineCounts], Type[VectorCounts]] = (
             LineCounts if absolute_directions else VectorCounts
         )
         self._accumulate = accumulate
@@ -338,11 +338,9 @@ class LineCounter(ResultAnalyzerBase):
         margin = 3
         img_center = (image.shape[1] // 2, image.shape[0] // 2)
 
-        for line_count, line, line_vector in zip(
-            result.line_counts, self._lines, self._line_vectors
-        ):
-            line_start = line[:2]
-            line_end = line[2:]
+        for line_count, line in zip(result.line_counts, self._lines):
+            line_start = tuple(line[:2])
+            line_end = tuple(line[2:])
 
             if self._absolute_directions:
                 cv2.line(
@@ -553,7 +551,10 @@ class LineCounter(ResultAnalyzerBase):
         def line_update():
             idx = self._gui_state["update"]
             if idx >= 0:
-                self._line_vectors[idx] = self._line_to_vector(self._lines[idx])
+                new_vector = self._line_to_vector(self._lines[idx])
+                if not np.array_equal(new_vector, self._line_vectors[idx]):
+                    self._line_vectors[idx] = new_vector
+                    self.reset()
 
         if event == cv2.EVENT_LBUTTONDOWN:
             for idx, line in enumerate(self._lines):
@@ -566,34 +567,25 @@ class LineCounter(ResultAnalyzerBase):
                     )
                     < 10
                 ):
-                    line_update()
                     self._gui_state["dragging"] = line
                     self._gui_state["offset"] = click_point
                     self._gui_state["update"] = idx
-                    self._gui_state["type"] = "line"
                     break
 
         if event == cv2.EVENT_RBUTTONDOWN:
             for idx, line in enumerate(self._lines):
                 for i in range(0, len(line), 2):
                     if np.linalg.norm(line[i : i + 2] - click_point) < 10:
-                        line_update()
-                        self._gui_state["dragging"] = line
+                        self._gui_state["dragging"] = line[i : i + 2]
                         self._gui_state["offset"] = click_point
                         self._gui_state["update"] = idx
-                        self._gui_state["type"] = "point"
-                        self._gui_state["point_idx"] = i
                         break
 
         elif event == cv2.EVENT_MOUSEMOVE:
             if self._gui_state["dragging"] is not None:
                 delta = click_point - self._gui_state["offset"]
-                if self._gui_state["type"] == "line":
-                    for i in range(0, len(self._gui_state["dragging"]), 2):
-                        self._gui_state["dragging"][i : i + 2] += delta
-                elif self._gui_state["type"] == "point":
-                    i = self._gui_state["point_idx"]
-                    self._gui_state["dragging"][i : i + 2] += delta
+                reshaped_view = self._gui_state["dragging"].reshape(-1, len(delta))
+                reshaped_view += delta
                 self._gui_state["offset"] = click_point
 
         elif event == cv2.EVENT_LBUTTONUP or event == cv2.EVENT_RBUTTONUP:

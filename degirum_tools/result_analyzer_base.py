@@ -7,6 +7,7 @@
 
 from abc import ABC, abstractmethod
 import numpy as np
+from typing import List
 
 
 class ResultAnalyzerBase(ABC):
@@ -56,7 +57,7 @@ class ResultAnalyzerBase(ABC):
         return self.annotate(result, image)
 
 
-def image_overlay_substitute(result, analyzers: list[ResultAnalyzerBase]):
+def image_overlay_substitute(result, analyzers: List[ResultAnalyzerBase]):
     """Substitutes the `image_overlay` property of the given `result` object with a new one
     that overlays the original image with the analyzer annotations.
 
