@@ -570,19 +570,19 @@ class ZoneCounter(ResultAnalyzerBase):
         def zone_update():
             idx = self._gui_state["update"]
             if idx >= 0 and self._wh is not None:
-                self._zones[idx] = _PolygonZone(
-                    self._polygons[idx],
-                    self._wh,
-                    self._triggering_position,
-                    self._bounding_box_scale,
-                    self._iopa_threshold,
-                    self._timeout_frames,
-                )
+                if not np.array_equal(self._zones[idx].polygon, self._polygons[idx]):
+                    self._zones[idx] = _PolygonZone(
+                        self._polygons[idx],
+                        self._wh,
+                        self._triggering_position,
+                        self._bounding_box_scale,
+                        self._iopa_threshold,
+                        self._timeout_frames,
+                    )
 
         if event == cv2.EVENT_LBUTTONDOWN:
             for idx, polygon in enumerate(self._polygons):
                 if cv2.pointPolygonTest(polygon, (x, y), False) > 0:
-                    zone_update()
                     self._gui_state["dragging"] = polygon
                     self._gui_state["offset"] = click_point
                     self._gui_state["update"] = idx
@@ -592,7 +592,6 @@ class ZoneCounter(ResultAnalyzerBase):
             for idx, polygon in enumerate(self._polygons):
                 for pt in polygon:
                     if np.linalg.norm(pt - click_point) < 10:
-                        zone_update()
                         self._gui_state["dragging"] = pt
                         self._gui_state["offset"] = click_point
                         self._gui_state["update"] = idx
