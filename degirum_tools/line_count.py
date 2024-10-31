@@ -8,7 +8,7 @@
 #
 
 import numpy as np, cv2
-from typing import List, Dict, Optional, Union, Any
+from typing import List, Dict, Optional, Union, Any, Type
 from copy import deepcopy
 from .ui_support import (
     put_text,
@@ -165,7 +165,7 @@ class LineCounter(ResultAnalyzerBase):
         self._whole_trail = whole_trail
         self._count_first_crossing = count_first_crossing
         self._absolute_directions = absolute_directions
-        self._count_type: Union[type[LineCounts], type[VectorCounts]] = (
+        self._count_type: Union[Type[LineCounts], Type[VectorCounts]] = (
             LineCounts if absolute_directions else VectorCounts
         )
         self._accumulate = accumulate
