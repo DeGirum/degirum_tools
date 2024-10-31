@@ -1228,7 +1228,7 @@ class CropCombiningGizmo(Gizmo):
         """Run gizmo"""
 
         frame_input = self.get_input(0)
-        crops: list[StreamData] = []
+        crops: List[StreamData] = []
         combined_meta: Optional[StreamMeta] = None
 
         for full_frame in frame_input:
