@@ -142,7 +142,7 @@ def put_text(
 
     top_left_xy = corner_xy
     lines: List[LineInfo] = []
-    max_width = 0
+    max_width = max_height = 0
     for line in label.splitlines():
         li = LineInfo()
         li.line = line
@@ -152,12 +152,12 @@ def put_text(
             font_scale,
             font_thickness,
         )
-        li.x = max(0, top_left_xy[0])
-        li.y = max(0, top_left_xy[1])
-
+        li.x = top_left_xy[0]
+        li.y = top_left_xy[1]
         li.line_height = li.line_height_no_baseline + baseline + margin
         top_left_xy = (li.x, li.y + int(li.line_height * line_spacing))
         max_width = max(max_width, line_width)
+        max_height = max(max_height, li.line_height)
         lines.append(li)
 
     max_width += margin
@@ -187,23 +187,24 @@ def put_text(
             li.x -= x_adjustment
             li.y -= y_adjustment
 
-            if li.x < 0:
-                li.x += im_w
-            if li.y < 0:
-                li.y += im_h
+    # fit to image
+    if (min_x := min(li.x for li in lines)) < 0:
+        for li in lines:
+            li.x -= min_x
+    elif (max_x := max(li.x for li in lines) + max_width - im_w) > 0:
+        for li in lines:
+            li.x -= max_x
+    if (min_y := min(li.y for li in lines)) < 0:
+        for li in lines:
+            li.y -= min_y
+    elif (max_y := max(li.y for li in lines) + max_height - im_h) > 0:
+        for li in lines:
+            li.y -= max_y
 
     for li in lines:
         if bg_color is not None:
-            # get actual mask sizes with regard to image crop
-            if im_h - (li.y + li.line_height) <= 0:
-                sz_h = max(im_h - li.y, 0)
-            else:
-                sz_h = li.line_height
-
-            if im_w - (li.x + max_width) <= 0:
-                sz_w = max(im_w - li.x, 0)
-            else:
-                sz_w = max_width
+            sz_h = li.line_height
+            sz_w = max_width
 
             # add background mask to image
             if sz_h > 0 and sz_w > 0:
