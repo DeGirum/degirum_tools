@@ -25,6 +25,8 @@ from .ui_support import Display
 from .image_tools import crop_image, resize_image, image_size, to_opencv
 from .result_analyzer_base import image_overlay_substitute
 from .crop_extent import CropExtentOptions, extend_bbox
+from .notifier import EventNotifier
+from .event_detector import EventDetector
 
 #
 # predefined meta tags
@@ -1555,15 +1557,17 @@ class AiAnalyzerGizmo(Gizmo):
                 image_overlay_substitute(inference_clone, self._analyzers)
                 new_meta.append(inference_clone, self.get_tags())
 
+                # check filters
                 if self._filters:
-                    if not (
-                        hasattr(inference_clone, "notifications")
-                        and (self._filters & inference_clone.notifications)
-                    ) and not (
-                        hasattr(inference_clone, "events_detected")
-                        and (self._filters & inference_clone.events_detected)
-                    ):
-                        filter_ok = False
+                    notifications = getattr(
+                        inference_clone, EventNotifier.key_notifications, None
+                    )
+                    if notifications is None or not self._filters & notifications:
+                        events = getattr(
+                            inference_clone, EventDetector.key_events_detected, None
+                        )
+                        if events is None or not self._filters & events:
+                            filter_ok = False
 
             if filter_ok:
                 self.send_result(StreamData(data.data, new_meta))

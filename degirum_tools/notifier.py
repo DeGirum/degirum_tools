@@ -17,6 +17,7 @@ from typing import Tuple, Union, Optional
 from .result_analyzer_base import ResultAnalyzerBase
 from .ui_support import put_text, color_complement, deduce_text_color, CornerPosition
 from .math_support import AnchorPoint, get_image_anchor_point
+from .event_detector import EventDetector
 
 
 class NotificationServer:
@@ -137,6 +138,8 @@ class EventNotifier(ResultAnalyzerBase):
     notifications and values are notification messages.
     """
 
+    key_notifications = "notifications"
+
     def __init__(
         self,
         name: str,
@@ -248,7 +251,7 @@ class EventNotifier(ResultAnalyzerBase):
             result: PySDK model result object
         """
 
-        if not hasattr(result, "events_detected"):
+        if not hasattr(result, EventDetector.key_events_detected):
             raise AttributeError(
                 "Detected events info is not available in the result: insert EventDetector analyzer in a chain"
             )
@@ -257,7 +260,7 @@ class EventNotifier(ResultAnalyzerBase):
         var_dict = {v: (v in result.events_detected) for v in self._condition.co_names}
         cond = eval(self._condition, var_dict)
 
-        if not hasattr(result, "notifications"):
+        if not hasattr(result, self.key_notifications):
             result.notifications = {}
 
         if cond and not self._prev_cond:  # condition is met for the first time
@@ -304,7 +307,7 @@ class EventNotifier(ResultAnalyzerBase):
         if not self._show_overlay:
             return image
 
-        if hasattr(result, "notifications") and result.notifications:
+        if hasattr(result, self.key_notifications) and result.notifications:
             self._last_notifications = {
                 k: v for k, v in result.notifications.items() if self._name == k
             }

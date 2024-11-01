@@ -325,6 +325,8 @@ class EventDetector(ResultAnalyzerBase):
 
     """
 
+    key_events_detected = "events_detected"
+
     def __init__(
         self,
         event_description: Union[str, dict],
@@ -452,7 +454,7 @@ class EventDetector(ResultAnalyzerBase):
             event_is_detected = true_cnt <= quantity_thr
 
         # add detected event to the result object
-        if not hasattr(result, "events_detected"):
+        if not hasattr(result, self.key_events_detected):
             result.events_detected = set()
         if event_is_detected:
             result.events_detected.add(self._event_name)
@@ -471,7 +473,7 @@ class EventDetector(ResultAnalyzerBase):
 
         if (
             not self._show_overlay
-            or not hasattr(result, "events_detected")
+            or not hasattr(result, self.key_events_detected)
             or not result.events_detected
             or self._event_name not in result.events_detected
         ):
