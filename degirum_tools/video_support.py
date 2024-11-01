@@ -95,8 +95,6 @@ def open_video_stream(
     stream = cv2.VideoCapture(video_source)  # type: ignore[arg-type]
     if not stream.isOpened():
         raise Exception(f"Error opening '{video_source}' video stream")
-    else:
-        print(f"Successfully opened video stream '{video_source}'")
 
     try:
         yield stream

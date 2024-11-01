@@ -10,7 +10,10 @@
 
 import os
 import threading
+import json
+import uuid
 from collections import deque
+from contextlib import ExitStack
 from typing import Set
 from .result_analyzer_base import ResultAnalyzerBase
 from .notifier import EventNotifier
@@ -32,7 +35,8 @@ class ClipSaver(ResultAnalyzerBase):
         file_prefix: str,
         *,
         pre_trigger_delay: int = 0,
-        generate_ai_overlay: bool = True,
+        embed_ai_annotations: bool = True,
+        save_ai_result_json: bool = True,
         target_fps=30.0,
     ):
         """
@@ -43,7 +47,8 @@ class ClipSaver(ResultAnalyzerBase):
             triggers: a set of event names or notifications which trigger video clip saving
             file_prefix: path and file prefix for video clip files
             pre_trigger_delay: delay before the event to start clip saving (in frames)
-            generate_ai_overlay: True to generate AI inference overlay image, False to use original image
+            embed_ai_annotations: True to embed AI inference annotations into video clip, False to use original image
+            save_ai_result_json: True to save AI result JSON file along with video clip
             target_fps: target frames per second for saved videos
         """
 
@@ -54,18 +59,20 @@ class ClipSaver(ResultAnalyzerBase):
         self._clip_duration = clip_duration
         self._triggers = triggers
         self._pre_trigger_delay = pre_trigger_delay
-        self._generate_ai_overlay = generate_ai_overlay
+        self._embed_ai_annotations = embed_ai_annotations
+        self._save_ai_result_json = save_ai_result_json
         self._file_prefix = file_prefix
         self._target_fps = target_fps
 
         # extract dir from file prefix and make it if it does not exist
-        dir_path = os.path.dirname(file_prefix)
-        if not os.path.exists(dir_path):
-            os.makedirs(dir_path)
+        self._dir_path = os.path.dirname(file_prefix)
+        if not os.path.exists(self._dir_path):
+            os.makedirs(self._dir_path)
 
         self._clip_buffer: deque = deque()
         self._end_counter = -1
         self._frame_counter = 0
+        self._thread_name = "dgtools_ClipSaverThread_" + str(uuid.uuid4())
 
     def analyze(self, result):
         """
@@ -95,7 +102,7 @@ class ClipSaver(ResultAnalyzerBase):
 
             # if triggered, set down-counting timer
             if triggered:
-                self._end_counter = self._clip_duration - self._pre_trigger_delay
+                self._end_counter = self._clip_duration - self._pre_trigger_delay - 1
         else:
             # otherwise, continue accumulating the clip
 
@@ -115,16 +122,61 @@ class ClipSaver(ResultAnalyzerBase):
         def save(clip_buffer):
             if clip_buffer:
                 w, h = image_size(clip_buffer[0].image)
-                filename = f"{self._file_prefix}_{self._frame_counter - self._clip_duration:08d}.mp4"
-                with open_video_writer(filename, w, h, self._target_fps) as writer:
-                    for frame in clip_buffer:
-                        if self._generate_ai_overlay:
-                            writer.write(frame.overlay_image)
+                start = max(0, self._frame_counter + 1 - self._clip_duration)
+                filename = f"{self._file_prefix}_{start:08d}"
+                with ExitStack() as stack:
+                    writer = stack.enter_context(
+                        open_video_writer(filename + ".mp4", w, h, self._target_fps)
+                    )
+                    json_file = None
+                    if self._save_ai_result_json:
+                        json_file = stack.enter_context(open(filename + ".json", "w"))
+                        json_file.write("[\n")
+
+                    def custom_serializer(obj):
+                        if isinstance(obj, set):
+                            return list(obj)
+                        raise TypeError(
+                            f"Object of type {obj.__class__.__name__} is not JSON serializable"
+                        )
+
+                    last_idx = len(clip_buffer) - 1
+                    for n, result in enumerate(clip_buffer):
+                        if self._embed_ai_annotations:
+                            writer.write(result.overlay_image)
                         else:
-                            writer.write(frame.image)
+                            writer.write(result.image)
+
+                        if json_file:
+                            values = {
+                                k: v
+                                for k, v in result.__dict__.items()
+                                if not k.startswith("__")
+                                and isinstance(
+                                    v, (int, float, str, bool, tuple, list, dict, set)
+                                )
+                            }
+
+                            r = json.dumps(values, indent=2, default=custom_serializer)
+                            if n < last_idx:
+                                r += ",\n"
+                            json_file.write(r)
+
+                    if json_file:
+                        json_file.write("\n]")
 
         # preserve a shallow copy of the clip buffer
         clip_buffer = deque(self._clip_buffer)
 
         # save the clip in a separate thread
-        threading.Thread(target=save, args=(clip_buffer,)).start()
+        threading.Thread(
+            target=save, args=(clip_buffer,), name=self._thread_name
+        ).start()
+
+    def join_all_saver_threads(self):
+        """
+        Join all threads started by this instance
+        """
+        for thread in threading.enumerate():
+            if thread.name == self._thread_name:
+                thread.join()

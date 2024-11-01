@@ -10,6 +10,7 @@
 from ._version import __version__, __version_info__
 from .audio_support import *
 from .classification_eval import *
+from .clip_saver import *
 from .compound_models import *
 from .crop_extent import *
 from .detection_eval import *
