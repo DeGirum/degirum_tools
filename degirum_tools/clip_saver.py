@@ -176,12 +176,13 @@ class ClipSaver(ResultAnalyzerBase):
                                 f"Object of type {obj.__class__.__name__} is not JSON serializable"
                             )
 
-                        json.dump(
-                            json_result,
-                            open(filename + ".json", "w"),
-                            indent=2,
-                            default=custom_serializer,
-                        )
+                        with open(filename + ".json", "w") as f:
+                            json.dump(
+                                json_result,
+                                f,
+                                indent=2,
+                                default=custom_serializer,
+                            )
 
         # preserve a shallow copy of self to use in thread
         context = copy.copy(self)
