@@ -262,7 +262,13 @@ class VideoWriter:
         if self._writer is None:
             return
 
-        self._writer.release()
+        if self._use_ffmpeg:
+            # workaround for bug in ffmpegcv
+            self._writer.process.stdin.close()
+            self._writer.process.wait()
+            delattr(self._writer, "process")
+        else:
+            self._writer.release()
 
     def __enter__(self):
         pass
