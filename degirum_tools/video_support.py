@@ -263,32 +263,27 @@ class VideoWriter:
             return
 
         process_to_wait = None
-        time.sleep(0.5)
         if self._use_ffmpeg:
             import psutil
 
             # find ffmpeg process: it is a child process of the writer shell process
             for p in psutil.process_iter([]):
-                print(
-                    f"video stream: {self._writer.process.pid} =? {p.ppid()} ({p.pid})"
-                )
                 if self._writer.process.pid == p.ppid():
                     process_to_wait = p
                     break
+            if process_to_wait is None:
+                process_to_wait = psutil.Process(self._writer.process.pid)
 
         self._writer.release()
 
         # wait for ffmpeg process to finish
         if process_to_wait is not None:
-            print(f"video stream: waiting for {self._fname} to finish...")
             try:
+                print(f"video writer: waiting {process_to_wait.pid} {time.time_ns()}")
                 process_to_wait.wait()
-                print("video stream: waiting done")
+                print(f"video writer: waiting done {time.time_ns()}")
             except Exception:
-                print("video stream: waiting failed")
                 pass
-        else:
-            print("video stream: nothing to wait")
 
     def __enter__(self):
         pass
