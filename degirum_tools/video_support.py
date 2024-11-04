@@ -268,8 +268,10 @@ class VideoWriter:
 
             # find ffmpeg process: it is a child process of the writer shell process
             for p in psutil.process_iter([]):
+                print(f"video stream: {self._writer.process.pid} =? {p.ppid()}")
                 if self._writer.process.pid == p.ppid():
                     process_to_wait = p
+                    break
 
         self._writer.release()
 
