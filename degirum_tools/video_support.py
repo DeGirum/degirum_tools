@@ -14,6 +14,7 @@ from functools import cmp_to_key
 from pathlib import Path
 from . import environment as env
 from .ui_support import Progress
+from .image_tools import ImageType, image_size, resize_image, to_opencv
 from typing import Union, Generator, Optional, Callable, Any
 
 
@@ -215,17 +216,18 @@ class VideoWriter:
         self._use_ffmpeg = platform.system() != "Windows"
         self._fps = fps
         self._fname = fname
+        self._wh: tuple = (w, h)
         if w > 0 and h > 0:
-            self._writer = self._create_writer(w, h)
+            self._writer = self._create_writer()
 
-    def _create_writer(self, w: int, h: int) -> Any:
+    def _create_writer(self) -> Any:
         if self._use_ffmpeg:
             import ffmpegcv
 
             # use ffmpeg-wrapped VideoWriter on other platforms;
             # reason: OpenCV VideoWriter does not support H264 on Linux
             return ffmpegcv.VideoWriter(
-                self._fname, codec=None, fps=self._fps, resize=(w, h)
+                self._fname, codec=None, fps=self._fps, resize=self._wh
             )
         else:
             # use OpenCV VideoWriter on Windows
@@ -233,19 +235,24 @@ class VideoWriter:
                 self._fname,
                 int.from_bytes("H264".encode(), byteorder="little"),
                 self._fps,
-                (w, h),
+                self._wh,
             )
 
-    def write(self, img: np.ndarray):
+    def write(self, img: ImageType):
         """
         Write image to video stream
         Args:
             img (np.ndarray): image to write
         """
+        im_sz = image_size(img)
         if self._writer is None:
-            self._writer = self._create_writer(img.shape[1], img.shape[0])
+            self._wh = im_sz
+            self._writer = self._create_writer()
         self._count += 1
-        self._writer.write(img)
+
+        if self._wh != im_sz:
+            img = resize_image(img, *self._wh)
+        self._writer.write(to_opencv(img))
 
     def release(self):
         """

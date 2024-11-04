@@ -22,7 +22,7 @@ from contextlib import ExitStack
 from .environment import get_test_mode
 from .video_support import open_video_stream, open_video_writer
 from .ui_support import Display
-from .image_tools import crop_image, resize_image, image_size, to_opencv
+from .image_tools import crop_image, image_size, resize_image, to_opencv
 from .result_analyzer_base import image_overlay_substitute
 from .crop_extent import CropExtentOptions, extend_bbox
 from .notifier import EventNotifier
@@ -867,8 +867,6 @@ class VideoSaverGizmo(Gizmo):
     def run(self):
         """Run gizmo"""
 
-        h = w = 0
-
         def get_img(data: StreamData) -> numpy.ndarray:
             frame = data.data
             if self._show_ai_overlay:
@@ -876,16 +874,9 @@ class VideoSaverGizmo(Gizmo):
                 if inference_meta:
                     frame = inference_meta.image_overlay
 
-            w1, h1 = image_size(frame)
-            if w != 0 and h != 0 and (w1 != w or h1 != h):
-                frame = resize_image(frame, w, h)
             return to_opencv(frame)
 
-        img = get_img(self.get_input(0).get())
-        w, h = image_size(img)
-        with open_video_writer(self._filename, w, h) as writer:
-            self.result_cnt += 1
-            writer.write(img)
+        with open_video_writer(self._filename) as writer:
             for data in self.get_input(0):
                 if self._abort:
                     break
@@ -929,23 +920,13 @@ class ResizingGizmo(Gizmo):
         return [self.name, tag_resize]
 
     def _resize(self, image):
-        is_opencv = isinstance(image, numpy.ndarray)
-        mparams = dg.aiclient.ModelParams()
-        mparams.InputRawDataType = ["DG_UINT8"]
-        mparams.InputImgFmt = ["RAW"]
-        mparams.InputW = [self._w]
-        mparams.InputH = [self._h]
-        mparams.InputColorSpace = ["BGR" if is_opencv else "RGB"]
-
-        pp = dg._preprocessor.create_image_preprocessor(
-            model_params=mparams,
+        return resize_image(
+            image,
+            self._w,
+            self._h,
             resize_method=self._resize_method,
             pad_method=self._pad_method,
-            image_backend="opencv" if is_opencv else "pil",
         )
-        pp.generate_image_result = True
-
-        return pp.forward(image)["image_result"]
 
     def run(self):
         """Run gizmo"""
