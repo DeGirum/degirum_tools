@@ -275,10 +275,15 @@ class VideoWriter:
 
         # wait for ffmpeg process to finish
         if process_to_wait is not None:
+            print(f"video stream: waiting for {self._fname} to finish...")
             try:
                 process_to_wait.wait()
+                print("video stream: waiting done")
             except Exception:
+                print("video stream: waiting failed")
                 pass
+        else:
+            print("video stream: nothing to wait")
 
     def __enter__(self):
         pass
