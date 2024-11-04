@@ -279,9 +279,12 @@ class VideoWriter:
         # wait for ffmpeg process to finish
         if process_to_wait is not None:
             try:
-                print(f"video writer: waiting {process_to_wait.pid} {time.time_ns()}")
-                process_to_wait.wait()
-                print(f"video writer: waiting done {time.time_ns()}")
+                start = time.time_ns()
+                print(f"video writer: waiting {process_to_wait.pid}")
+                ret = process_to_wait.wait()
+                print(
+                    f"video writer: waiting {process_to_wait.pid} done: ret={ret} ({(time.time_ns() - start)/1000}us)"
+                )
             except Exception:
                 pass
 
