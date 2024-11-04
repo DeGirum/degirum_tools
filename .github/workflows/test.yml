@@ -11,6 +11,7 @@ jobs:
   lint:
     name: Linters/Type Checkers
     strategy:
+      fail-fast: false
       matrix:
         python: [3.8, 3.12]
     runs-on: ubuntu-latest
