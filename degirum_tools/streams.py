@@ -31,12 +31,12 @@ from .event_detector import EventDetector
 #
 # predefined meta tags
 #
-tag_video = "video"  # tag for video source data
-tag_resize = "resize"  # tag for resizer result
-tag_inference = "inference"  # tag for inference result
-tag_preprocess = "preprocess"  # tag for preprocessor result
-tag_crop = "crop"  # tag for cropping result
-tag_analyzer = "analyzer"  # tag for analyzer result
+tag_video = "dgt_video"  # tag for video source data
+tag_resize = "dgt_resize"  # tag for resizer result
+tag_inference = "dgt_inference"  # tag for inference result
+tag_preprocess = "dgt_preprocess"  # tag for preprocessor result
+tag_crop = "dgt_crop"  # tag for cropping result
+tag_analyzer = "dgt_analyzer"  # tag for analyzer result
 
 
 class StreamMeta:
