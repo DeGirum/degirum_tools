@@ -267,12 +267,20 @@ class VideoWriter:
             import psutil
 
             # find ffmpeg process: it is a child process of the writer shell process
-            for p in psutil.process_iter([]):
-                if self._writer.process.pid == p.ppid():
-                    process_to_wait = p
-                    break
-            if process_to_wait is None:
-                process_to_wait = psutil.Process(self._writer.process.pid)
+            attempts = 0
+            while process_to_wait is None and attempts < 10:
+                for p in psutil.process_iter([]):
+                    try:
+                        ppid = p.ppid()
+                    except Exception:
+                        continue
+                    if self._writer.process.pid == ppid:
+                        process_to_wait = p
+                        break
+                if process_to_wait is None:
+                    attempts += 1
+                    time.sleep(0.1)
+            print(f"video writer: waiting for {process_to_wait}")
 
         self._writer.release()
 
@@ -283,7 +291,7 @@ class VideoWriter:
                 print(f"video writer: waiting {process_to_wait.pid}")
                 ret = process_to_wait.wait()
                 print(
-                    f"video writer: waiting {process_to_wait.pid} done: ret={ret} ({(time.time_ns() - start)/1000}us)"
+                    f"video writer: waiting {process_to_wait.pid} done: ret={ret} ({(time.time_ns() - start) / 1000}us)"
                 )
             except Exception:
                 pass
