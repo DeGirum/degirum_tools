@@ -262,16 +262,7 @@ class VideoWriter:
         if self._writer is None:
             return
 
-        if self._use_ffmpeg:
-            print("video writer: ", self._writer.process)
-
         self._writer.release()
-
-        if self._use_ffmpeg:
-            import psutil
-
-            for p in psutil.process_iter(["name"]):
-                print(p)
 
     def __enter__(self):
         pass

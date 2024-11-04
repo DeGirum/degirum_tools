@@ -192,10 +192,13 @@ class ClipSaver(ResultAnalyzerBase):
         # save the clip in a separate thread
         threading.Thread(target=save, args=(context,), name=self._thread_name).start()
 
-    def join_all_saver_threads(self):
+    def join_all_saver_threads(self) -> int:
         """
         Join all threads started by this instance
         """
+        nthreads = 0
         for thread in threading.enumerate():
             if thread.name == self._thread_name:
                 thread.join()
+                nthreads += 1
+        return nthreads

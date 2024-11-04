@@ -40,19 +40,21 @@ def test_clip_saver(temp_dir):
 
     def verify_results(case, clip_saver, triggers, results):
         case_name = f"Case '{case.name}'"
-        clip_saver.join_all_saver_threads()
+        nthreads = clip_saver.join_all_saver_threads()
+        assert nthreads == len(triggers)
         dir_path = clip_saver._dir_path
         assert os.path.exists(
             clip_saver._dir_path
         ), f"{case_name}: directory {clip_saver._dir_path} does not exist."
 
-        file_count = len(os.listdir(dir_path))
+        files = os.listdir(dir_path)
+        file_count = len(files)
         expected_file_count = len(triggers) * (
             2 if clip_saver._save_ai_result_json else 1
         )
         assert (
             file_count == expected_file_count
-        ), f"{case_name}: expected {expected_file_count} files, but found {file_count}."
+        ), f"{case_name}: expected {expected_file_count} files, but found {file_count}\n({files})."
 
         for t in triggers:
             start = t - clip_saver._pre_trigger_delay
