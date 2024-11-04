@@ -12,9 +12,10 @@ import os
 import threading
 import json
 import uuid
+import time
+import copy
 from collections import deque
-from contextlib import ExitStack
-from typing import Set
+from typing import Set, Dict, Any
 from .result_analyzer_base import ResultAnalyzerBase
 from .notifier import EventNotifier
 from .event_detector import EventDetector
@@ -71,6 +72,7 @@ class ClipSaver(ResultAnalyzerBase):
 
         self._clip_buffer: deque = deque()
         self._end_counter = -1
+        self._triggered: set = set()
         self._frame_counter = 0
         self._thread_name = "dgtools_ClipSaverThread_" + str(uuid.uuid4())
 
@@ -91,18 +93,22 @@ class ClipSaver(ResultAnalyzerBase):
             # if not in the middle of accumulating the clip from the previous trigger...
 
             # check trigger
-            triggered = False
+            triggered = set()
             notifications = getattr(result, EventNotifier.key_notifications, None)
-            if notifications is not None and self._triggers & notifications:
-                triggered = True
-            else:
-                events = getattr(result, EventDetector.key_events_detected, None)
-                if events is not None and self._triggers & events:
-                    triggered = True
+            if notifications is not None:
+                intersection = self._triggers & notifications
+                if intersection:
+                    triggered |= intersection
+            events = getattr(result, EventDetector.key_events_detected, None)
+            if events is not None:
+                intersection = self._triggers & events
+                if intersection:
+                    triggered |= intersection
 
             # if triggered, set down-counting timer
             if triggered:
                 self._end_counter = self._clip_duration - self._pre_trigger_delay - 1
+                self._triggered = triggered
         else:
             # otherwise, continue accumulating the clip
 
@@ -111,6 +117,7 @@ class ClipSaver(ResultAnalyzerBase):
             if self._end_counter <= 0:
                 self._save_clip()
                 self._end_counter = -1
+                self._triggered.clear()
 
         self._frame_counter += 1
 
@@ -119,59 +126,70 @@ class ClipSaver(ResultAnalyzerBase):
         Save video clip from the buffer
         """
 
-        def save(clip_buffer):
-            if clip_buffer:
-                w, h = image_size(clip_buffer[0].image)
-                start = max(0, self._frame_counter + 1 - self._clip_duration)
-                filename = f"{self._file_prefix}_{start:08d}"
-                with ExitStack() as stack:
-                    writer = stack.enter_context(
-                        open_video_writer(filename + ".mp4", w, h, self._target_fps)
-                    )
-                    json_file = None
-                    if self._save_ai_result_json:
-                        json_file = stack.enter_context(open(filename + ".json", "w"))
-                        json_file.write("[\n")
+        def save(context):
+            if context._clip_buffer:
+                w, h = image_size(context._clip_buffer[0].image)
+                start = max(0, context._frame_counter + 1 - context._clip_duration)
+                filename = f"{context._file_prefix}_{start:08d}"
 
-                    def custom_serializer(obj):
-                        if isinstance(obj, set):
-                            return list(obj)
-                        raise TypeError(
-                            f"Object of type {obj.__class__.__name__} is not JSON serializable"
+                with open_video_writer(
+                    filename + ".mp4", w, h, context._target_fps
+                ) as writer:
+
+                    json_result: Dict[str, Any] = {}
+                    if context._save_ai_result_json:
+                        json_result["properties"] = dict(
+                            timestamp=time.ctime(),
+                            start_frame=start,
+                            triggered_by=context._triggered,
+                            duration=context._clip_duration,
+                            pre_trigger_delay=context._pre_trigger_delay,
+                            target_fps=context._target_fps,
                         )
+                        json_result["results"] = []
 
-                    last_idx = len(clip_buffer) - 1
-                    for n, result in enumerate(clip_buffer):
-                        if self._embed_ai_annotations:
+                    for result in context._clip_buffer:
+                        if context._embed_ai_annotations:
                             writer.write(result.overlay_image)
                         else:
                             writer.write(result.image)
 
-                        if json_file:
-                            values = {
-                                k: v
-                                for k, v in result.__dict__.items()
-                                if not k.startswith("__")
-                                and isinstance(
-                                    v, (int, float, str, bool, tuple, list, dict, set)
-                                )
-                            }
+                        if context._save_ai_result_json:
+                            json_result["results"].append(
+                                {
+                                    k: v
+                                    for k, v in result.__dict__.items()
+                                    if not k.startswith("__")
+                                    and isinstance(
+                                        v,
+                                        (int, float, str, bool, tuple, list, dict, set),
+                                    )
+                                }
+                            )
 
-                            r = json.dumps(values, indent=2, default=custom_serializer)
-                            if n < last_idx:
-                                r += ",\n"
-                            json_file.write(r)
+                    if context._save_ai_result_json:
 
-                    if json_file:
-                        json_file.write("\n]")
+                        def custom_serializer(obj):
+                            if isinstance(obj, set):
+                                return list(obj)
+                            raise TypeError(
+                                f"Object of type {obj.__class__.__name__} is not JSON serializable"
+                            )
 
-        # preserve a shallow copy of the clip buffer
-        clip_buffer = deque(self._clip_buffer)
+                        json.dump(
+                            json_result,
+                            open(filename + ".json", "w"),
+                            indent=2,
+                            default=custom_serializer,
+                        )
+
+        # preserve a shallow copy of self to use in thread
+        context = copy.copy(self)
+        context._clip_buffer = deque(self._clip_buffer)
+        context._triggered = set(self._triggered)
 
         # save the clip in a separate thread
-        threading.Thread(
-            target=save, args=(clip_buffer,), name=self._thread_name
-        ).start()
+        threading.Thread(target=save, args=(context,), name=self._thread_name).start()
 
     def join_all_saver_threads(self):
         """

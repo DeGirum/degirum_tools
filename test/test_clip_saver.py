@@ -38,7 +38,8 @@ def test_clip_saver(temp_dir):
         for r in results:
             analyzer.analyze(r)
 
-    def verify_results(case_name, clip_saver, triggers, results):
+    def verify_results(case, clip_saver, triggers, results):
+        case_name = f"Case '{case.name}'"
         clip_saver.join_all_saver_threads()
         dir_path = clip_saver._dir_path
         assert os.path.exists(
@@ -89,7 +90,53 @@ def test_clip_saver(temp_dir):
                 assert os.path.exists(
                     json_path
                 ), f"{case_name}: file {json_path} does not exist."
-                loaded_results = json.load(open(json_path))
+                loaded_json = json.load(open(json_path))
+                assert "properties" in loaded_json, f"{case_name}: missing properties."
+                loaded_properties = loaded_json["properties"]
+                assert isinstance(
+                    loaded_properties, dict
+                ), f"{case_name}: properties is not a dict."
+
+                assert (
+                    "timestamp" in loaded_properties
+                ), f"{case_name}: missing timestamp."
+                assert (
+                    "start_frame" in loaded_properties
+                ), f"{case_name}: missing start_frame."
+                assert (
+                    loaded_properties["start_frame"] == start
+                ), f"{case_name}: start frame does not match."
+                assert (
+                    "triggered_by" in loaded_properties
+                ), f"{case_name}: missing triggered_by."
+                assert loaded_properties["triggered_by"] == list(
+                    set(case.events + case.notifications)
+                ), f"{case_name}: triggered set does not match."
+                assert (
+                    "duration" in loaded_properties
+                ), f"{case_name}: missing duration."
+                assert (
+                    loaded_properties["duration"] == clip_saver._clip_duration
+                ), f"{case_name}: duration does not match."
+                assert (
+                    "pre_trigger_delay" in loaded_properties
+                ), f"{case_name}: missing pre_trigger_delay."
+                assert (
+                    loaded_properties["pre_trigger_delay"]
+                    == clip_saver._pre_trigger_delay
+                ), f"{case_name}: pre-trigger delay does not match."
+                assert (
+                    "target_fps" in loaded_properties
+                ), f"{case_name}: missing target_fps."
+                assert (
+                    loaded_properties["target_fps"] == clip_saver._target_fps
+                ), f"{case_name}: target fps does not match."
+
+                assert "results" in loaded_json, f"{case_name}: missing results."
+                loaded_results = loaded_json["results"]
+                assert isinstance(
+                    loaded_results, list
+                ), f"{case_name}: results is not a list."
                 assert (
                     len(loaded_results) == clip_len
                 ), f"{case_name}: expected {clip_len} JSON results, but got {len(loaded_results)}."
@@ -266,7 +313,7 @@ def test_clip_saver(temp_dir):
 
         apply_analyzer(clip_saver, results)
         verify_results(
-            f"Case '{case.name}'",
+            case,
             clip_saver,
             (
                 case.expected_triggers
