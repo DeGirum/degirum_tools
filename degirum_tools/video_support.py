@@ -262,36 +262,16 @@ class VideoWriter:
         if self._writer is None:
             return
 
-        process_to_wait = None
         if self._use_ffmpeg:
-            import psutil
-
-            # find ffmpeg process: it is a child process of the writer shell process
-            attempts = 0
-            while process_to_wait is None and attempts < 3:
-                print(f"video writer: shell PID={self._writer.process.pid}")
-                for p in psutil.process_iter([]):
-                    print(f"video writer: {p.name()} PID={p.pid} parent={p.ppid()}")
-                    try:
-                        ppid = p.ppid()
-                    except Exception:
-                        continue
-                    if self._writer.process.pid == ppid:
-                        process_to_wait = p
-                        break
-                if process_to_wait is None:
-                    attempts += 1
-                    time.sleep(0.1)
-            print(f"video writer: to wait for {process_to_wait}")
+            print("video writer: ", self._writer.process)
 
         self._writer.release()
 
-        # wait for ffmpeg process to finish
-        if process_to_wait is not None:
-            try:
-                process_to_wait.wait()
-            except Exception:
-                pass
+        if self._use_ffmpeg:
+            import psutil
+
+            for p in psutil.process_iter(["name"]):
+                print(p)
 
     def __enter__(self):
         pass
