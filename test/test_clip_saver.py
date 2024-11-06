@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 def test_clip_saver(temp_dir):
     """
-    Test for ClipSaver analyzer
+    Test for ClipSavingAnalyzer
     """
 
     import degirum_tools
@@ -42,29 +42,29 @@ def test_clip_saver(temp_dir):
         case_name = f"Case '{case.name}'"
         nthreads = clip_saver.join_all_saver_threads()
         assert nthreads == len(triggers)
-        dir_path = clip_saver._dir_path
+        dir_path = clip_saver._saver._dir_path
         assert os.path.exists(
-            clip_saver._dir_path
-        ), f"{case_name}: directory {clip_saver._dir_path} does not exist."
+            clip_saver._saver._dir_path
+        ), f"{case_name}: directory {clip_saver._saver._dir_path} does not exist."
 
         files = os.listdir(dir_path)
         file_count = len(files)
         expected_file_count = len(triggers) * (
-            2 if clip_saver._save_ai_result_json else 1
+            2 if clip_saver._saver._save_ai_result_json else 1
         )
         assert (
             file_count == expected_file_count
         ), f"{case_name}: expected {expected_file_count} files, but found {file_count}\n({files})."
 
         for t in triggers:
-            start = t - clip_saver._pre_trigger_delay
-            clip_len = clip_saver._clip_duration
+            start = t - clip_saver._saver._pre_trigger_delay
+            clip_len = clip_saver._saver._clip_duration
             if start < 0:
                 clip_len += start + 1
                 start = 0
 
             clip_path = os.path.join(
-                dir_path, f"{clip_saver._file_prefix}_{start:08d}.mp4"
+                dir_path, f"{clip_saver._saver._file_prefix}_{start:08d}.mp4"
             )
             assert os.path.exists(
                 clip_path
@@ -76,8 +76,8 @@ def test_clip_saver(temp_dir):
                     height == h
                 ), f"{case_name}: expected height {h}, but got {height}."
                 assert (
-                    fps == clip_saver._target_fps
-                ), f"{case_name}: expected fps {clip_saver._target_fps}, but got {fps}."
+                    fps == clip_saver._saver._target_fps
+                ), f"{case_name}: expected fps {clip_saver._saver._target_fps}, but got {fps}."
 
                 cnt = stream.get(cv2.CAP_PROP_FRAME_COUNT)
                 assert (
@@ -85,10 +85,10 @@ def test_clip_saver(temp_dir):
                 ), f"{case_name}: expected {clip_len} frames, but got {cnt}."
 
             json_path = os.path.join(
-                dir_path, f"{clip_saver._file_prefix}_{start:08d}.json"
+                dir_path, f"{clip_saver._saver._file_prefix}_{start:08d}.json"
             )
 
-            if clip_saver._save_ai_result_json:
+            if clip_saver._saver._save_ai_result_json:
                 assert os.path.exists(
                     json_path
                 ), f"{case_name}: file {json_path} does not exist."
@@ -118,20 +118,20 @@ def test_clip_saver(temp_dir):
                     "duration" in loaded_properties
                 ), f"{case_name}: missing duration."
                 assert (
-                    loaded_properties["duration"] == clip_saver._clip_duration
+                    loaded_properties["duration"] == clip_saver._saver._clip_duration
                 ), f"{case_name}: duration does not match."
                 assert (
                     "pre_trigger_delay" in loaded_properties
                 ), f"{case_name}: missing pre_trigger_delay."
                 assert (
                     loaded_properties["pre_trigger_delay"]
-                    == clip_saver._pre_trigger_delay
+                    == clip_saver._saver._pre_trigger_delay
                 ), f"{case_name}: pre-trigger delay does not match."
                 assert (
                     "target_fps" in loaded_properties
                 ), f"{case_name}: missing target_fps."
                 assert (
-                    loaded_properties["target_fps"] == clip_saver._target_fps
+                    loaded_properties["target_fps"] == clip_saver._saver._target_fps
                 ), f"{case_name}: target fps does not match."
 
                 assert "results" in loaded_json, f"{case_name}: missing results."
@@ -303,7 +303,7 @@ def test_clip_saver(temp_dir):
         expect_fail = getattr(case, "expect_fail", False)
 
         try:
-            clip_saver = degirum_tools.ClipSaver(
+            clip_saver = degirum_tools.ClipSavingAnalyzer(
                 triggers=set(case.events + case.notifications),
                 file_prefix=file_prefix,
                 **case.args,
