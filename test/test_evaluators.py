@@ -10,29 +10,18 @@
 import pytest
 
 
-def test_ObjectDetectionModelEvaluator():
+def test_ObjectDetectionModelEvaluator(zoo_dir):
     """Test for ObjectDetectionModelEvaluator class"""
 
     import degirum_tools, degirum as dg
     import os, io, json
 
-    cur_dir = os.path.dirname(os.path.abspath(__file__))
-
     # load COCO detection and segmentation models
-    object_detection_model_name = "mobilenet_v2_ssd_coco--300x300_quant_n2x_cpu_1"
-    object_detection_model_path = f"{cur_dir}/model-zoo/{object_detection_model_name}/{object_detection_model_name}.json"
-    object_detection_zoo = dg.connect(dg.LOCAL, object_detection_model_path)
-    object_detection_model = object_detection_zoo.load_model(
-        object_detection_model_name
+    object_detection_model = dg.load_model(
+        "mobilenet_v2_ssd_coco--300x300_quant_n2x_cpu_1", dg.LOCAL, zoo_dir
     )
-
-    object_segmentation_model_name = (
-        "yolov8n_relu6_coco_seg--640x640_quant_tflite_cpu_1"
-    )
-    object_segmentation_model_path = f"{cur_dir}/model-zoo/{object_segmentation_model_name}/{object_segmentation_model_name}.json"
-    object_segmentation_zoo = dg.connect(dg.LOCAL, object_segmentation_model_path)
-    object_segmentation_model = object_segmentation_zoo.load_model(
-        object_segmentation_model_name
+    object_segmentation_model = dg.load_model(
+        "yolov8n_relu6_coco_seg--640x640_quant_tflite_cpu_1", dg.LOCAL, zoo_dir
     )
 
     #
@@ -129,19 +118,12 @@ def test_ObjectDetectionModelEvaluator():
             os.remove(predictions_file)
 
 
-def test_ImageClassificationModelEvaluator():
+def test_ImageClassificationModelEvaluator(classification_model):
     """Test for ImageClassificationModelEvaluator class"""
 
-    import degirum_tools, degirum as dg
-    import os, io, json
+    import degirum_tools, io, json
 
-    cur_dir = os.path.dirname(os.path.abspath(__file__))
-
-    # load classification model
-    model_name = "mobilenet_v2_generic_object--224x224_quant_n2x_cpu_1"
-    model_path = f"{cur_dir}/model-zoo/{model_name}/{model_name}.json"
-    zoo = dg.connect(dg.LOCAL, model_path)
-    model = zoo.load_model(model_name)
+    model = classification_model
 
     #
     # test evaluator creation
@@ -214,19 +196,16 @@ def test_ImageClassificationModelEvaluator():
         assert isinstance(v, list) and len(v) == len(evaluator.top_k)
 
 
-def test_ImageRegressionModelEvaluator():
+def test_ImageRegressionModelEvaluator(zoo_dir):
     """Test for ImageRegressionModelEvaluator class"""
 
     import degirum_tools, degirum as dg
-    import os, io
-
-    cur_dir = os.path.dirname(os.path.abspath(__file__))
+    import io
 
     # load regression model
-    model_name = "yolov8n_relu6_age--256x256_quant_tflite_cpu_1"
-    model_path = f"{cur_dir}/model-zoo/{model_name}/{model_name}.json"
-    zoo = dg.connect(dg.LOCAL, model_path)
-    model = zoo.load_model(model_name)
+    model = dg.load_model(
+        "yolov8n_relu6_age--256x256_quant_tflite_cpu_1", dg.LOCAL, zoo_dir
+    )
 
     #
     # test evaluator creation

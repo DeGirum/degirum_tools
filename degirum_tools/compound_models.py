@@ -10,10 +10,12 @@
 import queue, cv2, numpy as np, degirum as dg
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Union, Optional
+from typing import Union, Optional, List
 from .image_tools import detect_motion
 from .math_support import nms, NmsBoxSelectionPolicy
-from enum import Enum
+from .result_analyzer_base import ResultAnalyzerBase, image_overlay_substitute
+from .crop_extent import CropExtentOptions, extend_bbox
+from .image_tools import crop_image, image_size
 
 
 class ModelLike(ABC):
@@ -63,7 +65,7 @@ class ModelLike(ABC):
         return self.predict(data)
 
 
-class _FrameInfo:
+class FrameInfo:
     """Class to hold frame info"""
 
     def __init__(self, result1, sub_result):
@@ -102,9 +104,11 @@ class CompoundModelBase(ModelLike):
         """
         self.model1 = model1
         self.model2 = model2
+        self._master_model = model2
         self.queue = CompoundModelBase.NonBlockingQueue()
         # soft limit for the queue size
         self._queue_soft_limit = model1.frame_queue_depth
+        self._analyzers: List[ResultAnalyzerBase] = []
 
     @abstractmethod
     def queue_result1(self, result1):
@@ -149,6 +153,20 @@ class CompoundModelBase(ModelLike):
         # iterator over predictions of nested model
         model2_iter = self.model2.predict_batch(self.queue)
 
+        def result2_apply_final_steps(result2, transformed_result2):
+
+            # restore original frame info to support nested compound models
+            transformed_result2._frame_info = result2.info.original_info
+
+            # apply analyzers if any
+            if self._analyzers:
+                for analyzer in self._analyzers:
+                    analyzer.analyze(transformed_result2)
+
+                image_overlay_substitute(transformed_result2, self._analyzers)
+
+            return transformed_result2
+
         for result1 in self.model1.predict_batch(data):
             # put result of the first model into the queue
             if result1 is not None:
@@ -161,9 +179,7 @@ class CompoundModelBase(ModelLike):
                     if (
                         transformed_result2 := self.transform_result2(result2)
                     ) is not None:
-                        # restore original frame info to support nested compound models
-                        transformed_result2._frame_info = result2.info.original_info
-                        yield transformed_result2
+                        yield result2_apply_final_steps(result2, transformed_result2)
                         no_results = False
 
                 if no_results and self.model1.non_blocking_batch_predict:
@@ -178,9 +194,7 @@ class CompoundModelBase(ModelLike):
         # process all remaining results
         for result2 in model2_iter:
             if (transformed_result2 := self.transform_result2(result2)) is not None:
-                # restore original frame info to support nested compound models
-                transformed_result2._frame_info = result2.info.original_info
-                yield transformed_result2
+                yield result2_apply_final_steps(result2, transformed_result2)
 
     # explicitly redirect setting of `non_blocking_batch_predict` to the first model
     @property
@@ -199,9 +213,43 @@ class CompoundModelBase(ModelLike):
     def _custom_postprocessor(self, val: type):
         raise Exception("Custom postprocessor is not supported for compound models")
 
-    # fallback all getters of model-like attributes to the first model
+    def attach_analyzers(
+        self, analyzers: Union[ResultAnalyzerBase, List[ResultAnalyzerBase], None]
+    ):
+        """
+        Attach analyzers to a model.
+
+        Args:
+            analyzers: List of analyzer objects to attach to model,
+                or `None` to detach all analyzers if any were attached before
+        """
+        self._analyzers = (
+            []
+            if analyzers is None
+            else (analyzers if isinstance(analyzers, list) else [analyzers])
+        )
+
+    # fallback all getters of model-like attributes to the master model
     def __getattr__(self, attr):
-        return getattr(self.model1, attr)
+        return getattr(self._master_model, attr)
+
+    # fallback all setters of model-like attributes to the master model if it is defined
+    def __setattr__(self, name, value):
+        if "_master_model" not in self.__dict__:
+            return super().__setattr__(name, value)
+
+        model_class = self._master_model.__class__
+        is_model_class_attr = hasattr(model_class, name)
+        if not is_model_class_attr and not hasattr(self._master_model, name):
+            # this is to set attributes of the compound model itself
+            return super().__setattr__(name, value)
+
+        if is_model_class_attr:
+            attr = getattr(model_class, name)
+            if isinstance(attr, property) and attr.fset:
+                return attr.fset(self._master_model, value)
+
+        setattr(self._master_model, name, value)
 
 
 class CombiningCompoundModel(CompoundModelBase):
@@ -222,7 +270,7 @@ class CombiningCompoundModel(CompoundModelBase):
         Args:
             result1: prediction result of the first model
         """
-        self.queue.put((result1.image, _FrameInfo(result1, -1)))
+        self.queue.put((result1.image, FrameInfo(result1, -1)))
 
     def transform_result2(self, result2):
         """
@@ -240,35 +288,6 @@ class CombiningCompoundModel(CompoundModelBase):
         return result2
 
 
-class CropExtentOptions(Enum):
-    """
-    Options for applying extending crop to the input image.
-    """
-
-    ASPECT_RATIO_NO_ADJUSTMENT = 1
-    """
-    Each dimension of the bounding box is extended by 'crop_extent' parameter
-    """
-
-    ASPECT_RATIO_ADJUSTMENT_BY_LONG_SIDE = 2
-    """
-    The longer dimension of the bounding box is extended by 'crop_extent' parameter, and the other side is
-    calculated as new_bbox_h * aspect_ratio (if the longer dimension is the height of the bounding box)
-    or new_bbox_w / aspect_ratio (if the longer dimension is the width of the bounding box),
-    aspect_ratio is defined as the ratio of model2's input width to model2's input height
-    """
-
-    ASPECT_RATIO_ADJUSTMENT_BY_AREA = 3
-    """
-    The bounding box is extended by an area factor of ('crop_extent' * 0.01 + 1) ^ 2; the new height
-    is determined from the desired area and aspect ratio, and is adjusted to be at least as long as
-    the original bounding box height; the new width is calculated as new_bbox_h * aspect_ratio, where
-    aspect_ratio is defined as the ratio of model2's input width to model2's input height,
-    and then adjusted to be at least as long as the original bounding box width; the new
-    height is then adjusted as new_bbox_w / aspect_ratio
-    """
-
-
 class CroppingCompoundModel(CompoundModelBase):
     """
     Compound model class which crops original image according to results of the first model
@@ -282,8 +301,8 @@ class CroppingCompoundModel(CompoundModelBase):
         self,
         model1,
         model2,
-        crop_extent=0,
-        crop_extent_option=CropExtentOptions.ASPECT_RATIO_NO_ADJUSTMENT,
+        crop_extent: float = 0.0,
+        crop_extent_option: CropExtentOptions = CropExtentOptions.ASPECT_RATIO_NO_ADJUSTMENT,
     ):
         """
         Constructor.
@@ -312,20 +331,17 @@ class CroppingCompoundModel(CompoundModelBase):
         if len(result1.results) == 0 or "bbox" not in result1.results[0]:
             # no bbox detected: put black image into the queue to keep things going
             self.queue.put(
-                (np.zeros((2, 2, 3), dtype=np.uint8), _FrameInfo(result1, -1))
+                (np.zeros((2, 2, 3), dtype=np.uint8), FrameInfo(result1, -1))
             )
         else:
-            image_size = self.image_size(result1.image)
+            image_sz = image_size(result1.image)
             for idx, obj in enumerate(result1.results):
-                adj_bbox = self._adjust_bbox(obj["bbox"], image_size)
+                adj_bbox = self._adjust_bbox(obj["bbox"], image_sz)
+                # patch bbox in the result with extended bbox
                 obj["bbox"] = adj_bbox
-                if hasattr(result1.image, "crop"):
-                    cropped_img = result1.image.crop(adj_bbox)
-                else:
-                    cropped_img = result1.image[
-                        adj_bbox[1] : adj_bbox[3], adj_bbox[0] : adj_bbox[2]
-                    ]
-                self.queue.put((cropped_img, _FrameInfo(result1, idx)))
+
+                cropped_img = crop_image(result1.image, adj_bbox)
+                self.queue.put((cropped_img, FrameInfo(result1, idx)))
 
     def transform_result2(self, result2):
         """
@@ -341,67 +357,23 @@ class CroppingCompoundModel(CompoundModelBase):
         """
         return result2
 
-    def image_size(self, image):
-        """Get image size in (width, height) format"""
-        if hasattr(image, "shape"):
-            return (image.shape[1], image.shape[0])
-        elif hasattr(image, "size"):
-            return image.size
-        else:
-            raise Exception("Unsupported image type")
-
-    def _adjust_bbox(self, bbox, image_size):
+    def _adjust_bbox(self, bbox, image_sz):
         """
         Inflate bbox coordinates to crop extent according to chosen crop extent approach
         and adjust to image size
 
         Args:
             bbox: bbox coordinates in [x1, y1, x2, y2] format
-            image_size: image size in (width, height) format
+            image_sz: image size in (width, height) format
         """
-        bbox_w, bbox_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
 
-        if self._crop_extent_option == CropExtentOptions.ASPECT_RATIO_NO_ADJUSTMENT:
-            scale = self._crop_extent * 0.01 * 0.5
-            dx = bbox_w * scale
-            dy = bbox_h * scale
-
-        elif (
-            self._crop_extent_option
-            == CropExtentOptions.ASPECT_RATIO_ADJUSTMENT_BY_LONG_SIDE
-        ):
-            scale = self._crop_extent * 0.01 + 1.0
-            aspect_ratio = (
-                self.model2.model_info.InputW[0] / self.model2.model_info.InputH[0]
-            )
-            if bbox_h > bbox_w:
-                new_bbox_h = bbox_h * scale
-                new_bbox_w = new_bbox_h * aspect_ratio
-            else:
-                new_bbox_w = bbox_w * scale
-                new_bbox_h = new_bbox_w / aspect_ratio
-            dx = (new_bbox_w - bbox_w) / 2
-            dy = (new_bbox_h - bbox_h) / 2
-
-        elif (
-            self._crop_extent_option
-            == CropExtentOptions.ASPECT_RATIO_ADJUSTMENT_BY_AREA
-        ):
-            expansion_factor = np.power(self._crop_extent * 0.01 + 1, 2)
-            aspect_ratio = (
-                self.model2.model_info.InputW[0] / self.model2.model_info.InputH[0]
-            )
-            new_bbox_h = np.sqrt(bbox_w * bbox_h * expansion_factor / aspect_ratio)
-            new_bbox_h = max(new_bbox_h, bbox_h)
-            new_bbox_w = new_bbox_h * aspect_ratio
-            new_bbox_w = max(new_bbox_w, bbox_w)
-            new_bbox_h = new_bbox_w / aspect_ratio
-            dx = (new_bbox_w - bbox_w) / 2
-            dy = (new_bbox_h - bbox_h) / 2
-
-        maxval = [image_size[0], image_size[1], image_size[0], image_size[1]]
-        adjust = [-dx, -dy, dx, dy]
-        return [min(maxval[i], max(0, round(bbox[i] + adjust[i]))) for i in range(4)]
+        return extend_bbox(
+            bbox,
+            self._crop_extent_option,
+            self._crop_extent,
+            self.model2.model_info.InputW[0] / self.model2.model_info.InputH[0],
+            image_sz,
+        )
 
 
 class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
@@ -420,8 +392,8 @@ class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
         self,
         model1,
         model2,
-        crop_extent=0,
-        crop_extent_option=CropExtentOptions.ASPECT_RATIO_NO_ADJUSTMENT,
+        crop_extent: float = 0.0,
+        crop_extent_option: CropExtentOptions = CropExtentOptions.ASPECT_RATIO_NO_ADJUSTMENT,
     ):
         """
         Constructor.
@@ -440,6 +412,7 @@ class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
 
         super().__init__(model1, model2, crop_extent, crop_extent_option)
         self._current_result = None
+        self._master_model = model1  # because we yield results of the first model
 
     def transform_result2(self, result2):
         """
@@ -460,18 +433,17 @@ class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
         idx = result2.info.sub_result
 
         if idx >= 0:
-            # patch bbox label with recognized class label
-            label = (
-                result2.results[0]["label"] if self.model2.overlay_show_labels else ""
-            )
-            if self.model2.overlay_show_probabilities:
-                score = result2.results[0]["score"]
-                score_str = f"{score:.2f}" if isinstance(score, float) else str(score)
-                result1.results[idx]["label"] = (
-                    label + (": " if label else "") + score_str
-                )
-            else:
+            # patch bbox label with recognized class label and adjust probability
+            r = result2.results[0]
+            label = r.get("label")
+            if label is not None:
                 result1.results[idx]["label"] = label
+            score = r.get("score")
+            if score is not None:
+                result1.results[idx]["score"] = score
+            category_id = r.get("category_id")
+            if category_id is not None:
+                result1.results[idx]["category_id"] = category_id
 
         # return result when frame changes
         ret = None
@@ -530,9 +502,9 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
         model1,
         model2,
         *,
-        crop_extent=0,
-        crop_extent_option=CropExtentOptions.ASPECT_RATIO_NO_ADJUSTMENT,
-        add_model1_results=False,
+        crop_extent: float = 0.0,
+        crop_extent_option: CropExtentOptions = CropExtentOptions.ASPECT_RATIO_NO_ADJUSTMENT,
+        add_model1_results: bool = False,
         nms_options: Optional[NmsOptions] = None,
     ):
         """
@@ -706,7 +678,7 @@ class RegionExtractionPseudoModel(ModelLike):
     def custom_postprocessor(self, val: type):
         self._custom_postprocessor = val
 
-    # fallback all getters of model-like attributes to the first model
+    # fallback all getters of model-like attributes to the second model
     def __getattr__(self, attr):
         return getattr(self._model2, attr)
 

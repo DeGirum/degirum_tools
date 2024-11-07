@@ -161,7 +161,7 @@ class ZoneCounter(ResultAnalyzerBase):
 
     def __init__(
         self,
-        count_polygons: np.ndarray,
+        count_polygons: Union[np.ndarray, list],
         *,
         class_list: Optional[List] = None,
         per_class_display: Optional[bool] = False,

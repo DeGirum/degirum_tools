@@ -9,7 +9,7 @@
 
 import cv2, sys, os, time, PIL.Image, numpy as np, random, string
 from .environment import get_test_mode, in_colab, in_notebook, to_valid_filename
-from .image_tools import crop, luminance
+from .image_tools import luminance
 from dataclasses import dataclass
 from typing import Optional, Union, Any, List, Callable
 from enum import Enum
@@ -452,11 +452,6 @@ class Display:
         return self._capt
 
     @staticmethod
-    def crop(img, bbox: list):
-        """Crop and return OpenCV image to given bbox"""
-        return crop(img, bbox)
-
-    @staticmethod
     def _check_gui() -> bool:
         """Check if graphical display is supported
 
@@ -521,13 +516,13 @@ class Display:
 
         def preprocess_img(img):
             if hasattr(img, "image_overlay"):
-                # special case for model results: call it recursively
+                # special case for model results: use image_overlay property
                 img = img.image_overlay
             if isinstance(img, PIL.Image.Image):
                 # PIL image: convert to OpenCV format
                 img = np.array(img)[:, :, ::-1]
             if not isinstance(img, np.ndarray):
-                raise Exception("Unsupported image type")
+                raise Exception(f"Display: unsupported image type {type(img)}")
             return img
 
         orig_img = img
@@ -540,9 +535,10 @@ class Display:
         if in_colab():
             # special case for Colab environment
             show_in_colab(img)
-        elif self._no_gui and in_notebook():
-            # show image in notebook when possible
-            show_in_notebook(img)
+        elif self._no_gui:
+            if in_notebook():
+                # show image in notebook when possible
+                show_in_notebook(img)
         else:
             # show image in OpenCV window
             if not self._window_created:

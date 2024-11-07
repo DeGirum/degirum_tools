@@ -7,10 +7,10 @@
 # Implements unit tests to test general analyzer functionality
 #
 
-import numpy as np, pytest
+import numpy as np
 
 
-def test_attach_analyzers():
+def test_attach_analyzers(zoo_dir):
     """Test for attach_analyzers() function"""
 
     import degirum_tools, degirum as dg
@@ -31,7 +31,7 @@ def test_attach_analyzers():
             image[self.mylevel, self.mylevel] = self.mycolor
             return image
 
-    model = dg.connect(dg.LOCAL, "test/model-zoo/dummy/dummy.json").load_model("dummy")
+    model = dg.load_model("dummy", dg.LOCAL, zoo_dir)
     model._model_parameters.SimulateParams = True
     model.output_postprocess_type = "Classification"
 
@@ -64,6 +64,10 @@ def test_attach_analyzers():
     assert np.array_equal(result.image_overlay[0, 0], red)
     assert np.array_equal(result.image_overlay[1, 1], green)
 
+    # test result attributes propagation
+    result._inference_results = []
+    assert len(result.results) == 0
+
     # remove second analyzer
     degirum_tools.attach_analyzers(model, None)
     assert model.custom_postprocessor is not None
@@ -84,7 +88,23 @@ def test_attach_analyzers():
     assert np.array_equal(result.image_overlay[0, 0], black)
     assert np.array_equal(result.image_overlay[1, 1], black)
 
-    # check that compound model cannot have analyzers
-    compound_model = degirum_tools.CombiningCompoundModel(model, model)
-    with pytest.raises(Exception):
-        degirum_tools.attach_analyzers(compound_model, red_analyzer)
+    # check that compound model can have analyzers
+    model2 = dg.load_model("dummy", dg.LOCAL, zoo_dir)
+    model2._model_parameters.SimulateParams = True
+    model2.output_postprocess_type = "Classification"
+
+    class SampleCompoundModel(degirum_tools.CompoundModelBase):
+
+        def queue_result1(self, result1):
+            self.queue.put(
+                (result1.image, degirum_tools.compound_models.FrameInfo(result1, -1))
+            )
+
+        def transform_result2(self, result2):
+            return result2
+
+    compound_model = SampleCompoundModel(model, model2)
+    degirum_tools.attach_analyzers(compound_model, red_analyzer)
+    result = compound_model(data)
+    assert hasattr(result, "mycolor") and red in result.mycolor
+    assert np.array_equal(result.image_overlay[0, 0], red)

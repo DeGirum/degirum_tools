@@ -42,12 +42,31 @@ def test_line_counter():
     lines = [(40, 50, 110, 140)]
 
     test_cases: List[dict] = [
-        {"case": "No trails", "params": {"lines": lines}, "inp": [{}]},
+        {
+            "case": "No trails",
+            "params": {"lines": lines},
+            "inp": [
+                {
+                    "results": [],
+                }
+            ],
+            "res": [
+                [
+                    {
+                        "for_class": {},
+                        "right": 0,
+                        "left": 0,
+                    },
+                    [],
+                ]
+            ],
+        },
         {
             "case": "Incomplete trail",
             "params": {"lines": lines},
             "inp": [
                 {
+                    "results": [{"track_id": 1}],
                     "trails": {1: [np.array([20, 35, 30, 55])]},
                     "trail_classes": {1: "label1"},
                 }
@@ -58,7 +77,13 @@ def test_line_counter():
                         "for_class": {},
                         "right": 0,
                         "left": 0,
-                    }
+                    },
+                    [
+                        {
+                            "track_id": 1,
+                            "cross_line": [False],
+                        }
+                    ],
                 ]
             ],
         },
@@ -67,6 +92,7 @@ def test_line_counter():
             "params": {"lines": lines, "anchor_point": AnchorPoint.TOP_CENTER},
             "inp": [
                 {
+                    "results": [{"track_id": 1}],
                     "trails": {
                         1: [np.array([20, 35, 30, 55]), np.array([70, 40, 80, 60])]
                     },
@@ -79,7 +105,13 @@ def test_line_counter():
                         "for_class": {},
                         "right": 0,
                         "left": 0,
-                    }
+                    },
+                    [
+                        {
+                            "track_id": 1,
+                            "cross_line": [False],
+                        }
+                    ],
                 ]
             ],
         },
@@ -88,6 +120,7 @@ def test_line_counter():
             "params": {"lines": lines},
             "inp": [
                 {
+                    "results": [{"track_id": 1}],
                     "trails": {
                         1: [np.array([20, 35, 30, 55]), np.array([70, 40, 80, 60])]
                     },
@@ -100,7 +133,13 @@ def test_line_counter():
                         "for_class": {},
                         "right": 0,
                         "left": 1,
-                    }
+                    },
+                    [
+                        {
+                            "track_id": 1,
+                            "cross_line": [True],
+                        }
+                    ],
                 ]
             ],
         },
@@ -109,12 +148,14 @@ def test_line_counter():
             "params": {"lines": lines},
             "inp": [
                 {
+                    "results": [{"track_id": 1}],
                     "trails": {
                         1: [np.array([20, 35, 30, 55]), np.array([70, 40, 80, 60])]
                     },
                     "trail_classes": {1: "label1"},
                 },
                 {
+                    "results": [{"track_id": 2}],
                     "trails": {
                         2: [np.array([80, 60, 90, 80]), np.array([30, 50, 40, 70])]
                     },
@@ -127,14 +168,26 @@ def test_line_counter():
                         "for_class": {},
                         "right": 0,
                         "left": 1,
-                    }
+                    },
+                    [
+                        {
+                            "track_id": 1,
+                            "cross_line": [True],
+                        }
+                    ],
                 ],
                 [
                     {
                         "for_class": {},
                         "right": 1,
                         "left": 1,
-                    }
+                    },
+                    [
+                        {
+                            "track_id": 2,
+                            "cross_line": [True],
+                        }
+                    ],
                 ],
             ],
         },
@@ -143,12 +196,14 @@ def test_line_counter():
             "params": {"lines": lines, "per_class_display": True},
             "inp": [
                 {
+                    "results": [{"track_id": 1}],
                     "trails": {
                         1: [np.array([20, 35, 30, 55]), np.array([70, 40, 80, 60])]
                     },
                     "trail_classes": {1: "label1"},
                 },
                 {
+                    "results": [{"track_id": 2}],
                     "trails": {
                         2: [np.array([80, 60, 90, 80]), np.array([30, 50, 40, 70])]
                     },
@@ -161,7 +216,13 @@ def test_line_counter():
                         "for_class": {"label1": {"right": 0, "left": 1}},
                         "right": 0,
                         "left": 1,
-                    }
+                    },
+                    [
+                        {
+                            "track_id": 1,
+                            "cross_line": [True],
+                        }
+                    ],
                 ],
                 [
                     {
@@ -171,7 +232,13 @@ def test_line_counter():
                         },
                         "right": 1,
                         "left": 1,
-                    }
+                    },
+                    [
+                        {
+                            "track_id": 2,
+                            "cross_line": [True],
+                        }
+                    ],
                 ],
             ],
         },
@@ -180,12 +247,14 @@ def test_line_counter():
             "params": {"lines": lines, "accumulate": False},
             "inp": [
                 {
+                    "results": [{"track_id": 1}],
                     "trails": {
                         1: [np.array([20, 35, 30, 55]), np.array([70, 40, 80, 60])]
                     },
                     "trail_classes": {1: "label1"},
                 },
                 {
+                    "results": [{"track_id": 2}],
                     "trails": {
                         2: [np.array([80, 60, 90, 80]), np.array([30, 50, 40, 70])]
                     },
@@ -198,14 +267,26 @@ def test_line_counter():
                         "for_class": {},
                         "right": 0,
                         "left": 1,
-                    }
+                    },
+                    [
+                        {
+                            "track_id": 1,
+                            "cross_line": [True],
+                        }
+                    ],
                 ],
                 [
                     {
                         "for_class": {},
                         "right": 1,
                         "left": 0,
-                    }
+                    },
+                    [
+                        {
+                            "track_id": 2,
+                            "cross_line": [True],
+                        }
+                    ],
                 ],
             ],
         },
@@ -214,12 +295,14 @@ def test_line_counter():
             "params": {"lines": lines, "absolute_directions": True},
             "inp": [
                 {
+                    "results": [{"track_id": 1}],
                     "trails": {
                         1: [np.array([20, 35, 30, 55]), np.array([70, 40, 80, 60])]
                     },
                     "trail_classes": {1: "label1"},
                 },
                 {
+                    "results": [{"track_id": 2}],
                     "trails": {
                         2: [np.array([80, 60, 90, 80]), np.array([50, 120, 60, 140])]
                     },
@@ -234,7 +317,13 @@ def test_line_counter():
                         "left": 0,
                         "right": 1,
                         "top": 0,
-                    }
+                    },
+                    [
+                        {
+                            "track_id": 1,
+                            "cross_line": [True],
+                        }
+                    ],
                 ],
                 [
                     {
@@ -243,7 +332,13 @@ def test_line_counter():
                         "left": 1,
                         "right": 1,
                         "top": 0,
-                    }
+                    },
+                    [
+                        {
+                            "track_id": 2,
+                            "cross_line": [True],
+                        }
+                    ],
                 ],
             ],
         },
@@ -252,12 +347,14 @@ def test_line_counter():
             "params": {"lines": lines},
             "inp": [
                 {
+                    "results": [{"track_id": 1}],
                     "trails": {
                         1: [np.array([20, 35, 30, 55]), np.array([70, 40, 80, 60])]
                     },
                     "trail_classes": {1: "label1"},
                 },
                 {
+                    "results": [{"track_id": 1}],
                     "trails": {
                         1: [
                             np.array([20, 35, 30, 55]),
@@ -268,6 +365,7 @@ def test_line_counter():
                     "trail_classes": {1: "label1"},
                 },
                 {
+                    "results": [{"track_id": 1}],
                     "trails": {
                         1: [
                             np.array([20, 35, 30, 55]),
@@ -285,21 +383,39 @@ def test_line_counter():
                         "for_class": {},
                         "right": 0,
                         "left": 1,
-                    }
+                    },
+                    [
+                        {
+                            "track_id": 1,
+                            "cross_line": [True],
+                        }
+                    ],
                 ],
                 [
                     {
                         "for_class": {},
                         "right": 0,
                         "left": 1,
-                    }
+                    },
+                    [
+                        {
+                            "track_id": 1,
+                            "cross_line": [False],
+                        }
+                    ],
                 ],
                 [
                     {
                         "for_class": {},
                         "right": 0,
                         "left": 1,
-                    }
+                    },
+                    [
+                        {
+                            "track_id": 1,
+                            "cross_line": [False],
+                        }
+                    ],
                 ],
             ],
         },
@@ -308,12 +424,14 @@ def test_line_counter():
             "params": {"lines": lines, "count_first_crossing": False},
             "inp": [
                 {
+                    "results": [{"track_id": 1}],
                     "trails": {
                         1: [np.array([20, 35, 30, 55]), np.array([70, 40, 80, 60])]
                     },
                     "trail_classes": {1: "label1"},
                 },
                 {
+                    "results": [{"track_id": 1}],
                     "trails": {
                         1: [
                             np.array([20, 35, 30, 55]),
@@ -324,6 +442,7 @@ def test_line_counter():
                     "trail_classes": {1: "label1"},
                 },
                 {
+                    "results": [{"track_id": 1}],
                     "trails": {
                         1: [
                             np.array([20, 35, 30, 55]),
@@ -341,21 +460,39 @@ def test_line_counter():
                         "for_class": {},
                         "right": 0,
                         "left": 1,
-                    }
+                    },
+                    [
+                        {
+                            "track_id": 1,
+                            "cross_line": [True],
+                        }
+                    ],
                 ],
                 [
                     {
                         "for_class": {},
                         "right": 0,
                         "left": 1,
-                    }
+                    },
+                    [
+                        {
+                            "track_id": 1,
+                            "cross_line": [False],
+                        }
+                    ],
                 ],
                 [
                     {
                         "for_class": {},
                         "right": 0,
                         "left": 2,
-                    }
+                    },
+                    [
+                        {
+                            "track_id": 1,
+                            "cross_line": [True],
+                        }
+                    ],
                 ],
             ],
         },
@@ -364,6 +501,7 @@ def test_line_counter():
             "params": {"lines": lines, "whole_trail": False},
             "inp": [
                 {
+                    "results": [{"track_id": 1}],
                     "trails": {
                         1: [
                             np.array([20, 35, 30, 55]),
@@ -380,7 +518,13 @@ def test_line_counter():
                         "for_class": {},
                         "right": 1,
                         "left": 0,
-                    }
+                    },
+                    [
+                        {
+                            "track_id": 1,
+                            "cross_line": [True],
+                        }
+                    ],
                 ]
             ],
         },
@@ -393,12 +537,14 @@ def test_line_counter():
             },
             "inp": [
                 {
+                    "results": [{"track_id": 1}],
                     "trails": {
                         1: [np.array([20, 35, 30, 55]), np.array([70, 40, 80, 60])]
                     },
                     "trail_classes": {1: "label1"},
                 },
                 {
+                    "results": [{"track_id": 1}],
                     "trails": {
                         1: [
                             np.array([20, 35, 30, 55]),
@@ -409,6 +555,7 @@ def test_line_counter():
                     "trail_classes": {1: "label1"},
                 },
                 {
+                    "results": [{"track_id": 1}],
                     "trails": {
                         1: [
                             np.array([20, 35, 30, 55]),
@@ -426,21 +573,39 @@ def test_line_counter():
                         "for_class": {},
                         "right": 0,
                         "left": 1,
-                    }
+                    },
+                    [
+                        {
+                            "track_id": 1,
+                            "cross_line": [True],
+                        }
+                    ],
                 ],
                 [
                     {
                         "for_class": {},
                         "right": 1,
                         "left": 1,
-                    }
+                    },
+                    [
+                        {
+                            "track_id": 1,
+                            "cross_line": [True],
+                        }
+                    ],
                 ],
                 [
                     {
                         "for_class": {},
                         "right": 1,
                         "left": 2,
-                    }
+                    },
+                    [
+                        {
+                            "track_id": 1,
+                            "cross_line": [True],
+                        }
+                    ],
                 ],
             ],
         },
@@ -454,19 +619,25 @@ def test_line_counter():
 
             line_counter.analyze(result)
 
-            if "res" not in case:
-                assert not hasattr(
-                    result, "line_counts"
-                ), f"Case {ci} failed at step {i}: result has line_counts field."
-            else:
-                res = (
-                    ResSingleLineCounts(**case["res"][i][0])
-                    if "top" in case["res"][i][0].keys()
-                    else ResSingleVectorCounts(**case["res"][i][0])
-                )
-                assert result.line_counts[0] == res, (  # type: ignore[attr-defined]
-                    f"Case `{case['case']}` failed at step {i}: "
-                    + f"line counts `{result.line_counts}` "  # type: ignore[attr-defined]
-                    + f"do not match expected `{case['res'][i]}`."
-                    + f"\nConfig: {case['params']}"
-                )
+            counts = (
+                ResSingleLineCounts(**case["res"][i][0])
+                if "top" in case["res"][i][0].keys()
+                else ResSingleVectorCounts(**case["res"][i][0])
+            )
+
+            assert result.line_counts[0] == counts, (  # type: ignore[attr-defined]
+                f"Case `{case['case']}` failed at step {i}: "
+                + f"line counts `{result.line_counts}` "  # type: ignore[attr-defined]
+                + f"do not match expected `{case['res'][i]}`."
+                + f"\nConfig: {case['params']}"
+            )
+
+            obj_list = case["res"][i][1]
+            assert len(result.results) == len(obj_list) and all(  # type: ignore[attr-defined]
+                r1 == r2 for r1, r2 in zip(result.results, obj_list)  # type: ignore[attr-defined]
+            ), (
+                f"Case `{case['case']}` failed at step {i}: "
+                + f"number of objects `{len(result.results)}` "  # type: ignore[attr-defined]
+                + f"do not match expected `{len(obj_list)}`."
+                + f"\nConfig: {case['params']}"
+            )

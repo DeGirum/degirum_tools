@@ -13,6 +13,7 @@ from contextlib import ExitStack
 from pathlib import Path
 from typing import Union, List, Optional
 from dataclasses import dataclass
+from .compound_models import CompoundModelBase
 from .video_support import (
     open_video_stream,
     get_video_stream_properties,
@@ -87,11 +88,11 @@ def _create_analyzing_postprocessor_class(
         def __init__(self, *args, **kwargs):
             if AnalyzingPostprocessor._postprocessor_type is not None:
                 # create postprocessor of proper type
-                self._result = AnalyzingPostprocessor._postprocessor_type(
+                self.__dict__["_result"] = AnalyzingPostprocessor._postprocessor_type(
                     *args, **kwargs
                 )
             else:
-                self._result = kwargs.get("result")
+                self.__dict__["_result"] = kwargs.get("result")
 
             # apply all analyzers to analyze result
             for analyzer in AnalyzingPostprocessor._analyzers:
@@ -112,6 +113,12 @@ def _create_analyzing_postprocessor_class(
         # delegate all other attributes to wrapped postprocessor
         def __getattr__(self, attr):
             return getattr(self._result, attr)
+
+        def __setattr__(self, attr, value):
+            if attr in self.__dict__:
+                super().__setattr__(attr, value)
+            else:
+                setattr(self._result, attr, value)
 
         def __dir__(self):
             return self._result.__dir__() + [
@@ -143,7 +150,7 @@ def _create_analyzing_postprocessor_class(
 
 
 def attach_analyzers(
-    model: dg.model.Model,
+    model: Union[dg.model.Model, CompoundModelBase],
     analyzers: Union[ResultAnalyzerBase, List[ResultAnalyzerBase], None],
 ):
     """
@@ -158,24 +165,31 @@ def attach_analyzers(
         Model object with attached analyzers
     """
 
-    analyzing_postprocessor = _create_analyzing_postprocessor_class(analyzers, model)
-
-    if analyzers:
-        # attach custom postprocessor to model
-        model._custom_postprocessor = analyzing_postprocessor
+    if isinstance(model, CompoundModelBase):
+        model.attach_analyzers(analyzers)
     else:
-        # remove analyzing custom postprocessor from model if any
-        if (
-            model._custom_postprocessor is not None
-            and isinstance(model._custom_postprocessor, type)
-            and model._custom_postprocessor.__name__ == analyzing_postprocessor.__name__
-        ):
-            if model._custom_postprocessor._was_custom:
-                model._custom_postprocessor = (
-                    model._custom_postprocessor._postprocessor_type
-                )
-            else:
-                model._custom_postprocessor = None
+
+        analyzing_postprocessor = _create_analyzing_postprocessor_class(
+            analyzers, model
+        )
+
+        if analyzers:
+            # attach custom postprocessor to model
+            model._custom_postprocessor = analyzing_postprocessor
+        else:
+            # remove analyzing custom postprocessor from model if any
+            if (
+                model._custom_postprocessor is not None
+                and isinstance(model._custom_postprocessor, type)
+                and model._custom_postprocessor.__name__
+                == analyzing_postprocessor.__name__
+            ):
+                if model._custom_postprocessor._was_custom:
+                    model._custom_postprocessor = (
+                        model._custom_postprocessor._postprocessor_type
+                    )
+                else:
+                    model._custom_postprocessor = None
 
     return model
 
