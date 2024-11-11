@@ -225,7 +225,7 @@ def test_streams_simple_ai_construction(detection_model_name, zoo_dir):
         - [source, ai]
     """
 
-    c = streams.load_composition(txt, globals(), locals())
+    c = streams.load_composition(txt, local_context=locals())
     assert len(c._gizmos) == 2
     ai3 = c._gizmos[1]
     assert isinstance(ai3, streams.AiSimpleGizmo)
