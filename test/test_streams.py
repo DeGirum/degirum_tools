@@ -185,6 +185,54 @@ def test_streams_simple_ai(short_video, detection_model):
         assert all(bbox == obj["bbox"] for bbox, obj in zip(bboxes, ai_meta.results))
 
 
+def test_streams_simple_ai_construction(detection_model_name, zoo_dir):
+    """Test for AiSimpleGizmo construction"""
+
+    ai_base = streams.AiSimpleGizmo(
+        detection_model_name,
+        inference_host_address=dg.LOCAL,
+        zoo_url=zoo_dir,
+    )
+    assert isinstance(ai_base.model, dg.model.Model)
+
+    ai2 = streams.AiSimpleGizmo(
+        detection_model_name,
+        inference_host_address=dg.LOCAL,
+        zoo_url=zoo_dir,
+        measure_time=True,
+        overlay_show_probabilities=True,
+    )
+
+    assert ai2.model.measure_time != ai_base.model.measure_time
+    assert (
+        ai2.model.overlay_show_probabilities != ai_base.model.overlay_show_probabilities
+    )
+
+    txt = f"""
+    gizmos:
+        source:
+            class: VideoSourceGizmo
+        ai:
+            class: AiSimpleGizmo
+            params:
+                model: {detection_model_name}
+                inference_host_address: '@local'
+                zoo_url: '{zoo_dir}'
+                measure_time: true
+                overlay_show_probabilities: true
+
+    connections:
+        - [source, ai]
+    """
+
+    c = streams.load_composition(txt, globals(), locals())
+    assert len(c._gizmos) == 2
+    ai3 = c._gizmos[1]
+    assert isinstance(ai3, streams.AiSimpleGizmo)
+    assert ai3.model.measure_time
+    assert ai3.model.overlay_show_probabilities
+
+
 def test_streams_cropping_ai(short_video, detection_model):
     """Test for AiObjectDetectionCroppingGizmo"""
 

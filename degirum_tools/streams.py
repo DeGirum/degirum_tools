@@ -969,21 +969,26 @@ class AiGizmoBase(Gizmo):
 
     def __init__(
         self,
-        model,
+        model: Union[dg.model.Model, str],
         *,
         stream_depth: int = 10,
         allow_drop: bool = False,
         inp_cnt: int = 1,
+        **kwargs,
     ):
         """Constructor.
 
-        - model: PySDK model object
+        - model: PySDK model object or model name string
+            (in later case you need to specify all model loading parameters exactly as in `degirum.load_model()` function)
         - stream_depth: input stream depth
         - allow_drop: allow dropping frames from input stream on overflow
         """
         super().__init__([(stream_depth, allow_drop)] * inp_cnt)
 
-        self.model = model
+        if isinstance(model, str):
+            self.model = dg.load_model(model, **kwargs)
+        else:
+            self.model = model
 
     def get_tags(self) -> List[str]:
         """Get list of tags assigned to this gizmo"""
