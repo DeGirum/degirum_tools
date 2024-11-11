@@ -244,9 +244,9 @@ class Gizmo(ABC):
 
         Returns self
         """
-        other_gizmo._output_refs.append(
-            self.get_input(inp) if isinstance(inp, int) else inp
-        )
+        inp_stream = self.get_input(inp) if isinstance(inp, int) else inp
+        if not inp_stream in other_gizmo._output_refs:
+            other_gizmo._output_refs.append(inp_stream)
         self._connected_gizmos.add(other_gizmo)
         other_gizmo._connected_gizmos.add(self)
         return self

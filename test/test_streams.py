@@ -57,7 +57,15 @@ def test_streams_connection(short_video):
     source = streams.VideoSourceGizmo(short_video)
     sink = VideoSink()
     c = streams.Composition(source >> sink)
+    assert source._connected_gizmos == {sink}
+    assert sink._connected_gizmos == {source}
+    assert set(c._gizmos) == {source, sink}
 
+    # double connection: should be the same as single connection
+    source = streams.VideoSourceGizmo(short_video)
+    sink = VideoSink()
+    c = streams.Composition(source >> sink, source >> sink)
+    assert len(source._output_refs) == 1 and source._output_refs[0] is sink.get_input(0)
     assert source._connected_gizmos == {sink}
     assert sink._connected_gizmos == {source}
     assert set(c._gizmos) == {source, sink}
