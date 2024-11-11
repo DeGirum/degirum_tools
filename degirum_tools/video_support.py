@@ -401,6 +401,7 @@ class ClipSaver:
 
         self._clip_buffer: deque = deque()
         self._end_counter = -1
+        self._start_frame = 0
         self._triggered_by: list = []
         self._frame_counter = 0
         self._thread_name = "dgtools_ClipSaverThread_" + str(uuid.uuid4())
@@ -426,16 +427,16 @@ class ClipSaver:
             # if triggered, set down-counting timer
             if triggers:
                 self._end_counter = self._clip_duration - self._pre_trigger_delay - 1
+                self._start_frame = self._frame_counter - self._pre_trigger_delay
                 self._triggered_by = triggers
         else:
-            # otherwise, continue accumulating the clip
-
-            # decrement the timer, and if the timer is over, save the clip
+            # otherwise, continue accumulating the clip: decrement the timer
             self._end_counter -= 1
-            if self._end_counter <= 0:
-                self._save_clip()
-                self._end_counter = -1
-                self._triggered_by.clear()
+
+        if self._end_counter == 0:
+            self._save_clip()
+            self._end_counter = -1
+            self._triggered_by.clear()
 
         self._frame_counter += 1
 
@@ -447,8 +448,7 @@ class ClipSaver:
         def save(context):
             if context._clip_buffer:
                 w, h = image_size(context._clip_buffer[0].image)
-                start = max(0, context._frame_counter + 1 - context._clip_duration)
-                filename = f"{context._file_prefix}_{start:08d}"
+                filename = f"{context._file_prefix}_{context._start_frame:08d}"
 
                 with open_video_writer(
                     filename + ".mp4", w, h, context._target_fps
@@ -458,9 +458,9 @@ class ClipSaver:
                     if context._save_ai_result_json:
                         json_result["properties"] = dict(
                             timestamp=time.ctime(),
-                            start_frame=start,
+                            start_frame=context._start_frame,
                             triggered_by=context._triggered_by,
-                            duration=context._clip_duration,
+                            duration=len(context._clip_buffer),
                             pre_trigger_delay=context._pre_trigger_delay,
                             target_fps=context._target_fps,
                         )
