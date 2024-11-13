@@ -218,11 +218,9 @@ def test_streams_simple_ai_construction(detection_model_name, zoo_dir):
 
     txt = f"""
     gizmos:
-        source:
-            class: VideoSourceGizmo
+        source: VideoSourceGizmo
         ai:
-            class: AiSimpleGizmo
-            params:
+            AiSimpleGizmo:
                 model: {detection_model_name}
                 inference_host_address: '@local'
                 zoo_url: '{zoo_dir}'
@@ -233,7 +231,7 @@ def test_streams_simple_ai_construction(detection_model_name, zoo_dir):
         - [source, ai]
     """
 
-    c = streams.load_composition(txt, local_context=locals())
+    c = streams.load_composition(txt)
     assert len(c._gizmos) == 2
     ai3 = c._gizmos[1]
     assert isinstance(ai3, streams.AiSimpleGizmo)
@@ -628,21 +626,22 @@ def test_streams_crop_combining(
 def test_streams_load_composition(zoo_dir, detection_model_name):
     """Test for load_composition"""
 
-    import tempfile, yaml, json
+    import tempfile, yaml
+
+    #
+    # check various ways to load composition
+    #
 
     txt = """
     gizmos:
-        source:
-            class: VideoSourceGizmo
+        source: VideoSourceGizmo
         resizer:
-            class: ResizingGizmo
-            params:
+            ResizingGizmo:
                 w: 320
                 h: 240
                 pad_method: "stretch"
         display:
-            class: VideoDisplayGizmo
-            params:
+            VideoDisplayGizmo:
                 window_titles: ["Original", "Resized"]
                 show_fps: True
 
@@ -686,18 +685,9 @@ def test_streams_load_composition(zoo_dir, detection_model_name):
     finally:
         os.unlink(fname)
 
-    # check JSON file
-    try:
-        with tempfile.NamedTemporaryFile(
-            "w", suffix=".json", delete=False
-        ) as json_file:
-            json_file.write(json.dumps(yaml.safe_load(txt), indent=2))
-            fname = json_file.name
-        check(fname)
-    finally:
-        os.unlink(fname)
-
+    #
     # check for gizmos in context
+    #
     class MyGizmo(streams.Gizmo):
         def __init__(self):
             super().__init__([(0, False)])
@@ -707,20 +697,20 @@ def test_streams_load_composition(zoo_dir, detection_model_name):
 
     txt2 = """
     gizmos:
-        source:
-            class: VideoSourceGizmo
-        mygizmo:
-            class: MyGizmo
+        source: VideoSourceGizmo
+        mygizmo: MyGizmo
 
     connections:
         - [source, mygizmo]
     """
 
-    c = streams.load_composition(txt2, locals())
+    c = streams.load_composition(txt2, local_context=locals())
     assert len(c._gizmos) == 2
     assert MyGizmo is c._gizmos[1].__class__
 
+    #
     # check for custom YAML constructors
+    #
 
     class MyGizmo2(streams.Gizmo):
         def __init__(
@@ -735,21 +725,25 @@ def test_streams_load_composition(zoo_dir, detection_model_name):
             pass
 
     txt2 = """
+    vars:
+        model:
+            dg.load_model:
+                model_name: $(detection_model_name)
+                inference_host_address: $(dg.LOCAL)
+                zoo_url: $(zoo_dir)
     gizmos:
-        source:
-            class: VideoSourceGizmo
+        source: VideoSourceGizmo
         mygizmo:
-            class: MyGizmo2
-            params:
-                crop_extent: !Python streams.CropExtentOptions.ASPECT_RATIO_ADJUSTMENT_BY_AREA
-                cv2_interpolation: !Python cv2.INTER_LINEAR
-                model: !Python dg.load_model(detection_model_name, dg.LOCAL, zoo_dir)
+            MyGizmo2:
+                crop_extent: $(CropExtentOptions.ASPECT_RATIO_ADJUSTMENT_BY_AREA)
+                cv2_interpolation: $(cv2.INTER_LINEAR)
+                model: $(model)
 
     connections:
         - [source, mygizmo]
     """
 
-    c = streams.load_composition(txt2, globals(), locals())
+    c = streams.load_composition(txt2, local_context=locals())
     assert len(c._gizmos) == 2
     g2 = c._gizmos[1]
     assert isinstance(g2, MyGizmo2)
@@ -759,3 +753,52 @@ def test_streams_load_composition(zoo_dir, detection_model_name):
         isinstance(g2.model, dg.model.Model)
         and g2.model._model_name == detection_model_name
     )
+
+    #
+    # test variables
+    #
+
+    class ParamGizmo(streams.Gizmo):
+        def __init__(self, **kwargs):
+            super().__init__([(0, False)])
+            self.params = kwargs
+
+        def run(self):
+            pass
+
+    txt3 = """
+    vars:
+        tracker:
+            ObjectTracker:
+                class_list: ["Car"]
+                anchor_point: $(AnchorPoint.CENTER)
+        t2: $(tracker)
+        i: 10
+        f: 3.14
+        b: true
+        a: [1,2]
+
+    gizmos:
+        source: VideoSourceGizmo
+        sink:
+            ParamGizmo:
+                t: $(t2)
+                i: $(i)
+                f: $(f)
+                b: $(b)
+                a: $(a)
+
+    connections:
+        - [source, sink]
+    """
+
+    c = streams.load_composition(txt3, local_context=locals())
+    assert len(c._gizmos) == 2
+    g2 = c._gizmos[1]
+    assert isinstance(g2, ParamGizmo)
+    assert isinstance(g2.params["t"], degirum_tools.ObjectTracker)
+    assert g2.params["t"]._anchor_point == degirum_tools.AnchorPoint.CENTER
+    assert g2.params["i"] == 10
+    assert g2.params["f"] == 3.14
+    assert g2.params["b"] is True
+    assert g2.params["a"] == [1, 2]
