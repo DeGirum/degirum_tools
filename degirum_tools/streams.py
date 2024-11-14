@@ -110,10 +110,9 @@ def load_composition(
             description_dict = yaml.safe_load(open(description))
         else:
             description_dict = yaml.safe_load(description)
-    elif isinstance(description, dict):
-        description_dict = description
     else:
-        raise ValueError("load_composition: unsupported description type")
+        assert isinstance(description, dict)
+        description_dict = description
 
     # validate description
     jsonschema.validate(instance=description_dict, schema=composition_definition_schema)
@@ -134,7 +133,7 @@ def load_composition(
             ret = eval(expression, global_context, local_context)
             return ret
         except Exception as e:
-            raise ValueError(
+            raise RuntimeError(
                 f"load_composition: fail to evaluate expression '{expression}'"
             ) from e
 
@@ -155,30 +154,30 @@ def load_composition(
         else:
             return data  # leave other types as-is
 
-    def search_object_class(object_class_name):
-        object_class = None
+    def search_callable(callable_name):
+        callable = None
         # search in local context first
         if local_context:
-            object_class = local_context.get(object_class_name)
-        # then  search in global context
-        if object_class is None:
-            object_class = global_context.get(object_class_name)
+            callable = local_context.get(callable_name)
+        # then search in global context
+        if callable is None:
+            callable = global_context.get(callable_name)
         # finally try to evaluate it as expression
-        if object_class is None:
+        if callable is None:
             try:
-                object_class = eval_python_expression(object_class_name)
+                callable = eval_python_expression(callable_name)
             except Exception:
                 pass
-        return object_class
+        return callable
 
     def create_instance_by_desc(desc):
+        # check if the dictionary is the object description
         if isinstance(desc, dict) and len(desc) == 1:
-            # object description
             object_class_name, params = next(iter(desc.items()))
-            object_class = search_object_class(object_class_name)
+            object_class = search_callable(object_class_name)
             if object_class is None:
                 raise ValueError(
-                    f"load_composition: class '{object_class_name}' not defined"
+                    f"load_composition: '{object_class_name}' class is not defined"
                 )
 
             params = replace_vars(params, local_context)
@@ -186,17 +185,23 @@ def load_composition(
             try:
                 obj = object_class(**params)
             except Exception as e:
-                raise ValueError(
+                raise RuntimeError(
                     f"load_composition: error creating instance of '{object_class_name}'"
                 ) from e
-
             return obj
 
+        # check if the string is an object class or function name which exists in contexts
         if isinstance(desc, str):
-            # check if the string is an object class name which exists in contexts
-            object_class = search_object_class(desc)
-            if object_class is not None:
-                return object_class()
+            callable = search_callable(desc)
+            if callable is not None:
+                try:
+                    # call it
+                    obj = callable()
+                except Exception as e:
+                    raise RuntimeError(
+                        f"load_composition: error creating instance from '{desc}'"
+                    ) from e
+                return obj
 
         # else treat is as potential expression result or just return as-is
         return replace_vars(desc, local_context)
@@ -222,13 +227,9 @@ def load_composition(
             raise ValueError(
                 f"load_composition: pipeline '{p}' must have at least two elements"
             )
-        if not isinstance(p[0], str):
-            raise ValueError(
-                f"load_composition: pipeline first element '{p[0]}' must be a gizmo name"
-            )
         g0 = gizmos.get(p[0])
         if g0 is None:
-            raise ValueError(f"load_composition: gizmo '{p[0]}' is not defined")
+            raise ValueError(f"load_composition: '{p[0]}' gizmo is not defined")
 
         for el in p[1:]:
             if isinstance(el, str):
@@ -241,7 +242,7 @@ def load_composition(
             g1 = gizmos.get(gizmo_name)
             if g1 is None:
                 raise ValueError(
-                    f"load_composition: gizmo '{gizmo_name}' is not defined"
+                    f"load_composition: '{gizmo_name}' gizmo is not defined"
                 )
 
             g0 = g0 >> g1[input_index]

@@ -195,7 +195,7 @@ class VideoSaverGizmo(Gizmo):
 
     def __init__(
         self,
-        filename: str = "",
+        filename: str,
         *,
         show_ai_overlay=False,
         stream_depth: int = 10,
