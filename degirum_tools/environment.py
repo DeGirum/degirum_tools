@@ -58,14 +58,14 @@ def get_test_mode() -> bool:
     return bool(os.getenv(var_TestMode))
 
 
-def get_token() -> str:
+def get_token(default: Optional[str] = None) -> str:
     """Returns a token from .env file"""
     if in_colab():
         from google.colab import userdata
 
         return userdata.get("DEGIRUM_CLOUD_TOKEN")
     reload_env()  # reload environment variables from file
-    return get_var(var_Token)
+    return get_var(var_Token, default)
 
 
 def get_ai_server_hostname() -> str:

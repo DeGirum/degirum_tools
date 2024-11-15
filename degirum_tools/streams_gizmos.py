@@ -325,7 +325,7 @@ class AiGizmoBase(Gizmo):
 
         if isinstance(model, str):
             if "token" not in kwargs:
-                self.model = dg.load_model(model, token=get_token(), **kwargs)
+                self.model = dg.load_model(model, token=get_token(""), **kwargs)
             else:
                 self.model = dg.load_model(model, **kwargs)
         else:
