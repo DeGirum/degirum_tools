@@ -406,7 +406,7 @@ class ClipSaver:
         self._frame_counter = 0
         self._thread_name = "dgtools_ClipSaverThread_" + str(uuid.uuid4())
 
-    def forward(self, result, triggers: List[str] = []):
+    def forward(self, result, triggers: List[str] = []) -> Optional[str]:
         """
         Buffer given result in internal circular buffer.
         Initiate saving video clip if triggers list if not empty.
@@ -414,6 +414,9 @@ class ClipSaver:
         Args:
             result: PySDK model result object
             triggers: list of event names or notifications which trigger video clip saving
+
+        Returns:
+            filename of saved video clip if it was saved, None otherwise
         """
 
         # add result to the clip buffer
@@ -433,22 +436,23 @@ class ClipSaver:
             # otherwise, continue accumulating the clip: decrement the timer
             self._end_counter -= 1
 
+        filename = None
         if self._end_counter == 0:
-            self._save_clip()
+            filename = self._save_clip()
             self._end_counter = -1
             self._triggered_by.clear()
 
         self._frame_counter += 1
+        return filename
 
-    def _save_clip(self):
+    def _save_clip(self) -> str:
         """
         Save video clip from the buffer
         """
 
-        def save(context):
+        def save(context, filename):
             if context._clip_buffer:
                 w, h = image_size(context._clip_buffer[0].image)
-                filename = f"{context._file_prefix}_{context._start_frame:08d}"
 
                 with open_video_writer(
                     filename + ".mp4", w, h, context._target_fps
@@ -508,7 +512,11 @@ class ClipSaver:
         context._triggered_by = list(self._triggered_by)
 
         # save the clip in a separate thread
-        threading.Thread(target=save, args=(context,), name=self._thread_name).start()
+        filename = f"{context._file_prefix}_{context._start_frame:08d}"
+        threading.Thread(
+            target=save, args=(context, filename), name=self._thread_name
+        ).start()
+        return filename
 
     def join_all_saver_threads(self) -> int:
         """

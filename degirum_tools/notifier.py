@@ -18,6 +18,7 @@ from .result_analyzer_base import ResultAnalyzerBase
 from .ui_support import put_text, color_complement, deduce_text_color, CornerPosition
 from .math_support import AnchorPoint, get_image_anchor_point
 from .event_detector import EventDetector
+from .environment import import_optional_package
 
 
 class NotificationServer:
@@ -79,14 +80,19 @@ class NotificationServer:
         """
         Process commands from the queue. Runs in separate process.
         """
-        from apprise import Apprise, AppriseConfig
+
+        apprise = import_optional_package(
+            "apprise",
+            custom_message="`apprise` package is required for notifications. "
+            + "Please run `pip install degirum_tools[notifications]` to install required dependencies.",
+        )
 
         try:
             # initialize Apprise object
-            apprise_obj = Apprise()
+            apprise_obj = apprise.Apprise()
             if os.path.isfile(config):
                 # treat config as a path to the configuration file
-                conf = AppriseConfig()
+                conf = apprise.AppriseConfig()
                 if not conf.add(config):
                     raise ValueError(f"Invalid configuration file: {config}")
                 apprise_obj.add(conf)
