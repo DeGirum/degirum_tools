@@ -46,7 +46,7 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Install
         run: |
-          pip install -e '.[testing]'
+          pip install -e '.[testing,notifications]'
           sudo apt update
           sudo apt install ffmpeg
       - name: Run pytest (with coverage)
