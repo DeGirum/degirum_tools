@@ -15,7 +15,7 @@ import degirum_tools
 
 
 @dataclass
-class TestCase:
+class _TestCase:
     name: str
     frames: int
     triggers: list
@@ -28,8 +28,8 @@ class TestCase:
     h = 32
 
 
-test_cases: List[TestCase] = [
-    TestCase(
+test_cases: List[_TestCase] = [
+    _TestCase(
         name="too big pre_trigger_delay",
         expect_fail=True,
         frames=10,
@@ -41,7 +41,7 @@ test_cases: List[TestCase] = [
             pre_trigger_delay=6,
         ),
     ),
-    TestCase(
+    _TestCase(
         name="no events",
         expect_fail=True,
         frames=10,
@@ -52,7 +52,7 @@ test_cases: List[TestCase] = [
             clip_duration=5,
         ),
     ),
-    TestCase(
+    _TestCase(
         name="no triggers",
         frames=10,
         triggers=[],
@@ -62,7 +62,7 @@ test_cases: List[TestCase] = [
             clip_duration=5,
         ),
     ),
-    TestCase(
+    _TestCase(
         name="single trigger on event, no delay",
         frames=10,
         triggers=[3],
@@ -72,7 +72,7 @@ test_cases: List[TestCase] = [
             clip_duration=4,
         ),
     ),
-    TestCase(
+    _TestCase(
         name="single trigger on event, with delay",
         frames=12,
         triggers=[7],
@@ -83,7 +83,7 @@ test_cases: List[TestCase] = [
             pre_trigger_delay=2,
         ),
     ),
-    TestCase(
+    _TestCase(
         name="single trigger on notification, with delay, no json",
         frames=12,
         triggers=[7],
@@ -95,7 +95,7 @@ test_cases: List[TestCase] = [
             save_ai_result_json=False,
         ),
     ),
-    TestCase(
+    _TestCase(
         name="single trigger on event, with delay, no ai annotations",
         frames=12,
         triggers=[7],
@@ -107,7 +107,7 @@ test_cases: List[TestCase] = [
             embed_ai_annotations=False,
         ),
     ),
-    TestCase(
+    _TestCase(
         name="many triggers on notification, with delay, another FPS",
         frames=25,
         triggers=[4, 10, 17],
@@ -119,7 +119,7 @@ test_cases: List[TestCase] = [
             target_fps=10,
         ),
     ),
-    TestCase(
+    _TestCase(
         name="overlapping triggers on notification, with delay",
         frames=25,
         triggers=[7, 9, 11, 13],
@@ -131,7 +131,7 @@ test_cases: List[TestCase] = [
             pre_trigger_delay=2,
         ),
     ),
-    TestCase(
+    _TestCase(
         name="triggers on early events, back-to-back",
         frames=15,
         triggers=[0, 1, 2, 3, 4, 5],
@@ -142,7 +142,7 @@ test_cases: List[TestCase] = [
             pre_trigger_delay=4,
         ),
     ),
-    TestCase(
+    _TestCase(
         name="triggers on early events, overlapping",
         frames=15,
         triggers=[0, 2, 3],
@@ -154,7 +154,7 @@ test_cases: List[TestCase] = [
             pre_trigger_delay=2,
         ),
     ),
-    TestCase(
+    _TestCase(
         name="trigger on late event",
         frames=10,
         triggers=[2, 8],
@@ -170,7 +170,7 @@ test_cases: List[TestCase] = [
 
 
 class FakeResult:
-    def __init__(self, index: int, case: TestCase):
+    def __init__(self, index: int, case: _TestCase):
         self.index = index
         self.color = 255 - index
         dim = (case.h, case.w, 3)
@@ -180,7 +180,7 @@ class FakeResult:
         self.notifications: Set[str] = set()
 
 
-def generate_results(N: int, case: TestCase):
+def generate_results(N: int, case: _TestCase):
     return [FakeResult(i, case) for i in range(N)]
 
 
