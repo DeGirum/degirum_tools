@@ -21,6 +21,7 @@ from .line_count import *
 from .math_support import *
 from .notifier import *
 from .object_selector import *
+from .object_storage_support import *
 from .object_tracker import *
 from .regression_eval import *
 from .ui_support import *
