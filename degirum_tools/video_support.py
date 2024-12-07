@@ -406,7 +406,7 @@ class ClipSaver:
         self._frame_counter = 0
         self._thread_name = "dgtools_ClipSaverThread_" + str(uuid.uuid4())
 
-    def forward(self, result, triggers: List[str] = []) -> Optional[str]:
+    def forward(self, result, triggers: List[str] = []) -> List[str]:
         """
         Buffer given result in internal circular buffer.
         Initiate saving video clip if triggers list if not empty.
@@ -416,7 +416,7 @@ class ClipSaver:
             triggers: list of event names or notifications which trigger video clip saving
 
         Returns:
-            filename of saved video clip if it was saved, None otherwise
+            all filenames of saved video clip if it was saved, [] otherwise
         """
 
         # add result to the clip buffer
@@ -436,75 +436,85 @@ class ClipSaver:
             # otherwise, continue accumulating the clip: decrement the timer
             self._end_counter -= 1
 
-        filename = None
+        filenames = []
         if self._end_counter == 0:
-            filename = self._save_clip()
+            filenames = self._save_clip()
             self._end_counter = -1
             self._triggered_by.clear()
 
         self._frame_counter += 1
-        return filename
+        return filenames
 
-    def _save_clip(self) -> str:
+    def _save_clip(self) -> List[str]:
         """
         Save video clip from the buffer
         """
 
+        builtin_types = (int, float, str, bool, tuple, list, dict, set)
+
         def save(context, filename):
+
             if context._clip_buffer:
                 w, h = image_size(context._clip_buffer[0].image)
 
-                with open_video_writer(
-                    filename + ".mp4", w, h, context._target_fps
-                ) as writer:
+                tempfilename = str(Path(filename).parent / str(uuid.uuid4()))
+                try:
+                    with open_video_writer(
+                        tempfilename + ".mp4", w, h, context._target_fps
+                    ) as writer:
 
-                    json_result: Dict[str, Any] = {}
-                    if context._save_ai_result_json:
-                        json_result["properties"] = dict(
-                            timestamp=time.ctime(),
-                            start_frame=context._start_frame,
-                            triggered_by=context._triggered_by,
-                            duration=len(context._clip_buffer),
-                            pre_trigger_delay=context._pre_trigger_delay,
-                            target_fps=context._target_fps,
-                        )
-                        json_result["results"] = []
+                        json_result: Dict[str, Any] = {}
+                        if context._save_ai_result_json:
+                            json_result["properties"] = dict(
+                                timestamp=time.ctime(),
+                                start_frame=context._start_frame,
+                                triggered_by=context._triggered_by,
+                                duration=len(context._clip_buffer),
+                                pre_trigger_delay=context._pre_trigger_delay,
+                                target_fps=context._target_fps,
+                            )
+                            json_result["results"] = []
 
-                    for result in context._clip_buffer:
-                        if context._embed_ai_annotations:
-                            writer.write(result.overlay_image)
-                        else:
-                            writer.write(result.image)
+                        for result in context._clip_buffer:
+                            if context._embed_ai_annotations:
+                                writer.write(result.overlay_image)
+                            else:
+                                writer.write(result.image)
+
+                            if context._save_ai_result_json:
+                                json_result["results"].append(
+                                    {
+                                        k: v
+                                        for k, v in result.__dict__.items()
+                                        if not k.startswith("_")
+                                        and isinstance(v, builtin_types)
+                                    }
+                                )
 
                         if context._save_ai_result_json:
-                            json_result["results"].append(
-                                {
-                                    k: v
-                                    for k, v in result.__dict__.items()
-                                    if not k.startswith("__")
-                                    and isinstance(
-                                        v,
-                                        (int, float, str, bool, tuple, list, dict, set),
-                                    )
-                                }
-                            )
 
-                    if context._save_ai_result_json:
+                            def custom_serializer(obj):
+                                if isinstance(obj, set):
+                                    return list(obj)
+                                raise TypeError(
+                                    f"Object of type {obj.__class__.__name__} is not JSON serializable"
+                                )
 
-                        def custom_serializer(obj):
-                            if isinstance(obj, set):
-                                return list(obj)
-                            raise TypeError(
-                                f"Object of type {obj.__class__.__name__} is not JSON serializable"
-                            )
+                            with open(tempfilename + ".json", "w") as f:
+                                json.dump(
+                                    json_result,
+                                    f,
+                                    indent=2,
+                                    default=custom_serializer,
+                                )
 
-                        with open(filename + ".json", "w") as f:
-                            json.dump(
-                                json_result,
-                                f,
-                                indent=2,
-                                default=custom_serializer,
-                            )
+                finally:
+                    if os.path.exists(tempfilename + ".mp4"):
+                        os.rename(tempfilename + ".mp4", filename + ".mp4")
+                    if context._save_ai_result_json and os.path.exists(
+                        tempfilename + ".json"
+                    ):
+                        os.rename(tempfilename + ".json", filename + ".json")
 
         # preserve a shallow copy of self to use in thread
         context = copy.copy(self)
@@ -512,11 +522,16 @@ class ClipSaver:
         context._triggered_by = list(self._triggered_by)
 
         # save the clip in a separate thread
-        filename = f"{context._file_prefix}_{context._start_frame:08d}"
+
+        filename = f"{context._file_prefix}{'' if context._file_prefix.endswith('/') else '_' }{context._start_frame:08d}"
         threading.Thread(
             target=save, args=(context, filename), name=self._thread_name
         ).start()
-        return filename
+
+        filenames = [filename + ".mp4"]
+        if context._save_ai_result_json:
+            filenames.append(filename + ".json")
+        return filenames
 
     def join_all_saver_threads(self) -> int:
         """

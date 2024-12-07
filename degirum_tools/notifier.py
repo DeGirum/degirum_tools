@@ -8,17 +8,18 @@
 # It works with conjunction with EventDetector analyzer.
 #
 
-import numpy as np
-import multiprocessing
-import time
-import os
-import queue
-from typing import Tuple, Union, Optional
+
+import numpy as np, multiprocessing, threading, time, os, queue, tempfile, shutil
+from typing import Tuple, Union, Optional, List
+from dataclasses import dataclass
+from . import logger_get
 from .result_analyzer_base import ResultAnalyzerBase
 from .ui_support import put_text, color_complement, deduce_text_color, CornerPosition
 from .math_support import AnchorPoint, get_image_anchor_point
 from .event_detector import EventDetector
 from .environment import import_optional_package
+from .video_support import ClipSaver
+from .object_storage_support import ObjectStorageConfig, ObjectStorage
 
 
 class NotificationServer:
@@ -26,33 +27,73 @@ class NotificationServer:
     Notification server class to asynchronously send notifications via apprise
     """
 
-    def __init__(self, title: str, config: str, tags: Optional[str]):
+    @dataclass
+    class Job:
+        """
+        Job dataclass to store file upload request
+        """
+
+        payload: str  # job payload (it is job-dependent)
+        timestamp: float = time.time()  # timestamp of the job
+        is_done: bool = False
+        error: Optional[Exception] = None
+
+    def __init__(
+        self,
+        notification_cfg: Optional[str],
+        notification_title: Optional[str],
+        notification_tags: Optional[str],
+        storage_cfg: Optional[ObjectStorageConfig],
+        pending_timeout_s: float = 5.0,
+    ):
         """
         Constructor
 
         Args:
-            config: path to the apprise configuration file or notification server URL in apprise format
-            tags: tags to use for cloud notifications
+            notification_cfg: path to the apprise configuration file or notification server URL in apprise format
+            notification_title: title of the notification
+            notification_tags: tags to use for cloud notifications
+            storage_cfg: object storage configuration for file uploads
+            pending_timeout_s: timeout for pending notifications and file uploads
         """
-        import atexit
 
         # create message queues and start child process
-        self._in_queue: multiprocessing.Queue = multiprocessing.Queue()
-        self._out_queue: multiprocessing.Queue = multiprocessing.Queue()
+        self._message_queue: multiprocessing.Queue = multiprocessing.Queue()
+        self._file_queue: multiprocessing.Queue = multiprocessing.Queue()
+        self._response_queue: multiprocessing.Queue = multiprocessing.Queue()
         self._process: Optional[multiprocessing.Process] = multiprocessing.Process(
             target=NotificationServer._process_commands,
-            args=(self._in_queue, self._out_queue, title, config, tags),
+            args=(
+                self._message_queue,
+                self._file_queue,
+                self._response_queue,
+                notification_cfg,
+                notification_title,
+                notification_tags,
+                storage_cfg,
+                pending_timeout_s,
+            ),
         )
         self._process.start()
 
-        response = self._out_queue.get()  # wait for the child process to be ready
+        response = self._response_queue.get()  # wait for the child process to be ready
         if isinstance(response, Exception):
             raise response
         if not isinstance(response, bool) or not response:
             raise RuntimeError("Failed to initialize notification server")
 
-        # register atexit handler to send the poison pill
-        atexit.register(self._send_poison)
+    def _process_response_queue(self):
+        """
+        Process response queue to handle exceptions
+        """
+        logger = logger_get()
+        while True:
+            try:
+                exc = self._response_queue.get_nowait()
+                if isinstance(exc, Exception):
+                    logger.error(f"Notification error: {exc}")
+            except queue.Empty:
+                break
 
     def send_notification(self, message: str):
         """
@@ -61,77 +102,170 @@ class NotificationServer:
         Args:
             message: notification message
         """
-        self._in_queue.put(message)
-        try:
-            exc = self._out_queue.get_nowait()
-            if isinstance(exc, Exception):
-                raise exc
-        except queue.Empty:
-            pass
+        self._message_queue.put(message)
+        self._process_response_queue()
+
+    def send_file_upload_req(self, local_filepaths: List[str]):
+        """
+        Send file upload request
+
+        Args:
+            local_filepaths: list of local file paths to upload
+        """
+        self._file_queue.put(local_filepaths)
+        self._process_response_queue()
 
     @staticmethod
     def _process_commands(
-        in_queue: multiprocessing.Queue,
-        out_queue: multiprocessing.Queue,
-        title: str,
-        config: str,
-        tags: str,
+        message_queue: multiprocessing.Queue,
+        file_queue: multiprocessing.Queue,
+        response_queue: multiprocessing.Queue,
+        notification_cfg: Optional[str],
+        notification_title: Optional[str],
+        notification_tags: Optional[str],
+        storage_cfg: Optional[ObjectStorageConfig],
+        pending_timeout_s: float,
     ):
         """
         Process commands from the queue. Runs in separate process.
         """
 
-        apprise = import_optional_package(
-            "apprise",
-            custom_message="`apprise` package is required for notifications. "
-            + "Please run `pip install degirum_tools[notifications]` to install required dependencies.",
-        )
+        response_queue.put(True)  # to indicate that the child process is ready
 
-        try:
-            # initialize Apprise object
-            apprise_obj = apprise.Apprise()
-            if os.path.isfile(config):
-                # treat config as a path to the configuration file
-                conf = apprise.AppriseConfig()
-                if not conf.add(config):
-                    raise ValueError(f"Invalid configuration file: {config}")
-                apprise_obj.add(conf)
-            else:
-                # treat config as a single server URL
-                if not apprise_obj.add(config):
-                    raise ValueError(f"Invalid configuration URL: {config}")
-        except Exception as e:
-            out_queue.put(e)
-            return
+        # process notification messages from the queue
+        def process_notifications():
+            if not notification_cfg:
+                return
 
-        out_queue.put(True)  # to indicate that the child process is ready
-
-        # process messages from the queue
-        while True:
-            message = in_queue.get()
-            if message is None:
-                # poison pill received, exit the loop
-                break
+            apprise = import_optional_package(
+                "apprise",
+                custom_message="`apprise` package is required for notifications. "
+                + "Please run `pip install degirum_tools[notifications]` to install required dependencies.",
+            )
 
             try:
-                if "unittest" in config:  # special case for unit tests
-                    continue
-
-                if not apprise_obj.notify(body=message, title=title, tag=tags):
-                    raise Exception(f"Notification failed: {title} - {message}")
+                # initialize Apprise object
+                apprise_obj = apprise.Apprise()
+                if os.path.isfile(notification_cfg):
+                    # treat notification_cfg as a path to the configuration file
+                    conf = apprise.AppriseConfig()
+                    if not conf.add(notification_cfg):
+                        raise ValueError(
+                            f"Invalid configuration file: {notification_cfg}"
+                        )
+                    apprise_obj.add(conf)
+                else:
+                    # treat notification_cfg as a single server URL
+                    if not apprise_obj.add(notification_cfg):
+                        raise ValueError(
+                            f"Invalid configuration URL: {notification_cfg}"
+                        )
             except Exception as e:
-                out_queue.put(e)
+                response_queue.put(e)
+                return
 
-    def _send_poison(self):
+            while True:
+                message = message_queue.get()
+                if message is None:
+                    # poison pill received, exit the loop
+                    break
+
+                try:
+                    if "unittest" in notification_cfg:  # special case for unit tests
+                        continue
+
+                    if not apprise_obj.notify(
+                        body=message, title=notification_title, tag=notification_tags
+                    ):
+                        raise Exception(
+                            f"Notification failed: {notification_title} - {message}"
+                        )
+                except Exception as e:
+                    response_queue.put(e)
+
+        # process file upload requests from the queue
+        def process_file_uploads():
+            if not storage_cfg:
+                return
+
+            queue_poll_interval_s = 0.1
+
+            storage = ObjectStorage(storage_cfg)
+            pending_jobs: List[NotificationServer.Job] = []
+            queue_is_active = True
+
+            while queue_is_active or pending_jobs:
+                if queue_is_active:
+                    try:
+                        files_to_upload = file_queue.get(
+                            timeout=queue_poll_interval_s if pending_jobs else None
+                        )
+                    except queue.Empty:
+                        files_to_upload = []
+
+                    if files_to_upload is None:
+                        queue_is_active = False
+
+                    if files_to_upload:
+                        pending_jobs.extend(
+                            [NotificationServer.Job(f) for f in files_to_upload]
+                        )
+
+                # upload file to the cloud
+                for job in pending_jobs:
+                    file_name = job.payload
+                    parent_dir = os.path.basename(os.path.dirname(file_name))
+                    filename_with_parent_dir = (
+                        parent_dir + "/" + os.path.basename(file_name)
+                    )
+
+                    if not os.path.exists(file_name):
+                        if time.time() - job.timestamp > pending_timeout_s:
+                            job.error = TimeoutError(f"File not found: {file_name}")
+                            job.is_done = True
+                        continue
+
+                    try:
+                        storage.upload_file_to_object_storage(
+                            file_name, filename_with_parent_dir
+                        )
+                    except Exception as e:
+                        job.error = e
+
+                    job.is_done = True
+
+                # remove completed and stalled jobs
+                for job in pending_jobs[:]:  # use shallow copy
+                    if job.is_done:
+                        if os.path.exists(job.payload):
+                            os.remove(job.payload)
+                        if job.error:
+                            response_queue.put(job.error)
+                        pending_jobs.remove(job)
+
+        # start processing notifications and file uploads in separate threads
+        threads = []
+        if notification_cfg:
+            threads.append(threading.Thread(target=process_notifications))
+        if storage_cfg:
+            threads.append(threading.Thread(target=process_file_uploads))
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+    def terminate(self):
         """Send the poison pill to stop the child process"""
         if self._process is not None:
-            self._in_queue.put(None)
+            self._message_queue.put(None)
+            self._file_queue.put(None)
             self._process.join()
             self._process = None
+            self._process_response_queue()
 
     def __del__(self):
         # Send the poison pill to stop the child process
-        self._send_poison()
+        self.terminate()
 
 
 class EventNotifier(ResultAnalyzerBase):
@@ -153,13 +287,23 @@ class EventNotifier(ResultAnalyzerBase):
         *,
         message: str = "",
         holdoff: Union[Tuple[float, str], int, float] = 0,
-        notification_config: Union[str, NotificationServer, None] = None,
+        notification_config: Optional[str] = None,
         notification_tags: Optional[str] = None,
         show_overlay: bool = True,
         annotation_color: Optional[tuple] = None,
         annotation_font_scale: Optional[float] = None,
         annotation_pos: Union[AnchorPoint, tuple] = AnchorPoint.BOTTOM_LEFT,
         annotation_cool_down: float = 3.0,
+        clip_save: bool = False,
+        clip_sub_dir: str = "",
+        clip_duration: int = 0,
+        clip_pre_trigger_delay: int = 0,
+        clip_embed_ai_annotations: bool = True,
+        clip_target_fps: float = 30.0,
+        storage_endpoint: str = "",
+        storage_access_key: str = "",
+        storage_secret_key: str = "",
+        storage_bucket: str = "",
     ):
         """
         Constructor
@@ -175,8 +319,8 @@ class EventNotifier(ResultAnalyzerBase):
                 `{result}` placeholder with any valid derivatives to access current inference result and its attributes.
                 For example: "Objects detected: {result.results}"
             notification_config: optional configuration of cloud notification service:
-                it can be already constructed notification server object (taken from another notifier);
-                or path to the configuration file for notification service; or single notification service URL
+                it can be path to the configuration file for notification service
+                or single notification service URL
             notification_tags: optional tags to use for cloud notifications
                 Tags can be separated by "and" (or commas) and "or" (or spaces).
                 For example:
@@ -189,6 +333,16 @@ class EventNotifier(ResultAnalyzerBase):
             annotation_font_scale: font scale to use for annotations or None to use model default
             annotation_pos: position to place annotation text (either predefined point or (x,y) tuple)
             annotation_cool_down: time in seconds to keep notification on the screen
+            clip_save: if True, save video clips when notification is triggered
+            clip_sub_dir: the name of subdirectory in the bucket for video clip files
+            clip_duration: duration of the video clip to save (in frames)
+            clip_pre_trigger_delay: delay before the event to start clip saving (in frames)
+            clip_embed_ai_annotations: True to embed AI inference annotations into video clip, False to use original image
+            clip_target_fps: target frames per second for saved videos
+            storage_endpoint: The object storage endpoint URL to save video clips
+            storage_access_key: The access key for the cloud account
+            storage_secret_key: The secret key for the cloud account
+            storage_bucket: The name of the bucket to upload video clips
         """
 
         self._name = name
@@ -198,16 +352,6 @@ class EventNotifier(ResultAnalyzerBase):
         self._annotation_font_scale = annotation_font_scale
         self._annotation_pos = annotation_pos
         self._annotation_cool_down = annotation_cool_down
-
-        # setting up notification server
-        self.notification_server: Optional[NotificationServer] = None
-        if isinstance(notification_config, NotificationServer):
-            # externally provided notification server
-            self.notification_server = notification_config
-        elif isinstance(notification_config, str) and notification_config:
-            self.notification_server = NotificationServer(
-                self._name, notification_config, notification_tags
-            )
 
         # compile condition to evaluate it later
         self._condition = compile(condition, "<string>", "eval")
@@ -230,6 +374,37 @@ class EventNotifier(ResultAnalyzerBase):
                 )
         else:
             raise TypeError(f"Invalid holdoff time type: {holdoff}")
+
+        # instantiate clip saver if required
+        self._clip_save = clip_save
+        if clip_save:
+            self._clip_path = tempfile.mkdtemp()
+            full_clip_prefix = self._clip_path + "/" + clip_sub_dir + "/"
+
+            self._clip_saver = ClipSaver(
+                clip_duration,
+                full_clip_prefix,
+                pre_trigger_delay=clip_pre_trigger_delay,
+                embed_ai_annotations=clip_embed_ai_annotations,
+                save_ai_result_json=True,
+                target_fps=clip_target_fps,
+            )
+            self._storage_cfg = ObjectStorageConfig(
+                endpoint=storage_endpoint,
+                access_key=storage_access_key,
+                secret_key=storage_secret_key,
+                bucket=storage_bucket,
+            )
+
+        # setting up notification server
+        self.notification_server: Optional[NotificationServer] = None
+        if (isinstance(notification_config, str) and notification_config) or clip_save:
+            self.notification_server = NotificationServer(
+                notification_config,
+                self._name,
+                notification_tags,
+                self._storage_cfg if clip_save else None,
+            )
 
         self._frame = 0
         self._prev_cond = False
@@ -269,6 +444,7 @@ class EventNotifier(ResultAnalyzerBase):
         if not hasattr(result, self.key_notifications):
             result.notifications = {}
 
+        fired = False
         if cond and not self._prev_cond:  # condition is met for the first time
             # check for holdoff time
             if (
@@ -282,13 +458,28 @@ class EventNotifier(ResultAnalyzerBase):
                     and (time.time() - self._prev_time > self._holdoff_sec)
                 )  # holdoff in seconds is passed
             ):
-                result.notifications[self._name] = self._message.format(result=result)
+                fired = True
 
-                # send notifications to cloud service
+        # save video clip if required
+        clip_url = ""
+        if self._clip_save:
+            clip_filenames = self._clip_saver.forward(
+                result, [self._name] if fired else []
+            )
+            if clip_filenames:
                 if self.notification_server is not None:
-                    self.notification_server.send_notification(
-                        result.notifications[self._name]
+                    self.notification_server.send_file_upload_req(clip_filenames)
+                    clip_url = self._storage_cfg.construct_direct_url(
+                        os.path.basename(clip_filenames[0])
                     )
+
+        if fired:
+            message = self._message.format(result=result, clip_url=clip_url)
+            result.notifications[self._name] = message
+
+            # send notifications to cloud service
+            if self.notification_server is not None:
+                self.notification_server.send_notification(message)
 
         # update holdoff timestamp and frame number if condition is met
         if cond:
@@ -352,3 +543,12 @@ class EventNotifier(ResultAnalyzerBase):
             ),
             corner_position=CornerPosition.AUTO,
         )
+
+    def __del__(self):
+        self._clip_saver.join_all_saver_threads()
+
+        if self.notification_server:
+            self.notification_server.terminate()
+
+        if self._clip_save and os.path.exists(self._clip_path):
+            shutil.rmtree(self._clip_path)
