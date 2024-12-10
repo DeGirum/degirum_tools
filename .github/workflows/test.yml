@@ -52,8 +52,8 @@ jobs:
       - name: Run pytest (with coverage)
         run: python3 -m coverage run -m pytest -s -v test/
         env:
-          AWS_S3_ACCESS_KEY: ${{ secrets.AWS_S3_ACCESS_KEY }}
-          AWS_S3_SECRET_KEY: ${{ secrets.AWS_S3_SECRET_KEY }}
+          S3_ACCESS_KEY: ${{ secrets.AWS_S3_ACCESS_KEY }}
+          S3_SECRET_KEY: ${{ secrets.AWS_S3_SECRET_KEY }}
 
       - name: Display coverage report
         run: python3 -m coverage report --omit=config*

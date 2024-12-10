@@ -10,6 +10,7 @@ import sys, os, tempfile, pytest, pathlib
 sys.path.insert(0, os.getcwd())
 
 import degirum as dg
+import degirum_tools
 
 
 @pytest.fixture(scope="session")
@@ -75,3 +76,14 @@ def regression_model(zoo_dir, regression_model_name):
     """Load regression model from local zoo"""
     with dg.load_model(regression_model_name, dg.LOCAL, zoo_dir) as model:
         yield model
+
+
+@pytest.fixture(scope="session")
+def s3_credentials():
+    degirum_tools.environment.reload_env()
+    return dict(
+        endpoint="s3.us-west-1.amazonaws.com",
+        access_key=os.getenv(degirum_tools.environment.var_S3AccessKey),
+        secret_key=os.getenv(degirum_tools.environment.var_S3SecretKey),
+        bucket="dg-degirum-tools-test-s3",
+    )

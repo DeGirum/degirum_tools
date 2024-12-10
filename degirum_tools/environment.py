@@ -18,6 +18,8 @@ var_AiServer = "AISERVER_HOSTNAME_OR_IP"
 var_CloudZoo = "CLOUD_ZOO_URL"
 var_VideoSource = "CAMERA_ID"
 var_AudioSource = "AUDIO_ID"
+var_S3AccessKey = "S3_ACCESS_KEY"
+var_S3SecretKey = "S3_SECRET_KEY"
 
 
 def reload_env(custom_file: str = "env.ini"):

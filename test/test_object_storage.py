@@ -9,29 +9,21 @@
 
 import os
 import tempfile
+import pytest
 
 
-def test_object_storage():
+def test_object_storage(s3_credentials):
     """
     Test for ObjectStorage class
     """
 
     import degirum_tools
 
-    AWS_S3_ACCESS_KEY = os.getenv("AWS_S3_ACCESS_KEY")
-    AWS_S3_SECRET_KEY = os.getenv("AWS_S3_SECRET_KEY")
-    if AWS_S3_ACCESS_KEY is None or AWS_S3_SECRET_KEY is None:
-        print(
-            "AWS_S3_ACCESS_KEY and/or AWS_S3_SECRET_KEY environment variables are not set: test_object_storage is skipped"
+    cfg = degirum_tools.ObjectStorageConfig(**s3_credentials)
+    if cfg.access_key is None or cfg.secret_key is None:
+        pytest.skip(
+            "S3_ACCESS_KEY and/or S3_SECRET_KEY environment variables are not set"
         )
-        return  # Skip test
-
-    cfg = degirum_tools.ObjectStorageConfig(
-        endpoint="s3.us-west-1.amazonaws.com",
-        access_key=AWS_S3_ACCESS_KEY,
-        secret_key=AWS_S3_SECRET_KEY,
-        bucket="dg-degirum-tools-test-s3",
-    )
 
     obj_storage = degirum_tools.ObjectStorage(cfg)
 
