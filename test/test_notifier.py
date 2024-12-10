@@ -234,9 +234,9 @@ def test_notifier(s3_credentials):
 
         notifier = degirum_tools.EventNotifier(**params)
 
-        for i, input in enumerate(case["inp"]):
+        try:
+            for i, input in enumerate(case["inp"]):
 
-            try:
                 result = dg.postprocessor.InferenceResults(
                     model_params=None,
                     input_image=(
@@ -261,13 +261,11 @@ def test_notifier(s3_credentials):
                         + f"\nConfig: {case['params']}"
                     )
 
-            finally:
-                if notifier._clip_save:
-                    # cleanup bucket contents for clip saving tests
-                    storage = degirum_tools.ObjectStorage(notifier._storage_cfg)
-
-                    storage.delete_bucket_contents()
-                    bucket_contents = storage.list_bucket_contents()
-                    assert (
-                        bucket_contents is not None and len(list(bucket_contents)) == 0
-                    )
+        finally:
+            if notifier._clip_save:
+                # cleanup bucket contents for clip saving tests
+                storage = degirum_tools.ObjectStorage(notifier._storage_cfg)
+                del notifier  # delete notifier to finalize clip saving
+                storage.delete_bucket_contents()
+                bucket_contents = storage.list_bucket_contents()
+                assert bucket_contents is not None and len(list(bucket_contents)) == 0
