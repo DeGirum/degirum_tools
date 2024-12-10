@@ -191,6 +191,8 @@ class NotificationServer:
             queue_poll_interval_s = 0.1
 
             storage = ObjectStorage(storage_cfg)
+            storage.ensure_bucket_exists()
+
             pending_jobs: List[NotificationServer.Job] = []
             queue_is_active = True
 
@@ -300,10 +302,7 @@ class EventNotifier(ResultAnalyzerBase):
         clip_pre_trigger_delay: int = 0,
         clip_embed_ai_annotations: bool = True,
         clip_target_fps: float = 30.0,
-        storage_endpoint: str = "",
-        storage_access_key: str = "",
-        storage_secret_key: str = "",
-        storage_bucket: str = "",
+        storage_config: Optional[ObjectStorageConfig] = None,
     ):
         """
         Constructor
@@ -339,11 +338,15 @@ class EventNotifier(ResultAnalyzerBase):
             clip_pre_trigger_delay: delay before the event to start clip saving (in frames)
             clip_embed_ai_annotations: True to embed AI inference annotations into video clip, False to use original image
             clip_target_fps: target frames per second for saved videos
-            storage_endpoint: The object storage endpoint URL to save video clips
-            storage_access_key: The access key for the cloud account
-            storage_secret_key: The secret key for the cloud account
-            storage_bucket: The name of the bucket to upload video clips
+            storage_config: The object storage configuration (to save video clips)
         """
+
+        self._frame = 0
+        self._prev_cond = False
+        self._prev_frame = -1_000_000_000  # arbitrary big negative number
+        self._prev_time = -1_000_000_000.0
+        self._last_notifications: dict = {}
+        self._last_display_time = -1_000_000_000.0
 
         self._name = name
         self._message = message if message else f"Notification triggered: {name}"
@@ -352,9 +355,8 @@ class EventNotifier(ResultAnalyzerBase):
         self._annotation_font_scale = annotation_font_scale
         self._annotation_pos = annotation_pos
         self._annotation_cool_down = annotation_cool_down
-
-        # compile condition to evaluate it later
-        self._condition = compile(condition, "<string>", "eval")
+        self._clip_save = clip_save
+        self.notification_server: Optional[NotificationServer] = None
 
         # parse holdoff duration
         self._holdoff_frames = 0
@@ -375,9 +377,11 @@ class EventNotifier(ResultAnalyzerBase):
         else:
             raise TypeError(f"Invalid holdoff time type: {holdoff}")
 
+        # compile condition to evaluate it later
+        self._condition = compile(condition, "<string>", "eval")
+
         # instantiate clip saver if required
-        self._clip_save = clip_save
-        if clip_save:
+        if clip_save and storage_config:
             self._clip_path = tempfile.mkdtemp()
             full_clip_prefix = self._clip_path + "/" + clip_sub_dir + "/"
 
@@ -389,15 +393,9 @@ class EventNotifier(ResultAnalyzerBase):
                 save_ai_result_json=True,
                 target_fps=clip_target_fps,
             )
-            self._storage_cfg = ObjectStorageConfig(
-                endpoint=storage_endpoint,
-                access_key=storage_access_key,
-                secret_key=storage_secret_key,
-                bucket=storage_bucket,
-            )
+            self._storage_cfg = storage_config
 
         # setting up notification server
-        self.notification_server: Optional[NotificationServer] = None
         if (isinstance(notification_config, str) and notification_config) or clip_save:
             self.notification_server = NotificationServer(
                 notification_config,
@@ -405,13 +403,6 @@ class EventNotifier(ResultAnalyzerBase):
                 notification_tags,
                 self._storage_cfg if clip_save else None,
             )
-
-        self._frame = 0
-        self._prev_cond = False
-        self._prev_frame = -1_000_000_000  # arbitrary big negative number
-        self._prev_time = -1_000_000_000.0
-        self._last_notifications: dict = {}
-        self._last_display_time = -1_000_000_000.0
 
     def analyze(self, result):
         """
@@ -545,7 +536,8 @@ class EventNotifier(ResultAnalyzerBase):
         )
 
     def __del__(self):
-        self._clip_saver.join_all_saver_threads()
+        if self._clip_save:
+            self._clip_saver.join_all_saver_threads()
 
         if self.notification_server:
             self.notification_server.terminate()

@@ -98,9 +98,29 @@ class ObjectStorage:
                 f"Error occurred when ensuring bucket '{self._config.bucket}' exists: {e}"
             ) from e
 
-    def delete_bucket(self):
+    def list_bucket_contents(self):
         """
-        Delete the bucket from cloud object storage
+        List the contents of the bucket in cloud object storage
+
+        Returns:
+            List of objects in the bucket of None if the bucket does not exist
+        """
+
+        try:
+            if self._client.bucket_exists(self._config.bucket):
+                return self._client.list_objects(self._config.bucket, recursive=True)
+        except self._minio.S3Error as e:
+            raise RuntimeError(
+                f"Error occurred when listing bucket '{self._config.bucket}': {e}"
+            ) from e
+        return None
+
+    def delete_bucket_contents(self) -> bool:
+        """
+        Delete the bucket contents from cloud object storage
+
+        Returns:
+            True if bucket contents were deleted, False if bucket does not exist
         """
 
         try:
@@ -108,6 +128,20 @@ class ObjectStorage:
                 objects = self._client.list_objects(self._config.bucket, recursive=True)
                 for obj in objects:
                     self._client.remove_object(self._config.bucket, obj.object_name)
+                return True
+        except self._minio.S3Error as e:
+            raise RuntimeError(
+                f"Error occurred when deleting bucket '{self._config.bucket}': {e}"
+            )
+        return False
+
+    def delete_bucket(self):
+        """
+        Delete the bucket with all contents from cloud object storage
+        """
+
+        try:
+            if self.delete_bucket_contents():
                 self._client.remove_bucket(self._config.bucket)
         except self._minio.S3Error as e:
             raise RuntimeError(
