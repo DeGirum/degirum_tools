@@ -523,7 +523,7 @@ class ClipSaver:
 
         # save the clip in a separate thread
 
-        filename = f"{context._file_prefix}{'' if context._file_prefix.endswith('/') else '_' }{context._start_frame:08d}"
+        filename = f"{context._file_prefix}{'' if context._file_prefix.endswith('/') else '_'}{context._start_frame:08d}"
         threading.Thread(
             target=save, args=(context, filename), name=self._thread_name
         ).start()
