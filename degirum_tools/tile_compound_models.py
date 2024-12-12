@@ -568,7 +568,7 @@ class LocalGlobalTileModel(TileModel):
 
         else:
             # new frame comes: return combined result of previous frame
-            ret = self._finalize_current_result(result1)
+            ret = self._finalize_current_result(self._current_result1)
             self._current_result = result2
             self._current_result1 = result1
 
@@ -770,7 +770,7 @@ class BoxFusionTileModel(_EdgeMixin, TileModel):
 
         else:
             # new frame comes: return combined result of previous frame
-            ret = self._finalize_current_result(result1)
+            ret = self._finalize_current_result(self._current_result1)
             self._current_result = result2
             self._current_result1 = result1
 
@@ -906,7 +906,7 @@ class BoxFusionLocalGlobalTileModel(BoxFusionTileModel):
 
         else:
             # new frame comes: return combined result of previous frame
-            ret = self._finalize_current_result(result1)
+            ret = self._finalize_current_result(self._current_result1)
             self._current_result = result2
             self._current_result1 = result1
 

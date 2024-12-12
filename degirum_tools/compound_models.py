@@ -156,7 +156,7 @@ class CompoundModelBase(ModelLike):
         def result2_apply_final_steps(result2, transformed_result2):
 
             # restore original frame info to support nested compound models
-            transformed_result2._frame_info = result2.info.original_info
+            transformed_result2._frame_info = transformed_result2.info.original_info
 
             # apply analyzers if any
             if self._analyzers:
@@ -590,7 +590,7 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
 
         else:
             # new frame comes: return combined result of previous frame
-            ret = self._finalize_current_result(result1)
+            ret = self._finalize_current_result(self._current_result1)
             self._current_result = result2
             self._current_result1 = result1
 
