@@ -156,7 +156,7 @@ class CompoundModelBase(ModelLike):
         def result2_apply_final_steps(result2, transformed_result2):
 
             # restore original frame info to support nested compound models
-            if isinstance(transformed_result2, FrameInfo):
+            if isinstance(transformed_result2.info, FrameInfo):
                 transformed_result2._frame_info = transformed_result2.info.original_info
             else:
                 transformed_result2._frame_info = transformed_result2.info
