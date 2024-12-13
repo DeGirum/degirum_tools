@@ -50,7 +50,7 @@ setup(
             "types-Pillow",
             "types-PyYAML",
         ],
-        "testing": ["pytest", "coverage"],
+        "testing": ["pytest", "coverage", "pygobject"],
         "build": ["build"],
     },
     include_package_data=True,

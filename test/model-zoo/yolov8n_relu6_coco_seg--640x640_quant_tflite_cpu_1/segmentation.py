@@ -272,7 +272,8 @@ class PostProcessor:
                 )
             else:  # best class only
                 conf = np.max(cls, axis=1, keepdims=True)
-                j = np.argmax(cls[:, :], axis=1, keepdims=True)
+                j = np.argmax(cls[:, :], axis=1)  # Remove keepdims
+                j = np.expand_dims(j, axis=1)  # Add the dimension back
                 x = np.concatenate((box, conf, j, mask), axis=1)
 
             # Filter by class

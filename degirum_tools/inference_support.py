@@ -18,7 +18,7 @@ from .video_support import (
     open_video_stream,
     get_video_stream_properties,
     video_source,
-    open_video_writer,
+    open_video_writer, VideoCaptureGst
 )
 from .ui_support import Progress, Display, Timer
 from .result_analyzer_base import ResultAnalyzerBase
@@ -276,7 +276,7 @@ def annotate_video(
             display = stack.enter_context(Display(win_name))
 
         if isinstance(video_source_id, cv2.VideoCapture):
-            stream = video_source_id
+            stream: Union[cv2.VideoCapture, VideoCaptureGst] = video_source_id
         else:
             stream = stack.enter_context(open_video_stream(video_source_id))
 
