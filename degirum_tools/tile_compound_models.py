@@ -1,19 +1,17 @@
 import copy
 from typing import List, MutableSequence, Optional, Sequence, Tuple, Union
 
-import cv2
-import numpy as np
+import cv2, numpy as np, degirum as dg
 
-import degirum as dg
-from degirum_tools import (
-    CroppingAndDetectingCompoundModel,
+from .math_support import nms, edge_box_fusion
+from .compound_models import (
+    FrameInfo,
     CropExtentOptions,
     ModelLike,
     NmsOptions,
     MotionDetectOptions,
-    detect_motion,
-)
-from degirum_tools.math_support import nms, edge_box_fusion
+    CroppingAndDetectingCompoundModel,
+    detect_motion)
 
 
 class _TileInfo:
@@ -694,6 +692,10 @@ class BoxFusionTileModel(_EdgeMixin, TileModel):
                     use_iou=self._nms_options.use_iou,
                     box_select=self._nms_options.box_select,
                 )
+
+            if isinstance(self._current_result.info, FrameInfo):
+                self._current_result._frame_info = self._current_result.info.original_info
+
             return self._current_result
         return None
 
