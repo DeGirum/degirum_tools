@@ -10,8 +10,7 @@
 
 
 import numpy as np, multiprocessing, threading, time, os, queue, tempfile, shutil
-from typing import Tuple, Union, Optional, List
-from dataclasses import dataclass
+from typing import Tuple, Union, Optional, Dict
 from . import logger_get
 from .result_analyzer_base import ResultAnalyzerBase
 from .ui_support import put_text, color_complement, deduce_text_color, CornerPosition
@@ -27,16 +26,48 @@ class NotificationServer:
     Notification server class to asynchronously send notifications via apprise
     """
 
-    @dataclass
+    class DefaultDict(dict):
+        def __missing__(self, key):
+            return f"{{{key}}}"  # Return the literal placeholder if key is missing
+
     class Job:
         """
-        Job dataclass to store file upload request
+        Notification server job base class
         """
 
-        payload: str  # job payload (it is job-dependent)
-        timestamp: float = time.time()  # timestamp of the job
-        is_done: bool = False
-        error: Optional[Exception] = None
+        _id: int = 0  # job ID counter
+        _lock = threading.Lock()
+
+        # job types
+        job_file_upload = "upload file"
+        job_notification = "send notification"
+
+        @staticmethod
+        def new_id() -> int:
+            """Generate new job ID"""
+            with NotificationServer.Job._lock:
+                NotificationServer.Job._id += 1
+                return NotificationServer.Job._id
+
+        def __init__(
+            self, job_type: str, payload: str, dependent: Optional[int] = None
+        ):
+            """
+            Constructor
+
+            Args:
+                job_type: job type
+                payload: job payload (it is job-dependent)
+                dependent: job ID of the job which depends on this one
+            """
+
+            self.id = NotificationServer.Job.new_id()  # job ID
+            self.job_type = job_type  # job type
+            self.dependent = dependent  # job ID dependent job
+            self.payload = payload  # job payload (it is job-dependent)
+            self.timestamp: float = time.time()  # timestamp of the job
+            self.is_done: bool = False
+            self.error: Optional[Exception] = None
 
     def __init__(
         self,
@@ -58,14 +89,12 @@ class NotificationServer:
         """
 
         # create message queues and start child process
-        self._message_queue: multiprocessing.Queue = multiprocessing.Queue()
-        self._file_queue: multiprocessing.Queue = multiprocessing.Queue()
+        self._job_queue: multiprocessing.Queue = multiprocessing.Queue()
         self._response_queue: multiprocessing.Queue = multiprocessing.Queue()
         self._process: Optional[multiprocessing.Process] = multiprocessing.Process(
             target=NotificationServer._process_commands,
             args=(
-                self._message_queue,
-                self._file_queue,
+                self._job_queue,
                 self._response_queue,
                 notification_cfg,
                 notification_title,
@@ -95,30 +124,27 @@ class NotificationServer:
             except queue.Empty:
                 break
 
-    def send_notification(self, message: str):
+    def send_job(self, job_type, payload: str, dependent: Optional[int] = None):
         """
-        Send notification to cloud service
+        Send job to notification server
 
         Args:
-            message: notification message
-        """
-        self._message_queue.put(message)
-        self._process_response_queue()
+            job_type: job type
+            payload: job payload
+            dependent: job ID of another job which depends on this one
 
-    def send_file_upload_req(self, local_filepaths: List[str]):
+        Returns:
+            job ID of posted job
         """
-        Send file upload request
 
-        Args:
-            local_filepaths: list of local file paths to upload
-        """
-        self._file_queue.put(local_filepaths)
+        job = NotificationServer.Job(job_type, payload, dependent)
+        self._job_queue.put(job)
         self._process_response_queue()
+        return job.id
 
     @staticmethod
     def _process_commands(
-        message_queue: multiprocessing.Queue,
-        file_queue: multiprocessing.Queue,
+        job_queue: multiprocessing.Queue,
         response_queue: multiprocessing.Queue,
         notification_cfg: Optional[str],
         notification_title: Optional[str],
@@ -132,135 +158,186 @@ class NotificationServer:
 
         response_queue.put(True)  # to indicate that the child process is ready
 
-        # process notification messages from the queue
-        def process_notifications():
-            if not notification_cfg:
-                return
-
-            apprise = import_optional_package(
-                "apprise",
-                custom_message="`apprise` package is required for notifications. "
-                + "Please run `pip install degirum_tools[notifications]` to install required dependencies.",
-            )
-
-            try:
-                # initialize Apprise object
-                apprise_obj = apprise.Apprise()
-                if os.path.isfile(notification_cfg):
-                    # treat notification_cfg as a path to the configuration file
-                    conf = apprise.AppriseConfig()
-                    if not conf.add(notification_cfg):
-                        raise ValueError(
-                            f"Invalid configuration file: {notification_cfg}"
-                        )
-                    apprise_obj.add(conf)
-                else:
-                    # treat notification_cfg as a single server URL
-                    if not apprise_obj.add(notification_cfg):
-                        raise ValueError(
-                            f"Invalid configuration URL: {notification_cfg}"
-                        )
-            except Exception as e:
-                response_queue.put(e)
-                return
-
-            while True:
-                message = message_queue.get()
-                if message is None:
-                    # poison pill received, exit the loop
-                    break
-
+        def configure_file_uploads():
+            if storage_cfg:
                 try:
-                    if "unittest" in notification_cfg:  # special case for unit tests
-                        continue
+                    storage = ObjectStorage(storage_cfg)
+                    storage.ensure_bucket_exists()
+                    return storage
+                except Exception as e:
+                    response_queue.put(e)
+            return None
 
-                    if not apprise_obj.notify(
-                        body=message, title=notification_title, tag=notification_tags
-                    ):
-                        raise Exception(
-                            f"Notification failed: {notification_title} - {message}"
-                        )
+        def configure_notifications():
+            if notification_cfg:
+                try:
+                    apprise = import_optional_package(
+                        "apprise",
+                        custom_message="`apprise` package is required for notifications. "
+                        + "Please run `pip install degirum_tools[notifications]` to install required dependencies.",
+                    )
+
+                    # initialize Apprise object
+                    apprise_obj = apprise.Apprise()
+                    if os.path.isfile(notification_cfg):
+                        # treat notification_cfg as a path to the configuration file
+                        conf = apprise.AppriseConfig()
+                        if not conf.add(notification_cfg):
+                            raise ValueError(
+                                f"Invalid configuration file: {notification_cfg}"
+                            )
+                        apprise_obj.add(conf)
+                    else:
+                        # treat notification_cfg as a single server URL
+                        if not apprise_obj.add(notification_cfg):
+                            raise ValueError(
+                                f"Invalid configuration URL: {notification_cfg}"
+                            )
+                    return apprise_obj
                 except Exception as e:
                     response_queue.put(e)
 
-        # process file upload requests from the queue
-        def process_file_uploads():
-            if not storage_cfg:
+            return None
+
+        storage = configure_file_uploads()
+        notifier = configure_notifications()
+
+        param_key_url = "url"  # key to access the file URL in the job results
+
+        #
+        # Run file upload job
+        #
+        def run_file_upload_job(job, params):
+            if storage is None:
+                job.is_done = True
                 return
 
-            queue_poll_interval_s = 0.1
+            file_name = job.payload
+            parent_dir = os.path.basename(os.path.dirname(file_name))
+            filename_with_parent_dir = parent_dir + "/" + os.path.basename(file_name)
+            url: Optional[str] = None
 
-            storage = ObjectStorage(storage_cfg)
-            storage.ensure_bucket_exists()
+            if not os.path.exists(file_name):
+                job.is_done = False  # no local file to upload yet: job is not done
+                return None
 
-            pending_jobs: List[NotificationServer.Job] = []
-            queue_is_active = True
+            try:
+                storage.upload_file_to_object_storage(
+                    file_name, filename_with_parent_dir
+                )
+                os.remove(file_name)  # remove local file after upload
+                url = storage.generate_presigned_url(filename_with_parent_dir)
+            except Exception as e:
+                job.error = e
 
-            while queue_is_active or pending_jobs:
-                if queue_is_active:
-                    try:
-                        files_to_upload = file_queue.get(
-                            timeout=queue_poll_interval_s if pending_jobs else None
-                        )
-                    except queue.Empty:
-                        files_to_upload = []
+            job.is_done = True
+            return {param_key_url: url} if url else None
 
-                    if files_to_upload is None:
-                        queue_is_active = False
+        #
+        # Run notification job
+        #
+        def run_notification_job(job, params):
 
-                    if files_to_upload:
-                        pending_jobs.extend(
-                            [NotificationServer.Job(f) for f in files_to_upload]
-                        )
+            message = job.payload
+            need_params = "{" in message and "}" in message
 
-                # upload file to the cloud
-                for job in pending_jobs:
-                    file_name = job.payload
-                    parent_dir = os.path.basename(os.path.dirname(file_name))
-                    filename_with_parent_dir = (
-                        parent_dir + "/" + os.path.basename(file_name)
+            if need_params and not params:
+                job.is_done = False  # no params available yet: job is not done
+                return None
+
+            job.is_done = True
+            if (
+                notifier is None
+                or notification_cfg is None
+                or "unittest" in notification_cfg  # special case for unit tests
+            ):
+                return None
+
+            try:
+
+                # replace placeholders in the message
+                if need_params:
+                    message = message.format_map(NotificationServer.DefaultDict(params))
+
+                if not notifier.notify(
+                    body=message, title=notification_title, tag=notification_tags
+                ):
+                    raise Exception(
+                        f"Notification failed: {notification_title} - {message}"
                     )
+            except Exception as e:
+                job.error = e
 
-                    if not os.path.exists(file_name):
-                        if time.time() - job.timestamp > pending_timeout_s:
-                            job.error = TimeoutError(f"File not found: {file_name}")
-                            job.is_done = True
-                        continue
+            return None
 
-                    try:
-                        storage.upload_file_to_object_storage(
-                            file_name, filename_with_parent_dir
-                        )
-                    except Exception as e:
-                        job.error = e
+        #
+        # Job processing loop
+        #
+        pending_jobs: Dict[int, NotificationServer.Job] = {}
+        job_results: Dict[int, dict] = {}
+        queue_poll_interval_s = 0.5
+        queue_is_active = True
 
+        while queue_is_active or pending_jobs:
+
+            # process queue
+            if queue_is_active:
+                try:
+                    job = job_queue.get(
+                        timeout=queue_poll_interval_s if pending_jobs else None
+                    )
+                    if job is None:  # poison pill received
+                        queue_is_active = False
+                except queue.Empty:
+                    job = None
+
+                if job is not None:
+                    pending_jobs[job.id] = job
+
+            if not pending_jobs:
+                continue
+
+            # process pending jobs
+            for job in pending_jobs.values():
+                # prepare job parameters
+                params: Optional[dict] = job_results.get(job.id)
+                results: Optional[dict] = None
+
+                # run job
+                if job.job_type == NotificationServer.Job.job_file_upload:
+                    results = run_file_upload_job(job, params)
+                elif job.job_type == NotificationServer.Job.job_notification:
+                    results = run_notification_job(job, params)
+                else:
+                    job.error = NotImplementedError(f"Invalid job type: {job.job_type}")
                     job.is_done = True
 
-                # remove completed and stalled jobs
-                for job in pending_jobs[:]:  # use shallow copy
-                    if job.is_done:
-                        if os.path.exists(job.payload):
-                            os.remove(job.payload)
-                        if job.error:
-                            response_queue.put(job.error)
-                        pending_jobs.remove(job)
+                # handle job timeouts
+                if not job.is_done and time.time() - job.timestamp > pending_timeout_s:
+                    job.error = TimeoutError(
+                        f"Job {job.job_type} '{job.payload}' is not completed in {pending_timeout_s} sec"
+                    )
+                    job.is_done = True
 
-        # start processing notifications and file uploads in separate threads
-        threads = []
-        if notification_cfg:
-            threads.append(threading.Thread(target=process_notifications))
-        if storage_cfg:
-            threads.append(threading.Thread(target=process_file_uploads))
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
+                # handle errors
+                if job.error:
+                    response_queue.put(job.error)
+
+                # save results for dependent job
+                if results and job.dependent:
+                    job_results[job.dependent] = results
+
+                # remove results of completed job
+                if job.is_done:
+                    job_results.pop(job.id, None)
+
+            # cleanup completed jobs
+            pending_jobs = {k: v for k, v in pending_jobs.items() if not v.is_done}
 
     def terminate(self):
         """Send the poison pill to stop the child process"""
         if self._process is not None:
-            self._message_queue.put(None)
-            self._file_queue.put(None)
+            self._job_queue.put(None)
             self._process.join()
             self._process = None
             self._process_response_queue()
@@ -319,14 +396,12 @@ class EventNotifier(ResultAnalyzerBase):
                 For example: "Objects detected: {result.results}"
             notification_config: optional configuration of cloud notification service:
                 it can be path to the configuration file for notification service
-                or single notification service URL
+                or single notification service URL (see [https://github.com/caronc/apprise])
             notification_tags: optional tags to use for cloud notifications
                 Tags can be separated by "and" (or commas) and "or" (or spaces).
                 For example:
                 "Tag1, Tag2" (equivalent to "Tag1 and Tag2"
                 "Tag1 Tag2" (equivalent to "Tag1 or Tag2")
-            apprise_config_path: The config file (either in yaml or txt) for the apprise library on github which is
-                used by us to send notifications. [https://github.com/caronc/apprise]
             show_overlay: if True, annotate image; if False, send through original image
             annotation_color: Color to use for annotations, None to use complement to result overlay color
             annotation_font_scale: font scale to use for annotations or None to use model default
@@ -451,26 +526,32 @@ class EventNotifier(ResultAnalyzerBase):
             ):
                 fired = True
 
-        # save video clip if required
-        clip_url = ""
-        if self._clip_save:
-            clip_filenames = self._clip_saver.forward(
-                result, [self._name] if fired else []
-            )
-            if clip_filenames:
-                if self.notification_server is not None:
-                    self.notification_server.send_file_upload_req(clip_filenames)
-                    clip_url = self._storage_cfg.construct_direct_url(
-                        os.path.basename(clip_filenames[0])
-                    )
-
+        # send notification if event is fired
+        notification_job_id: Optional[int] = None
         if fired:
-            message = self._message.format(result=result, clip_url=clip_url)
+            message = self._message.format_map(
+                NotificationServer.DefaultDict(result=result)
+            )
             result.notifications[self._name] = message
 
             # send notifications to cloud service
             if self.notification_server is not None:
-                self.notification_server.send_notification(message)
+                notification_job_id = self.notification_server.send_job(
+                    NotificationServer.Job.job_notification, message
+                )
+
+        # save video clip if required
+        if self._clip_save:
+            clip_filenames = self._clip_saver.forward(
+                result, [self._name] if fired else []
+            )
+            if self.notification_server is not None and clip_filenames:
+                for clip_filename in clip_filenames:
+                    self.notification_server.send_job(
+                        NotificationServer.Job.job_file_upload,
+                        clip_filename,
+                        notification_job_id if ".mp4" in clip_filename else None,
+                    )
 
         # update holdoff timestamp and frame number if condition is met
         if cond:

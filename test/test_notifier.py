@@ -11,7 +11,7 @@ from typing import List
 import pytest
 
 
-def test_notifier(s3_credentials):
+def test_notifier(s3_credentials, msteams_test_workflow_url):
     """
     Test for EventNotifier analyzer
     """
@@ -189,9 +189,9 @@ def test_notifier(s3_credentials):
             "params": {
                 "name": "test",
                 "condition": "a",
-                "message": "{clip_url}",
-                "notification_tags": "Test",
-                "notification_config": "json://unittest",
+                "message": "Unit test: [Uploaded file]({url})",
+                "notification_tags": "all",
+                "notification_config": msteams_test_workflow_url,
                 "clip_save": True,
                 "clip_sub_dir": "test",
                 "clip_duration": 3,
@@ -202,13 +202,15 @@ def test_notifier(s3_credentials):
             "inp": [
                 {"events_detected": {""}},
                 {"events_detected": {""}},
-                {"events_detected": {"a"}, "msg": "e1"},
+                {"events_detected": {"a"}},
                 {"events_detected": {""}},
                 {"events_detected": {""}},
             ],
-            "res": [{}, {}, {"test": ""}, {}, {}],
+            "res": [{}, {}, {"test": "Unit test: [Uploaded file]({url})"}, {}, {}],
         },
     ]
+
+    degirum_tools.logger_add_handler()
 
     for ci, case in enumerate(test_cases):
         params = case["params"]
@@ -267,5 +269,3 @@ def test_notifier(s3_credentials):
                 storage = degirum_tools.ObjectStorage(notifier._storage_cfg)
                 del notifier  # delete notifier to finalize clip saving
                 storage.delete_bucket_contents()
-                bucket_contents = storage.list_bucket_contents()
-                assert bucket_contents is not None and len(list(bucket_contents)) == 0

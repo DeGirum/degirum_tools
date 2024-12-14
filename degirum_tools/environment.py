@@ -20,6 +20,7 @@ var_VideoSource = "CAMERA_ID"
 var_AudioSource = "AUDIO_ID"
 var_S3AccessKey = "S3_ACCESS_KEY"
 var_S3SecretKey = "S3_SECRET_KEY"
+var_MSTeamsTestWorkflowURL = "MSTEAMS_TEST_WORKFLOW_URL"
 
 
 def reload_env(custom_file: str = "env.ini"):

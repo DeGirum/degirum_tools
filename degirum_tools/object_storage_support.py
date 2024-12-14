@@ -9,6 +9,7 @@
 
 
 import time
+from datetime import timedelta
 from .environment import import_optional_package
 from dataclasses import dataclass
 
@@ -23,6 +24,7 @@ class ObjectStorageConfig:
     access_key: str  # The access key for the cloud account
     secret_key: str  # The secret key for the cloud account
     bucket: str  # The name of the bucket to manage
+    url_expiration_s: int = 3600  # The expiration time for the presigned URL in seconds
 
     def construct_direct_url(self, object_name: str):
         """
@@ -148,14 +150,13 @@ class ObjectStorage:
                 f"Error occurred when deleting bucket '{self._config.bucket}': {e}"
             )
 
-    def generate_presigned_url(self, object_name: str, expiry_seconds=3600):
+    def generate_presigned_url(self, object_name: str):
         """
         Generate a presigned URL to download a file from cloud object storage bucket.
         File must exist in the bucket prior to this call.
 
         Args:
             object_name: The name of the object (path within the bucket)
-            expiry_seconds: The number of seconds the presigned URL is valid for
 
         Returns:
             The presigned URL to download the object
@@ -163,7 +164,9 @@ class ObjectStorage:
 
         try:
             return self._client.presigned_get_object(
-                self._config.bucket, object_name, expires=expiry_seconds
+                self._config.bucket,
+                object_name,
+                expires=timedelta(seconds=self._config.url_expiration_s),
             )
         except self._minio.S3Error as e:
             raise RuntimeError(

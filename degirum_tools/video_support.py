@@ -400,9 +400,11 @@ class ClipSaver:
             os.makedirs(self._dir_path)
 
         self._clip_buffer: deque = deque()
+        self._triggered_by: list = []
+        self._filenames: list = []
+
         self._end_counter = -1
         self._start_frame = 0
-        self._triggered_by: list = []
         self._frame_counter = 0
         self._thread_name = "dgtools_ClipSaverThread_" + str(uuid.uuid4())
 
@@ -424,40 +426,47 @@ class ClipSaver:
         if len(self._clip_buffer) > self._clip_duration:
             self._clip_buffer.popleft()
 
+        triggered = False
         if self._end_counter < 0:
             # if not in the middle of accumulating the clip from the previous trigger...
 
             # if triggered, set down-counting timer
             if triggers:
+                triggered = True
                 self._end_counter = self._clip_duration - self._pre_trigger_delay - 1
                 self._start_frame = self._frame_counter - self._pre_trigger_delay
                 self._triggered_by = triggers
+                filename = f"{self._file_prefix}{'' if self._file_prefix.endswith('/') else '_'}{self._start_frame:08d}"
+                self._filenames = [filename + ".mp4"]
+                if self._save_ai_result_json:
+                    self._filenames.append(filename + ".json")
         else:
             # otherwise, continue accumulating the clip: decrement the timer
             self._end_counter -= 1
 
-        filenames = []
         if self._end_counter == 0:
-            filenames = self._save_clip()
+            self._save_clip()
             self._end_counter = -1
             self._triggered_by.clear()
 
         self._frame_counter += 1
-        return filenames
 
-    def _save_clip(self) -> List[str]:
+        return self._filenames if triggered else []
+
+    def _save_clip(self):
         """
         Save video clip from the buffer
         """
 
         builtin_types = (int, float, str, bool, tuple, list, dict, set)
 
-        def save(context, filename):
-
+        def save(context):
             if context._clip_buffer:
                 w, h = image_size(context._clip_buffer[0].image)
 
-                tempfilename = str(Path(filename).parent / str(uuid.uuid4()))
+                tempfilename = str(
+                    Path(context._filenames[0]).parent / str(uuid.uuid4())
+                )
                 try:
                     with open_video_writer(
                         tempfilename + ".mp4", w, h, context._target_fps
@@ -510,28 +519,20 @@ class ClipSaver:
 
                 finally:
                     if os.path.exists(tempfilename + ".mp4"):
-                        os.rename(tempfilename + ".mp4", filename + ".mp4")
+                        os.rename(tempfilename + ".mp4", context._filenames[0])
                     if context._save_ai_result_json and os.path.exists(
                         tempfilename + ".json"
                     ):
-                        os.rename(tempfilename + ".json", filename + ".json")
+                        os.rename(tempfilename + ".json", context._filenames[1])
 
         # preserve a shallow copy of self to use in thread
         context = copy.copy(self)
         context._clip_buffer = deque(self._clip_buffer)
         context._triggered_by = list(self._triggered_by)
+        context._filenames = list(self._filenames)
 
         # save the clip in a separate thread
-
-        filename = f"{context._file_prefix}{'' if context._file_prefix.endswith('/') else '_'}{context._start_frame:08d}"
-        threading.Thread(
-            target=save, args=(context, filename), name=self._thread_name
-        ).start()
-
-        filenames = [filename + ".mp4"]
-        if context._save_ai_result_json:
-            filenames.append(filename + ".json")
-        return filenames
+        threading.Thread(target=save, args=(context,), name=self._thread_name).start()
 
     def join_all_saver_threads(self) -> int:
         """

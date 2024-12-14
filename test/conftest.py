@@ -87,3 +87,11 @@ def s3_credentials():
         secret_key=os.getenv(degirum_tools.environment.var_S3SecretKey),
         bucket="dg-degirum-tools-test-s3",
     )
+
+
+@pytest.fixture(scope="session")
+def msteams_test_workflow_url():
+    degirum_tools.environment.reload_env()
+    return os.getenv(
+        degirum_tools.environment.var_MSTeamsTestWorkflowURL, "json://unittest"
+    )
