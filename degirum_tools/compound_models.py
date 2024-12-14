@@ -546,7 +546,7 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
                     use_iou=self._nms_options.use_iou,
                     box_select=self._nms_options.box_select,
                 )
-            
+
             if isinstance(self._current_result.info, FrameInfo):
                 self._current_result._frame_info = self._current_result.info.original_info
 
