@@ -9,7 +9,7 @@
 
 
 import time, os, shutil
-from datetime import datetime, timedelta
+import datetime
 from dataclasses import dataclass
 from .environment import import_optional_package
 
@@ -98,7 +98,7 @@ class _LocalMinio:
         os.rmdir(bucket_path)
 
     def presigned_get_object(
-        self, bucket_name, object_name, expires=timedelta(hours=1)
+        self, bucket_name, object_name, expires=datetime.timedelta(hours=1)
     ):
         """Return the path to the original file as a simulated presigned URL"""
         object_path = os.path.join(self.base_dir, bucket_name, object_name)
@@ -140,7 +140,7 @@ class _LocalMinio:
         # Return a dictionary with size and last modification time
         return {
             "size": stat.st_size,
-            "last_modified": datetime.fromtimestamp(stat.st_mtime),
+            "last_modified": datetime.datetime.fromtimestamp(stat.st_mtime),
         }
 
 
@@ -272,7 +272,7 @@ class ObjectStorage:
             return self._client.presigned_get_object(
                 self._config.bucket,
                 object_name,
-                expires=timedelta(seconds=self._config.url_expiration_s),
+                expires=datetime.timedelta(seconds=self._config.url_expiration_s),
             )
         except Exception as e:
             raise RuntimeError(

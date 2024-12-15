@@ -9,8 +9,8 @@
 #
 
 
-import numpy as np, multiprocessing, threading, time, os, queue, tempfile, shutil
-from typing import Tuple, Union, Optional, Dict
+import numpy as np, multiprocessing, threading, time, os, queue, tempfile, shutil, datetime
+from typing import Tuple, List, Union, Optional, Dict
 from . import logger_get
 from .result_analyzer_base import ResultAnalyzerBase
 from .ui_support import put_text, color_complement, deduce_text_color, CornerPosition
@@ -19,7 +19,6 @@ from .event_detector import EventDetector
 from .environment import import_optional_package
 from .video_support import ClipSaver
 from .object_storage_support import ObjectStorageConfig, ObjectStorage
-import datetime
 
 
 class NotificationServer:
@@ -382,7 +381,9 @@ class EventNotifier(ResultAnalyzerBase):
         show_overlay: bool = True,
         annotation_color: Optional[tuple] = None,
         annotation_font_scale: Optional[float] = None,
-        annotation_pos: Union[AnchorPoint, tuple] = AnchorPoint.BOTTOM_LEFT,
+        annotation_pos: Union[
+            AnchorPoint, Tuple[int, int], List[int]
+        ] = AnchorPoint.BOTTOM_LEFT,
         annotation_cool_down: float = 3.0,
         clip_save: bool = False,
         clip_sub_dir: str = "",
@@ -431,7 +432,7 @@ class EventNotifier(ResultAnalyzerBase):
         self._prev_cond = False
         self._prev_frame = -1_000_000_000  # arbitrary big negative number
         self._prev_time = -1_000_000_000.0
-        self._last_notifications: dict = {}
+        self._last_notification = ""
         self._last_display_time = -1_000_000_000.0
 
         self._name = name
@@ -587,17 +588,17 @@ class EventNotifier(ResultAnalyzerBase):
         if not self._show_overlay:
             return image
 
+        # handle cool down time
         if hasattr(result, self.key_notifications) and result.notifications:
-            self._last_notifications = {
-                k: v for k, v in result.notifications.items() if self._name == k
-            }
-            self._last_display_time = time.time()
-        else:
-            if (
-                not self._last_notifications
-                or time.time() - self._last_display_time > self._annotation_cool_down
-            ):
-                return image
+            msg = result.notifications.get(self._name)
+            if msg:
+                self._last_notification = msg
+                self._last_display_time = time.time()
+        if (
+            not self._last_notification
+            or time.time() - self._last_display_time > self._annotation_cool_down
+        ):
+            return image
 
         bg_color = (
             color_complement(result.overlay_color)
@@ -611,11 +612,11 @@ class EventNotifier(ResultAnalyzerBase):
                 image.shape[1], image.shape[0], self._annotation_pos
             )
         else:
-            pos = self._annotation_pos
+            pos = tuple(self._annotation_pos)
 
         return put_text(
             image,
-            "\n".join(self._last_notifications.values()),
+            self._last_notification,
             pos,
             font_color=text_color,
             bg_color=bg_color,

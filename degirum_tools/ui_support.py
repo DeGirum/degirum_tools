@@ -516,7 +516,7 @@ class Display:
                     )
 
         def preprocess_img(img):
-            if "image_overlay" in vars(img):
+            if "image_overlay" in vars(type(img)):
                 # special case for model results: use image_overlay property
                 img = img.image_overlay
             if isinstance(img, PIL.Image.Image):
