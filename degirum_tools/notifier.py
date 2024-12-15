@@ -19,12 +19,16 @@ from .event_detector import EventDetector
 from .environment import import_optional_package
 from .video_support import ClipSaver
 from .object_storage_support import ObjectStorageConfig, ObjectStorage
+import datetime
 
 
 class NotificationServer:
     """
     Notification server class to asynchronously send notifications via apprise
     """
+
+    # special notification configuration for console output
+    notification_config_console = "console://"
 
     class DefaultDict(dict):
         def __missing__(self, key):
@@ -259,12 +263,19 @@ class NotificationServer:
                 if need_params:
                     message = message.format_map(NotificationServer.DefaultDict(params))
 
-                if not notifier.notify(
-                    body=message, title=notification_title, tag=notification_tags
+                if notification_cfg.startswith(
+                    NotificationServer.notification_config_console
                 ):
-                    raise Exception(
-                        f"Notification failed: {notification_title} - {message}"
+                    print(
+                        f"{datetime.datetime.now()}: {notification_title} - {message}"
                     )
+                else:
+                    if not notifier.notify(
+                        body=message, title=notification_title, tag=notification_tags
+                    ):
+                        raise Exception(
+                            f"Notification failed: {notification_title} - {message}"
+                        )
             except Exception as e:
                 job.error = e
 
@@ -357,7 +368,7 @@ class EventNotifier(ResultAnalyzerBase):
     notifications and values are notification messages.
     """
 
-    key_notifications = "notifications"
+    key_notifications = "notifications"  # extra result key
 
     def __init__(
         self,
