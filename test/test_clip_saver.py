@@ -175,7 +175,7 @@ class FakeResult:
         self.color = 255 - index
         dim = (case.h, case.w, 3)
         self.image = np.full(dim, (self.color, 0, 0), dtype=np.uint8)
-        self.overlay_image = np.full(dim, (0, 0, self.color), dtype=np.uint8)
+        self.image_overlay = np.full(dim, (0, 0, self.color), dtype=np.uint8)
         self.events_detected: Set[str] = set()
         self.notifications: Set[str] = set()
 

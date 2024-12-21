@@ -16,7 +16,7 @@ from pathlib import Path
 from . import environment as env
 from .ui_support import Progress
 from .image_tools import ImageType, image_size, resize_image, to_opencv
-from typing import Union, Generator, Optional, Callable, Any, List, Dict
+from typing import Union, Generator, Optional, Callable, Any, List, Dict, Tuple
 
 
 @contextmanager
@@ -408,7 +408,7 @@ class ClipSaver:
         self._frame_counter = 0
         self._thread_name = "dgtools_ClipSaverThread_" + str(uuid.uuid4())
 
-    def forward(self, result, triggers: List[str] = []) -> List[str]:
+    def forward(self, result, triggers: List[str] = []) -> Tuple[List[str], bool]:
         """
         Buffer given result in internal circular buffer.
         Initiate saving video clip if triggers list if not empty.
@@ -418,7 +418,9 @@ class ClipSaver:
             triggers: list of event names or notifications which trigger video clip saving
 
         Returns:
-            all filenames of saved video clip if it was saved, [] otherwise
+            tuple of 2 elements:
+                - all filenames related to the video clip if event is triggered in this frame, empty list otherwise
+                - True if new files are created, False if files are reused from the previous event
         """
 
         # add result to the clip buffer
@@ -426,13 +428,12 @@ class ClipSaver:
         if len(self._clip_buffer) > self._clip_duration:
             self._clip_buffer.popleft()
 
-        triggered = False
-        if self._end_counter < 0:
-            # if not in the middle of accumulating the clip from the previous trigger...
+        triggered = True if triggers else False
+        new_files = False
 
-            # if triggered, set down-counting timer
-            if triggers:
-                triggered = True
+        if self._end_counter < 0:
+            # if triggered, set down-counting timer and generate filenames
+            if triggered:
                 self._end_counter = self._clip_duration - self._pre_trigger_delay - 1
                 self._start_frame = self._frame_counter - self._pre_trigger_delay
                 self._triggered_by = triggers
@@ -440,8 +441,9 @@ class ClipSaver:
                 self._filenames = [filename + ".mp4"]
                 if self._save_ai_result_json:
                     self._filenames.append(filename + ".json")
+                new_files = True
         else:
-            # otherwise, continue accumulating the clip: decrement the timer
+            # continue accumulating the clip: decrement the timer
             self._end_counter -= 1
 
         if self._end_counter == 0:
@@ -451,7 +453,7 @@ class ClipSaver:
 
         self._frame_counter += 1
 
-        return self._filenames if triggered else []
+        return (self._filenames if triggered else [], new_files)
 
     def _save_clip(self):
         """
@@ -486,7 +488,7 @@ class ClipSaver:
 
                         for result in context._clip_buffer:
                             if context._embed_ai_annotations:
-                                writer.write(result.overlay_image)
+                                writer.write(result.image_overlay)
                             else:
                                 writer.write(result.image)
 
@@ -505,8 +507,16 @@ class ClipSaver:
                             def custom_serializer(obj):
                                 if isinstance(obj, set):
                                     return list(obj)
+                                if isinstance(obj, np.ndarray):
+                                    return obj.tolist()
+                                if isinstance(obj, np.integer):
+                                    return int(obj)
+                                if isinstance(obj, np.floating):
+                                    return float(obj)
+                                if hasattr(obj, "to_dict"):
+                                    return obj.to_dict()
                                 raise TypeError(
-                                    f"Object of type {obj.__class__.__name__} is not JSON serializable"
+                                    f"Object of type {obj.__class__.__name__} is not JSON serializable: implement to_dict() method"
                                 )
 
                             with open(tempfilename + ".json", "w") as f:
@@ -538,6 +548,11 @@ class ClipSaver:
         """
         Join all threads started by this instance
         """
+
+        # save unfinished clip if any
+        if self._end_counter > 0:
+            self._save_clip()
+
         nthreads = 0
         for thread in threading.enumerate():
             if thread.name == self._thread_name:

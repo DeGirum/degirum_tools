@@ -56,6 +56,14 @@ class ResultAnalyzerBase(ABC):
         self.analyze(result)
         return self.annotate(result, image)
 
+    def finalize(self):
+        """
+        Perform finalization/cleanup actions
+        """
+
+    def __del__(self):
+        self.finalize()
+
 
 def image_overlay_substitute(result, analyzers: List[ResultAnalyzerBase]):
     """Substitutes the `image_overlay` property of the given `result` object with a new one

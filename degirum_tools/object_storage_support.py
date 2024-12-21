@@ -101,12 +101,7 @@ class _LocalMinio:
         self, bucket_name, object_name, expires=datetime.timedelta(hours=1)
     ):
         """Return the path to the original file as a simulated presigned URL"""
-        object_path = os.path.join(self.base_dir, bucket_name, object_name)
-        if not os.path.isfile(object_path):
-            raise FileNotFoundError(
-                f"Object '{object_name}' does not exist in bucket '{bucket_name}'."
-            )
-        return object_path
+        return os.path.join(self.base_dir, bucket_name, object_name)
 
     def fput_object(self, bucket_name, object_name, file_path):
         """Upload a file to the specified bucket and object path"""

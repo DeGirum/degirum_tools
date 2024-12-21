@@ -916,6 +916,9 @@ class AiAnalyzerGizmo(Gizmo):
             if filter_ok:
                 self.send_result(StreamData(data.data, new_meta))
 
+        for analyzer in self._analyzers:
+            analyzer.finalize()
+
 
 class SinkGizmo(Gizmo):
     """Gizmo to receive results and accumulate them in the queue. This queue can be used as a

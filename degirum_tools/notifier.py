@@ -9,7 +9,7 @@
 #
 
 
-import numpy as np, multiprocessing, threading, time, os, queue, tempfile, shutil, datetime
+import numpy as np, sys, multiprocessing, threading, time, os, queue, tempfile, shutil, datetime
 from typing import Tuple, List, Union, Optional, Dict
 from . import logger_get
 from .result_analyzer_base import ResultAnalyzerBase
@@ -21,13 +21,14 @@ from .video_support import ClipSaver
 from .object_storage_support import ObjectStorageConfig, ObjectStorage
 
 
+# special notification configuration for console output
+notification_config_console = "json://console"
+
+
 class NotificationServer:
     """
     Notification server class to asynchronously send notifications via apprise
     """
-
-    # special notification configuration for console output
-    notification_config_console = "console://"
 
     class DefaultDict(dict):
         def __missing__(self, key):
@@ -43,6 +44,7 @@ class NotificationServer:
 
         # job types
         job_file_upload = "upload file"
+        job_file_reference = "reference file"
         job_notification = "send notification"
 
         @staticmethod
@@ -66,7 +68,7 @@ class NotificationServer:
 
             self.id = NotificationServer.Job.new_id()  # job ID
             self.job_type = job_type  # job type
-            self.dependent = dependent  # job ID dependent job
+            self.dependent = dependent  # job ID of dependent job
             self.payload = payload  # job payload (it is job-dependent)
             self.timestamp: float = time.time()  # timestamp of the job
             self.is_done: bool = False
@@ -210,7 +212,7 @@ class NotificationServer:
         #
         # Run file upload job
         #
-        def run_file_upload_job(job, params):
+        def run_file_upload_job(job, do_upload):
             if storage is None:
                 job.is_done = True
                 return
@@ -220,16 +222,18 @@ class NotificationServer:
             filename_with_parent_dir = parent_dir + "/" + os.path.basename(file_name)
             url: Optional[str] = None
 
-            if not os.path.exists(file_name):
+            if do_upload and not os.path.exists(file_name):
                 job.is_done = False  # no local file to upload yet: job is not done
                 return None
 
             try:
-                storage.upload_file_to_object_storage(
-                    file_name, filename_with_parent_dir
-                )
-                os.remove(file_name)  # remove local file after upload
+                if do_upload:
+                    storage.upload_file_to_object_storage(
+                        file_name, filename_with_parent_dir
+                    )
+                    os.remove(file_name)  # remove local file after upload
                 url = storage.generate_presigned_url(filename_with_parent_dir)
+
             except Exception as e:
                 job.error = e
 
@@ -262,12 +266,11 @@ class NotificationServer:
                 if need_params:
                     message = message.format_map(NotificationServer.DefaultDict(params))
 
-                if notification_cfg.startswith(
-                    NotificationServer.notification_config_console
-                ):
+                if notification_config_console in notification_cfg:
                     print(
                         f"{datetime.datetime.now()}: {notification_title} - {message}"
                     )
+                    sys.stdout.flush()
                 else:
                     if not notifier.notify(
                         body=message, title=notification_title, tag=notification_tags
@@ -315,7 +318,9 @@ class NotificationServer:
 
                 # run job
                 if job.job_type == NotificationServer.Job.job_file_upload:
-                    results = run_file_upload_job(job, params)
+                    results = run_file_upload_job(job, True)
+                elif job.job_type == NotificationServer.Job.job_file_reference:
+                    results = run_file_upload_job(job, False)
                 elif job.job_type == NotificationServer.Job.job_notification:
                     results = run_notification_job(job, params)
                 else:
@@ -554,16 +559,28 @@ class EventNotifier(ResultAnalyzerBase):
 
         # save video clip if required
         if self._clip_save:
-            clip_filenames = self._clip_saver.forward(
+            clip_filenames, new_files = self._clip_saver.forward(
                 result, [self._name] if fired else []
             )
-            if self.notification_server is not None and clip_filenames:
-                for clip_filename in clip_filenames:
-                    self.notification_server.send_job(
-                        NotificationServer.Job.job_file_upload,
-                        clip_filename,
-                        notification_job_id if ".mp4" in clip_filename else None,
-                    )
+            if clip_filenames:
+                if self.notification_server is not None:
+                    for clip_filename in clip_filenames:
+
+                        job_type = (
+                            NotificationServer.Job.job_file_upload
+                            if new_files
+                            else NotificationServer.Job.job_file_reference
+                        )
+                        dependent_job = (
+                            notification_job_id if ".mp4" in clip_filename else None
+                        )
+
+                        if new_files or dependent_job is not None:
+                            self.notification_server.send_job(
+                                job_type,
+                                clip_filename,
+                                dependent_job,
+                            )
 
         # update holdoff timestamp and frame number if condition is met
         if cond:
@@ -628,11 +645,14 @@ class EventNotifier(ResultAnalyzerBase):
             corner_position=CornerPosition.AUTO,
         )
 
-    def __del__(self):
+    def finalize(self):
+        """
+        Perform finalization/cleanup actions
+        """
         if self._clip_save:
             self._clip_saver.join_all_saver_threads()
 
-        if self.notification_server:
+        if self.notification_server is not None:
             self.notification_server.terminate()
 
         if self._clip_save and os.path.exists(self._clip_path):
