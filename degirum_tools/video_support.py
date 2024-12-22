@@ -551,6 +551,8 @@ class ClipSaver:
 
         # save unfinished clip if any
         if self._end_counter > 0:
+            for _ in range(self._end_counter):
+                self._clip_buffer.popleft()
             self._save_clip()
 
         nthreads = 0

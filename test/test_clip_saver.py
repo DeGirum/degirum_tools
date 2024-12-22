@@ -158,7 +158,7 @@ test_cases: List[_TestCase] = [
         name="trigger on late event",
         frames=10,
         triggers=[2, 8],
-        expected_triggers=[2],
+        expected_triggers=[2, 8],
         events=["event1"],
         notifications=[],
         args=dict(
@@ -214,6 +214,8 @@ def verify_results(case, clip_saver, triggers, results):
         clip_len = clip_saver._saver._clip_duration
         if start < 0:
             clip_len += start
+        if start + clip_len > case.frames:
+            clip_len = case.frames - start
 
         clip_path = os.path.join(
             dir_path, f"{clip_saver._saver._file_prefix}_{start:08d}.mp4"
