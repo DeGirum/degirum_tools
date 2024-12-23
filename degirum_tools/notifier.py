@@ -29,6 +29,7 @@ notification_config_console = "json://console"
 class NotificationServer:
     """
     Notification server class to asynchronously send notifications via apprise
+    and upload files to the object storage.
     """
 
     class DefaultDict(dict):
@@ -371,6 +372,11 @@ class EventNotifier(ResultAnalyzerBase):
 
     Adds `notifications` dictionary to the `result` object, where keys are names of generated
     notifications and values are notification messages.
+
+    It sends notifications to the notification service specified in `notification_config`.
+
+    If `clip_save` is set to True, it saves video clips when notification is triggered.
+    Saved clips are uploaded to the object storage if `storage_config` is provided.
     """
 
     key_notifications = "notifications"  # extra result key
@@ -552,7 +558,7 @@ class EventNotifier(ResultAnalyzerBase):
         notification_job_id: Optional[int] = None
         if fired:
             message = self._message.format_map(
-                NotificationServer.DefaultDict(result=result)
+                NotificationServer.DefaultDict(result=result, time=time.asctime())
             )
             result.notifications[self._name] = message
 
