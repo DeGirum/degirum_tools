@@ -11,6 +11,7 @@
 
 import numpy as np, sys, multiprocessing, threading, time, os, queue, tempfile, shutil, datetime
 from typing import Tuple, List, Union, Optional, Dict
+from contextvars import ContextVar
 from . import logger_get
 from .result_analyzer_base import ResultAnalyzerBase
 from .ui_support import put_text, color_complement, deduce_text_color, CornerPosition
@@ -437,8 +438,12 @@ class EventNotifier(ResultAnalyzerBase):
         self._prev_cond = False
         self._prev_frame = -1_000_000_000  # arbitrary big negative number
         self._prev_time = -1_000_000_000.0
-        self._last_notification = ""
-        self._last_display_time = -1_000_000_000.0
+        self._last_notification = ContextVar(
+            f"last_notification_{id(self)}", default=""
+        )
+        self._last_display_time = ContextVar(
+            f"last_display_time_{id(self)}", default=-1_000_000_000.0
+        )
 
         self._name = name
         self._message = message if message else f"Notification triggered: {name}"
@@ -609,11 +614,14 @@ class EventNotifier(ResultAnalyzerBase):
         if hasattr(result, self.key_notifications) and result.notifications:
             msg = result.notifications.get(self._name)
             if msg:
-                self._last_notification = msg
-                self._last_display_time = time.time()
+                self._last_notification.set(msg)
+                self._last_display_time.set(time.time())
+
+        last_notification = self._last_notification.get()
+        last_display_time = self._last_display_time.get()
         if (
-            not self._last_notification
-            or time.time() - self._last_display_time > self._annotation_cool_down
+            not last_notification
+            or time.time() - last_display_time > self._annotation_cool_down
         ):
             return image
 
@@ -633,7 +641,7 @@ class EventNotifier(ResultAnalyzerBase):
 
         return put_text(
             image,
-            self._last_notification,
+            last_notification,
             pos,
             font_color=text_color,
             bg_color=bg_color,
