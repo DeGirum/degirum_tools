@@ -50,17 +50,42 @@ def crop_image(img: ImageType, bbox: list):
         return img[int(bbox[1]) : int(bbox[3]), int(bbox[0]) : int(bbox[2])]
 
 
-def resize_image(img: ImageType, w: int, h: int):
-    """Resize and return PIL/OpenCV image to given size
+def resize_image(
+    img: ImageType,
+    w: int,
+    h: int,
+    *,
+    pad_method: str = "letterbox",
+    resize_method: str = "bilinear",
+):
+    """Resize and return PIL/OpenCV image to given size using PySDK preprocessor
 
     Args:
         img: image
         w, h: new width and height
+        pad_method: padding method - one of "stretch", "letterbox", "crop-first", "crop-last"
+        resize_method: resampling method - one of "nearest", "bilinear", "area", "bicubic", "lanczos"
+
     """
-    if isinstance(img, PILImage):
-        return img.resize((w, h))
-    else:
-        return cv2.resize(img, (w, h))
+    import degirum as dg
+
+    is_opencv = isinstance(img, np.ndarray)
+    mparams = dg.aiclient.ModelParams()
+    mparams.InputRawDataType = ["DG_UINT8"]
+    mparams.InputImgFmt = ["RAW"]
+    mparams.InputW = [w]
+    mparams.InputH = [h]
+    mparams.InputColorSpace = ["BGR" if is_opencv else "RGB"]
+
+    pp = dg._preprocessor.create_image_preprocessor(
+        model_params=mparams,
+        resize_method=resize_method,
+        pad_method=pad_method,
+        image_backend="opencv" if is_opencv else "pil",
+    )
+    pp.generate_image_result = True
+
+    return pp.forward(img)["image_result"]
 
 
 def paste_image(img: ImageType, crop: ImageType, bbox: list):

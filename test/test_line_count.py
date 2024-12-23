@@ -611,7 +611,7 @@ def test_line_counter():
         },
     ]
 
-    for ci, case in enumerate(test_cases):
+    for case in test_cases:
         line_counter = degirum_tools.LineCounter(**case["params"])
 
         for i, input in enumerate(case["inp"]):
