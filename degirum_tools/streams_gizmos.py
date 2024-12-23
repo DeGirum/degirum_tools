@@ -19,16 +19,19 @@ from .ui_support import Display
 from .image_tools import crop_image, resize_image, image_size, to_opencv
 from .result_analyzer_base import image_overlay_substitute
 from .crop_extent import CropExtentOptions, extend_bbox
+from .notifier import EventNotifier
+from .event_detector import EventDetector
+from .environment import get_token
 
 #
 # predefined meta tags
 #
-tag_video = "video"  # tag for video source data
-tag_resize = "resize"  # tag for resizer result
-tag_inference = "inference"  # tag for inference result
-tag_preprocess = "preprocess"  # tag for preprocessor result
-tag_crop = "crop"  # tag for cropping result
-tag_analyzer = "analyzer"  # tag for analyzer result
+tag_video = "dgt_video"  # tag for video source data
+tag_resize = "dgt_resize"  # tag for resizer result
+tag_inference = "dgt_inference"  # tag for inference result
+tag_preprocess = "dgt_preprocess"  # tag for preprocessor result
+tag_crop = "dgt_crop"  # tag for cropping result
+tag_analyzer = "dgt_analyzer"  # tag for analyzer result
 
 
 def clone_result(result):
@@ -215,8 +218,6 @@ class VideoSaverGizmo(Gizmo):
     def run(self):
         """Run gizmo"""
 
-        h = w = 0
-
         def get_img(data: StreamData) -> np.ndarray:
             frame = data.data
             if self._show_ai_overlay:
@@ -224,9 +225,6 @@ class VideoSaverGizmo(Gizmo):
                 if inference_meta:
                     frame = inference_meta.image_overlay
 
-            w1, h1 = image_size(frame)
-            if w != 0 and h != 0 and (w1 != w or h1 != h):
-                frame = resize_image(frame, w, h)
             return to_opencv(frame)
 
         img = get_img(self.get_input(0).get())
@@ -277,23 +275,13 @@ class ResizingGizmo(Gizmo):
         return [self.name, tag_resize]
 
     def _resize(self, image):
-        is_opencv = isinstance(image, np.ndarray)
-        mparams = dg.aiclient.ModelParams()
-        mparams.InputRawDataType = ["DG_UINT8"]
-        mparams.InputImgFmt = ["RAW"]
-        mparams.InputW = [self._w]
-        mparams.InputH = [self._h]
-        mparams.InputColorSpace = ["BGR" if is_opencv else "RGB"]
-
-        pp = dg._preprocessor.create_image_preprocessor(
-            model_params=mparams,
+        return resize_image(
+            image,
+            self._w,
+            self._h,
             resize_method=self._resize_method,
             pad_method=self._pad_method,
-            image_backend="opencv" if is_opencv else "pil",
         )
-        pp.generate_image_result = True
-
-        return pp.forward(image)["image_result"]
 
     def run(self):
         """Run gizmo"""
@@ -336,7 +324,10 @@ class AiGizmoBase(Gizmo):
         super().__init__([(stream_depth, allow_drop)] * inp_cnt)
 
         if isinstance(model, str):
-            self.model = dg.load_model(model, **kwargs)
+            if "token" not in kwargs:
+                self.model = dg.load_model(model, token=get_token(""), **kwargs)
+            else:
+                self.model = dg.load_model(model, **kwargs)
         else:
             self.model = model
 
@@ -910,18 +901,23 @@ class AiAnalyzerGizmo(Gizmo):
                 image_overlay_substitute(inference_clone, self._analyzers)
                 new_meta.append(inference_clone, self.get_tags())
 
+                # check filters
                 if self._filters:
-                    if not (
-                        hasattr(inference_clone, "notifications")
-                        and (self._filters & inference_clone.notifications)
-                    ) and not (
-                        hasattr(inference_clone, "events_detected")
-                        and (self._filters & inference_clone.events_detected)
-                    ):
-                        filter_ok = False
+                    notifications = getattr(
+                        inference_clone, EventNotifier.key_notifications, None
+                    )
+                    if notifications is None or not self._filters & notifications:
+                        events = getattr(
+                            inference_clone, EventDetector.key_events_detected, None
+                        )
+                        if events is None or not self._filters & events:
+                            filter_ok = False
 
             if filter_ok:
                 self.send_result(StreamData(data.data, new_meta))
+
+        for analyzer in self._analyzers:
+            analyzer.finalize()
 
 
 class SinkGizmo(Gizmo):

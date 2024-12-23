@@ -18,6 +18,9 @@ var_AiServer = "AISERVER_HOSTNAME_OR_IP"
 var_CloudZoo = "CLOUD_ZOO_URL"
 var_VideoSource = "CAMERA_ID"
 var_AudioSource = "AUDIO_ID"
+var_S3AccessKey = "S3_ACCESS_KEY"
+var_S3SecretKey = "S3_SECRET_KEY"
+var_MSTeamsTestWorkflowURL = "MSTEAMS_TEST_WORKFLOW_URL"
 
 
 def reload_env(custom_file: str = "env.ini"):
@@ -58,14 +61,14 @@ def get_test_mode() -> bool:
     return bool(os.getenv(var_TestMode))
 
 
-def get_token() -> str:
+def get_token(default: Optional[str] = None) -> str:
     """Returns a token from .env file"""
     if in_colab():
         from google.colab import userdata
 
         return userdata.get("DEGIRUM_CLOUD_TOKEN")
     reload_env()  # reload environment variables from file
-    return get_var(var_Token)
+    return get_var(var_Token, default)
 
 
 def get_ai_server_hostname() -> str:
@@ -97,7 +100,9 @@ def in_colab() -> bool:
     return "google.colab" in sys.modules
 
 
-def import_optional_package(pkg_name: str, is_long: bool = False) -> types.ModuleType:
+def import_optional_package(
+    pkg_name: str, is_long: bool = False, custom_message: Optional[str] = None
+) -> types.ModuleType:
     """Import package with given name.
     Returns the package object.
     Raises error message if the package is not installed"""
@@ -110,9 +115,12 @@ def import_optional_package(pkg_name: str, is_long: bool = False) -> types.Modul
             print(f"...done; '{pkg_name}' version: {ret.__version__}")
         return ret
     except ModuleNotFoundError as e:
-        raise Exception(
-            f"\n*** Error loading '{pkg_name}' package: {e}. Not installed?\n"
-        )
+        if custom_message:
+            raise Exception(custom_message)
+        else:
+            raise Exception(
+                f"\n*** Error loading '{pkg_name}' package: {e}. Not installed?\n"
+            )
 
 
 def configure_colab(

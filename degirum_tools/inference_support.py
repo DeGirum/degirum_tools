@@ -96,7 +96,7 @@ def _create_analyzing_postprocessor_class(
 
             # apply all analyzers to analyze result
             for analyzer in AnalyzingPostprocessor._analyzers:
-                analyzer.analyze(self._result)
+                analyzer.analyze(self)
 
         @property
         def image_overlay(self):
@@ -160,9 +160,6 @@ def attach_analyzers(
         model: Model object to attach analyzers to
         analyzers: List of analyzer objects to attach to model,
             or `None` to detach all analyzers if any were attached before
-
-    Returns:
-        Model object with attached analyzers
     """
 
     if isinstance(model, CompoundModelBase):
@@ -184,14 +181,15 @@ def attach_analyzers(
                 and model._custom_postprocessor.__name__
                 == analyzing_postprocessor.__name__
             ):
+                for analyzer in model._custom_postprocessor._analyzers:
+                    analyzer.finalize()
+                model._custom_postprocessor._analyzers = None
                 if model._custom_postprocessor._was_custom:
                     model._custom_postprocessor = (
                         model._custom_postprocessor._postprocessor_type
                     )
                 else:
                     model._custom_postprocessor = None
-
-    return model
 
 
 def predict_stream(

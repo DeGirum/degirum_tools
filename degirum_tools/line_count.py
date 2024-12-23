@@ -49,6 +49,14 @@ class SingleLineCounts:
         self.bottom += other.bottom
         return self
 
+    def to_dict(self):
+        return {
+            "left": self.left,
+            "right": self.right,
+            "top": self.top,
+            "bottom": self.bottom,
+        }
+
 
 class LineCounts(SingleLineCounts):
     """Class to hold total line crossing counts and counts for multiple classes"""
@@ -56,6 +64,15 @@ class LineCounts(SingleLineCounts):
     def __init__(self):
         super().__init__()
         self.for_class: Dict[str, SingleLineCounts] = {}
+
+    def to_dict(self):
+        return {
+            **super().to_dict(),
+            "for_class": {
+                class_name: class_count.to_dict()
+                for class_name, class_count in self.for_class.items()
+            },
+        }
 
 
 class SingleVectorCounts:
@@ -83,6 +100,12 @@ class SingleVectorCounts:
         self.left += other.left
         return self
 
+    def to_dict(self):
+        return {
+            "right": self.right,
+            "left": self.left,
+        }
+
 
 class VectorCounts(SingleVectorCounts):
     """Class to hold total vector crossing counts and counts for multiple classes"""
@@ -90,6 +113,15 @@ class VectorCounts(SingleVectorCounts):
     def __init__(self):
         super().__init__()
         self.for_class: Dict[str, SingleVectorCounts] = {}
+
+    def to_dict(self):
+        return {
+            **super().to_dict(),
+            "for_class": {
+                class_name: class_count.to_dict()
+                for class_name, class_count in self.for_class.items()
+            },
+        }
 
 
 class LineCounter(ResultAnalyzerBase):

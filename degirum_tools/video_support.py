@@ -7,14 +7,16 @@
 # Implements classes and functions to handle video streams for capturing and saving
 #
 
-import time
-import cv2, urllib, numpy as np
+import time, os, threading, cv2, urllib, copy, json, uuid
+import numpy as np
+from collections import deque
 from contextlib import contextmanager
 from functools import cmp_to_key
 from pathlib import Path
 from . import environment as env
 from .ui_support import Progress
-from typing import Union, Generator, Optional, Callable, Any
+from .image_tools import ImageType, image_size, resize_image, to_opencv
+from typing import Union, Generator, Optional, Callable, Any, List, Dict, Tuple
 
 
 @contextmanager
@@ -95,8 +97,6 @@ def open_video_stream(
     stream = cv2.VideoCapture(video_source)  # type: ignore[arg-type]
     if not stream.isOpened():
         raise Exception(f"Error opening '{video_source}' video stream")
-    else:
-        print(f"Successfully opened video stream '{video_source}'")
 
     try:
         yield stream
@@ -217,17 +217,18 @@ class VideoWriter:
         self._use_ffmpeg = platform.system() != "Windows"
         self._fps = fps
         self._fname = fname
+        self._wh: tuple = (w, h)
         if w > 0 and h > 0:
-            self._writer = self._create_writer(w, h)
+            self._writer = self._create_writer()
 
-    def _create_writer(self, w: int, h: int) -> Any:
+    def _create_writer(self) -> Any:
         if self._use_ffmpeg:
             import ffmpegcv
 
             # use ffmpeg-wrapped VideoWriter on other platforms;
             # reason: OpenCV VideoWriter does not support H264 on Linux
             return ffmpegcv.VideoWriter(
-                self._fname, codec=None, fps=self._fps, resize=(w, h)
+                self._fname, codec=None, fps=self._fps, resize=self._wh
             )
         else:
             # use OpenCV VideoWriter on Windows
@@ -235,19 +236,24 @@ class VideoWriter:
                 self._fname,
                 int.from_bytes("H264".encode(), byteorder="little"),
                 self._fps,
-                (w, h),
+                self._wh,
             )
 
-    def write(self, img: np.ndarray):
+    def write(self, img: ImageType):
         """
         Write image to video stream
         Args:
             img (np.ndarray): image to write
         """
+        im_sz = image_size(img)
         if self._writer is None:
-            self._writer = self._create_writer(img.shape[1], img.shape[0])
+            self._wh = im_sz
+            self._writer = self._create_writer()
         self._count += 1
-        self._writer.write(img)
+
+        if self._wh != im_sz:
+            img = resize_image(img, *self._wh)
+        self._writer.write(to_opencv(img))
 
     def release(self):
         """
@@ -257,23 +263,13 @@ class VideoWriter:
         if self._writer is None:
             return
 
-        process_to_wait = None
         if self._use_ffmpeg:
-            import psutil
-
-            # find ffmpeg process: it is a child process of the writer shell process
-            for p in psutil.process_iter([]):
-                if self._writer.process.pid == p.ppid():
-                    process_to_wait = p
-
-        self._writer.release()
-
-        # wait for ffmpeg process to finish
-        if process_to_wait is not None:
-            try:
-                process_to_wait.wait()
-            except Exception:
-                pass
+            # workaround for bug in ffmpegcv
+            self._writer.process.stdin.close()
+            self._writer.process.wait()
+            delattr(self._writer, "process")
+        else:
+            self._writer.release()
 
     def __enter__(self):
         pass
@@ -359,3 +355,209 @@ def video2jpegs(
             fi += 1
 
         return fi
+
+
+class ClipSaver:
+    """
+    Class to to save video clips triggered at particular frame
+    with a specified duration before and after the event.
+    """
+
+    def __init__(
+        self,
+        clip_duration: int,
+        file_prefix: str,
+        *,
+        pre_trigger_delay: int = 0,
+        embed_ai_annotations: bool = True,
+        save_ai_result_json: bool = True,
+        target_fps=30.0,
+    ):
+        """
+        Constructor
+
+        Args:
+            clip_duration: duration of the video clip to save (in frames)
+            file_prefix: path and file prefix for video clip files
+            pre_trigger_delay: delay before the event to start clip saving (in frames)
+            embed_ai_annotations: True to embed AI inference annotations into video clip, False to use original image
+            save_ai_result_json: True to save AI result JSON file along with video clip
+            target_fps: target frames per second for saved videos
+        """
+
+        if pre_trigger_delay >= clip_duration:
+            raise ValueError("`pre_trigger_delay` should be less than `clip_duration`")
+        self._clip_duration = clip_duration
+        self._pre_trigger_delay = pre_trigger_delay
+        self._embed_ai_annotations = embed_ai_annotations
+        self._save_ai_result_json = save_ai_result_json
+        self._file_prefix = file_prefix
+        self._target_fps = target_fps
+
+        # extract dir from file prefix and make it if it does not exist
+        self._dir_path = os.path.dirname(file_prefix)
+        if not os.path.exists(self._dir_path):
+            os.makedirs(self._dir_path)
+
+        self._clip_buffer: deque = deque()
+        self._triggered_by: list = []
+        self._filenames: list = []
+
+        self._end_counter = -1
+        self._start_frame = 0
+        self._frame_counter = 0
+        self._thread_name = "dgtools_ClipSaverThread_" + str(uuid.uuid4())
+
+    def forward(self, result, triggers: List[str] = []) -> Tuple[List[str], bool]:
+        """
+        Buffer given result in internal circular buffer.
+        Initiate saving video clip if triggers list if not empty.
+
+        Args:
+            result: PySDK model result object
+            triggers: list of event names or notifications which trigger video clip saving
+
+        Returns:
+            tuple of 2 elements:
+                - all filenames related to the video clip if event is triggered in this frame, empty list otherwise
+                - True if new files are created, False if files are reused from the previous event
+        """
+
+        # add result to the clip buffer
+        self._clip_buffer.append(result)
+        if len(self._clip_buffer) > self._clip_duration:
+            self._clip_buffer.popleft()
+
+        triggered = True if triggers else False
+        new_files = False
+
+        if self._end_counter < 0:
+            # if triggered, set down-counting timer and generate filenames
+            if triggered:
+                self._end_counter = self._clip_duration - self._pre_trigger_delay - 1
+                self._start_frame = self._frame_counter - self._pre_trigger_delay
+                self._triggered_by = triggers
+                filename = f"{self._file_prefix}{'' if self._file_prefix.endswith('/') else '_'}{self._start_frame:08d}"
+                self._filenames = [filename + ".mp4"]
+                if self._save_ai_result_json:
+                    self._filenames.append(filename + ".json")
+                new_files = True
+        else:
+            # continue accumulating the clip: decrement the timer
+            self._end_counter -= 1
+
+        if self._end_counter == 0:
+            self._save_clip()
+            self._end_counter = -1
+            self._triggered_by.clear()
+
+        self._frame_counter += 1
+
+        return (self._filenames if triggered else [], new_files)
+
+    def _save_clip(self):
+        """
+        Save video clip from the buffer
+        """
+
+        builtin_types = (int, float, str, bool, tuple, list, dict, set)
+
+        def save(context):
+            if context._clip_buffer:
+                w, h = image_size(context._clip_buffer[0].image)
+
+                tempfilename = str(
+                    Path(context._filenames[0]).parent / str(uuid.uuid4())
+                )
+                try:
+                    with open_video_writer(
+                        tempfilename + ".mp4", w, h, context._target_fps
+                    ) as writer:
+
+                        json_result: Dict[str, Any] = {}
+                        if context._save_ai_result_json:
+                            json_result["properties"] = dict(
+                                timestamp=time.ctime(),
+                                start_frame=context._start_frame,
+                                triggered_by=context._triggered_by,
+                                duration=len(context._clip_buffer),
+                                pre_trigger_delay=context._pre_trigger_delay,
+                                target_fps=context._target_fps,
+                            )
+                            json_result["results"] = []
+
+                        for result in context._clip_buffer:
+                            if context._embed_ai_annotations:
+                                writer.write(result.image_overlay)
+                            else:
+                                writer.write(result.image)
+
+                            if context._save_ai_result_json:
+                                json_result["results"].append(
+                                    {
+                                        k: v
+                                        for k, v in result.__dict__.items()
+                                        if not k.startswith("_")
+                                        and isinstance(v, builtin_types)
+                                    }
+                                )
+
+                        if context._save_ai_result_json:
+
+                            def custom_serializer(obj):
+                                if isinstance(obj, set):
+                                    return list(obj)
+                                if isinstance(obj, np.ndarray):
+                                    return obj.tolist()
+                                if isinstance(obj, np.integer):
+                                    return int(obj)
+                                if isinstance(obj, np.floating):
+                                    return float(obj)
+                                if hasattr(obj, "to_dict"):
+                                    return obj.to_dict()
+                                raise TypeError(
+                                    f"Object of type {obj.__class__.__name__} is not JSON serializable: implement to_dict() method"
+                                )
+
+                            with open(tempfilename + ".json", "w") as f:
+                                json.dump(
+                                    json_result,
+                                    f,
+                                    indent=2,
+                                    default=custom_serializer,
+                                )
+
+                finally:
+                    if os.path.exists(tempfilename + ".mp4"):
+                        os.rename(tempfilename + ".mp4", context._filenames[0])
+                    if context._save_ai_result_json and os.path.exists(
+                        tempfilename + ".json"
+                    ):
+                        os.rename(tempfilename + ".json", context._filenames[1])
+
+        # preserve a shallow copy of self to use in thread
+        context = copy.copy(self)
+        context._clip_buffer = deque(self._clip_buffer)
+        context._triggered_by = list(self._triggered_by)
+        context._filenames = list(self._filenames)
+
+        # save the clip in a separate thread
+        threading.Thread(target=save, args=(context,), name=self._thread_name).start()
+
+    def join_all_saver_threads(self) -> int:
+        """
+        Join all threads started by this instance
+        """
+
+        # save unfinished clip if any
+        if self._end_counter > 0:
+            for _ in range(self._end_counter):
+                self._clip_buffer.popleft()
+            self._save_clip()
+
+        nthreads = 0
+        for thread in threading.enumerate():
+            if thread.name == self._thread_name:
+                thread.join()
+                nthreads += 1
+        return nthreads

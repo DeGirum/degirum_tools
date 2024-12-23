@@ -11,6 +11,7 @@ jobs:
   lint:
     name: Linters/Type Checkers
     strategy:
+      fail-fast: false
       matrix:
         python: [3.8, 3.12]
     runs-on: ubuntu-latest
@@ -31,6 +32,7 @@ jobs:
   test:
     name: Unit Tests
     strategy:
+      fail-fast: false
       matrix:
         python: [3.8, 3.12]
     runs-on: ubuntu-latest
@@ -44,11 +46,15 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Install
         run: |
-          pip install -e '.[testing]'
+          pip install -e '.[testing,notifications]'
           sudo apt update
           sudo apt install ffmpeg
       - name: Run pytest (with coverage)
-        run: python3 -m coverage run -m pytest test/
+        run: python3 -m coverage run -m pytest -s -v test/
+        env:
+          S3_ACCESS_KEY: ${{ secrets.AWS_S3_ACCESS_KEY }}
+          S3_SECRET_KEY: ${{ secrets.AWS_S3_SECRET_KEY }}
+
       - name: Display coverage report
         run: python3 -m coverage report --omit=config*
 
