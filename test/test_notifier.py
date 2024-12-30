@@ -11,18 +11,13 @@ from typing import List
 import pytest
 
 
-def test_notifier():
+def test_notifier(s3_credentials, msteams_test_workflow_url):
     """
     Test for EventNotifier analyzer
     """
 
-    import degirum_tools
-
-    # helper class to convert dictionary to object
-    class D2C:
-        def __init__(self, **kwargs):
-            for key, value in kwargs.items():
-                setattr(self, key, value)
+    import degirum_tools, degirum as dg
+    import numpy as np
 
     test_cases: List[dict] = [
         # ----------------------------------------------------------------
@@ -187,30 +182,90 @@ def test_notifier():
             ],
             "res": [{"test": "e1"}, {}, {"test": "e2"}],
         },
+        # -------------------------------------------------------
+        # Clip saving tests
+        # -------------------------------------------------------
+        {
+            "params": {
+                "name": "test",
+                "condition": "a",
+                "message": "Unit test: [Uploaded file]({url})",
+                "notification_tags": "all",
+                "notification_config": msteams_test_workflow_url,
+                "clip_save": True,
+                "clip_sub_dir": "test",
+                "clip_duration": 3,
+                "clip_pre_trigger_delay": 1,
+                "clip_embed_ai_annotations": False,
+                "storage_config": degirum_tools.ObjectStorageConfig(**s3_credentials),
+            },
+            "inp": [
+                {"events_detected": {""}},
+                {"events_detected": {""}},
+                {"events_detected": {"a"}},
+                {"events_detected": {""}},
+                {"events_detected": {""}},
+            ],
+            "res": [{}, {}, {"test": "Unit test: [Uploaded file]({url})"}, {}, {}],
+        },
     ]
 
+    degirum_tools.logger_add_handler()
+
     for ci, case in enumerate(test_cases):
+        params = case["params"]
+
         if "res" not in case:
             # expected to fail
             with pytest.raises(Exception):
-                notifier = degirum_tools.EventNotifier(**case["params"])
+                notifier = degirum_tools.EventNotifier(**params)
             continue
 
-        notifier = degirum_tools.EventNotifier(**case["params"])
+        if (
+            "clip_save" in params
+            and params["clip_save"]
+            and (
+                params["storage_config"].access_key is None
+                or params["storage_config"].secret_key is None
+            )
+        ):
+            print(
+                f"Case {ci} skipped: S3_ACCESS_KEY and/or S3_SECRET_KEY environment variables are not set"
+            )
+            continue
 
-        for i, input in enumerate(case["inp"]):
-            result = D2C(**input)
+        notifier = degirum_tools.EventNotifier(**params)
 
-            if case["res"] is None:
-                with pytest.raises(Exception):
-                    notifier.analyze(result)
-            else:
-                notifier.analyze(result)
-                assert (
-                    result.notifications == case["res"][i]  # type: ignore[attr-defined]
-                ), (
-                    f"Case {ci} failed at step {i}: "
-                    + f"notifications `{result.notifications}` "  # type: ignore[attr-defined]
-                    + f"do not match expected `{case['res'][i]}`."
-                    + f"\nConfig: {case['params']}"
+        try:
+            for i, input in enumerate(case["inp"]):
+
+                result = dg.postprocessor.InferenceResults(
+                    model_params=None,
+                    input_image=(
+                        np.zeros((100, 100, 3)) if notifier._clip_save else None
+                    ),
+                    inference_results={},
+                    conversion=None,
                 )
+                result.__dict__.update(input)
+
+                if case["res"] is None:
+                    with pytest.raises(Exception):
+                        notifier.analyze(result)
+                else:
+                    notifier.analyze(result)
+                    assert (
+                        result.notifications == case["res"][i]  # type: ignore[attr-defined]
+                    ), (
+                        f"Case {ci} failed at step {i}: "
+                        + f"notifications `{result.notifications}` "  # type: ignore[attr-defined]
+                        + f"do not match expected `{case['res'][i]}`."
+                        + f"\nConfig: {case['params']}"
+                    )
+
+        finally:
+            if notifier._clip_save:
+                # cleanup bucket contents for clip saving tests
+                storage = degirum_tools.ObjectStorage(notifier._storage_cfg)
+                del notifier  # delete notifier to finalize clip saving
+                storage.delete_bucket_contents()

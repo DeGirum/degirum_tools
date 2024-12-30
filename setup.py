@@ -46,7 +46,9 @@ setup(
         if line and not line.startswith("#")
     ],
     python_requires=">=3.8",
+    # extras
     extras_require={
+        # linters for CI/CD
         "linting": [
             "black",
             "mypy",
@@ -55,8 +57,12 @@ setup(
             "types-Pillow",
             "types-PyYAML",
         ],
+        # testing for CI/CD
         "testing": ["pytest", "coverage"],
+        # building for CI/CD
         "build": ["build"],
+        # external notifications
+        "notifications": ["apprise", "minio"],
     },
     include_package_data=True,
 )

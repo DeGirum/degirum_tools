@@ -516,7 +516,7 @@ class _ByteTrack:
 
         """ Add newly detected tracklets to tracked_stracks"""
         unconfirmed = []
-        tracked_stracks = []  # type: list[STrack]
+        tracked_stracks: List[STrack] = []
         for track in self._tracked_tracks:
             track.obj_idx = -1  # clear object index in advance
             if not track.is_activated:
@@ -812,13 +812,13 @@ class _Tracer:
                 for idx, obj in enumerate(result.results)
                 if "track_id" in obj
             ],
-            dtype=np.int32,
+            dtype=int,
         )
 
         if len(tracked_objects) > 0:
             # update active trails
-            for idx, tid, x1, y1, x2, y2 in tracked_objects[:, 0:6]:
-                bbox = np.array([x1, y1, x2, y2])
+            for row in tracked_objects:
+                idx, tid, *bbox = map(int, row)
                 trail = self.active_trails.get(tid, None)
                 if trail is None:
                     trail = []
@@ -959,9 +959,7 @@ class ObjectTracker(ResultAnalyzerBase):
             # if tracing is enabled, show trails
 
             all_trails = [
-                get_anchor_coordinates(np.array(trail), self._anchor_point).astype(
-                    np.int32
-                )
+                get_anchor_coordinates(np.array(trail), self._anchor_point).astype(int)
                 for _, trail in result.trails.items()
                 if len(trail) > 1
             ]

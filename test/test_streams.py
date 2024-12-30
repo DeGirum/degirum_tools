@@ -57,7 +57,15 @@ def test_streams_connection(short_video):
     source = streams.VideoSourceGizmo(short_video)
     sink = VideoSink()
     c = streams.Composition(source >> sink)
+    assert source._connected_gizmos == {sink}
+    assert sink._connected_gizmos == {source}
+    assert set(c._gizmos) == {source, sink}
 
+    # double connection: should be the same as single connection
+    source = streams.VideoSourceGizmo(short_video)
+    sink = VideoSink()
+    c = streams.Composition(source >> sink, source >> sink)
+    assert len(source._output_refs) == 1 and source._output_refs[0] is sink.get_input(0)
     assert source._connected_gizmos == {sink}
     assert sink._connected_gizmos == {source}
     assert set(c._gizmos) == {source, sink}
@@ -183,6 +191,52 @@ def test_streams_simple_ai(short_video, detection_model):
         assert isinstance(orig_meta, streams.StreamMeta)
         assert not (orig_meta is ai_meta)
         assert all(bbox == obj["bbox"] for bbox, obj in zip(bboxes, ai_meta.results))
+
+
+def test_streams_simple_ai_construction(detection_model_name, zoo_dir):
+    """Test for AiSimpleGizmo construction"""
+
+    ai_base = streams.AiSimpleGizmo(
+        detection_model_name,
+        inference_host_address=dg.LOCAL,
+        zoo_url=zoo_dir,
+    )
+    assert isinstance(ai_base.model, dg.model.Model)
+
+    ai2 = streams.AiSimpleGizmo(
+        detection_model_name,
+        inference_host_address=dg.LOCAL,
+        zoo_url=zoo_dir,
+        measure_time=True,
+        overlay_show_probabilities=True,
+    )
+
+    assert ai2.model.measure_time != ai_base.model.measure_time
+    assert (
+        ai2.model.overlay_show_probabilities != ai_base.model.overlay_show_probabilities
+    )
+
+    txt = f"""
+    gizmos:
+        source: VideoSourceGizmo
+        ai:
+            AiSimpleGizmo:
+                model: {detection_model_name}
+                inference_host_address: '@local'
+                zoo_url: '{zoo_dir}'
+                measure_time: true
+                overlay_show_probabilities: true
+
+    connections:
+        - [source, ai]
+    """
+
+    c = streams.load_composition(txt)
+    assert len(c._gizmos) == 2
+    ai3 = c._gizmos[1]
+    assert isinstance(ai3, streams.AiSimpleGizmo)
+    assert ai3.model.measure_time
+    assert ai3.model.overlay_show_probabilities
 
 
 def test_streams_cropping_ai(short_video, detection_model):
@@ -569,24 +623,25 @@ def test_streams_crop_combining(
                 assert extra_results[1].results[0]["label"] == "Age"
 
 
-def test_streams_load_composition():
+def test_streams_load_composition(zoo_dir, detection_model_name):
     """Test for load_composition"""
 
-    import tempfile, yaml, json
+    import tempfile, yaml
+
+    #
+    # check various ways to load composition
+    #
 
     txt = """
     gizmos:
-        source:
-            class: VideoSourceGizmo
+        source: VideoSourceGizmo
         resizer:
-            class: ResizingGizmo
-            params:
+            ResizingGizmo:
                 w: 320
                 h: 240
                 pad_method: "stretch"
         display:
-            class: VideoDisplayGizmo
-            params:
+            VideoDisplayGizmo:
                 window_titles: ["Original", "Resized"]
                 show_fps: True
 
@@ -630,18 +685,9 @@ def test_streams_load_composition():
     finally:
         os.unlink(fname)
 
-    # check JSON file
-    try:
-        with tempfile.NamedTemporaryFile(
-            "w", suffix=".json", delete=False
-        ) as json_file:
-            json_file.write(json.dumps(yaml.safe_load(txt), indent=2))
-            fname = json_file.name
-        check(fname)
-    finally:
-        os.unlink(fname)
-
+    #
     # check for gizmos in context
+    #
     class MyGizmo(streams.Gizmo):
         def __init__(self):
             super().__init__([(0, False)])
@@ -651,49 +697,207 @@ def test_streams_load_composition():
 
     txt2 = """
     gizmos:
-        source:
-            class: VideoSourceGizmo
-        mygizmo:
-            class: MyGizmo
+        source: VideoSourceGizmo
+        mygizmo: MyGizmo
 
     connections:
         - [source, mygizmo]
     """
 
-    c = streams.load_composition(txt2, locals())
+    c = streams.load_composition(txt2, local_context=locals())
     assert len(c._gizmos) == 2
     assert MyGizmo is c._gizmos[1].__class__
 
+    #
     # check for custom YAML constructors
+    #
 
     class MyGizmo2(streams.Gizmo):
         def __init__(
-            self, crop_extent: streams.CropExtentOptions, cv2_interpolation: int
+            self, crop_extent: streams.CropExtentOptions, cv2_interpolation: int, model
         ):
             super().__init__([(0, False)])
             self.crop_extent = crop_extent
             self.cv2_interpolation = cv2_interpolation
+            self.model = model
 
         def run(self):
             pass
 
     txt2 = """
+    vars:
+        model:
+            dg.load_model:
+                model_name: $(detection_model_name)
+                inference_host_address: $(dg.LOCAL)
+                zoo_url: $(zoo_dir)
     gizmos:
-        source:
-            class: VideoSourceGizmo
+        source: VideoSourceGizmo
         mygizmo:
-            class: MyGizmo2
-            params:
-                crop_extent: !CropExtentOptions ASPECT_RATIO_ADJUSTMENT_BY_AREA
-                cv2_interpolation: !OpenCV INTER_LINEAR
+            MyGizmo2:
+                crop_extent: $(CropExtentOptions.ASPECT_RATIO_ADJUSTMENT_BY_AREA)
+                cv2_interpolation: $(cv2.INTER_LINEAR)
+                model: $(model)
 
     connections:
         - [source, mygizmo]
     """
 
-    c = streams.load_composition(txt2, locals())
+    c = streams.load_composition(txt2, local_context=locals())
     assert len(c._gizmos) == 2
     g2 = c._gizmos[1]
     assert isinstance(g2, MyGizmo2)
     assert g2.crop_extent == streams.CropExtentOptions.ASPECT_RATIO_ADJUSTMENT_BY_AREA
     assert g2.cv2_interpolation == cv2.INTER_LINEAR
+    assert (
+        isinstance(g2.model, dg.model.Model)
+        and g2.model._model_name == detection_model_name
+    )
+
+    #
+    # test variables
+    #
+
+    class ParamGizmo(streams.Gizmo):
+        def __init__(self, **kwargs):
+            super().__init__([(0, False)])
+            self.params = kwargs
+
+        def run(self):
+            pass
+
+    def test_func(val):
+        return val
+
+    txt3 = """
+    vars:
+        tracker:
+            ObjectTracker:
+                class_list: ["Car"]
+                anchor_point: $(AnchorPoint.CENTER)
+        t2: $(tracker)
+        i: 10
+        f: 3.14
+        b: true
+        a:
+            test_func:
+                val: [1, 2]
+
+    gizmos:
+        source: VideoSourceGizmo
+        sink:
+            ParamGizmo:
+                t: $(t2)
+                i: $(i)
+                f: $(f)
+                b: $(b)
+                a: $(a)
+
+    connections:
+        - [source, sink]
+    """
+
+    c = streams.load_composition(txt3, local_context=locals())
+    assert len(c._gizmos) == 2
+    g2 = c._gizmos[1]
+    assert isinstance(g2, ParamGizmo)
+    assert isinstance(g2.params["t"], degirum_tools.ObjectTracker)
+    assert g2.params["t"]._anchor_point == degirum_tools.AnchorPoint.CENTER
+    assert g2.params["i"] == 10
+    assert g2.params["f"] == 3.14
+    assert g2.params["b"] is True
+    assert g2.params["a"] == [1, 2]
+
+    #
+    # check for various errors
+    #
+
+    with pytest.raises(RuntimeError, match="fail to evaluate expression"):
+        streams.load_composition(
+            """
+            gizmos:
+                source: $(undefined_variable)
+            connections:
+                - [source]
+            """
+        )
+
+    with pytest.raises(ValueError, match="class is not defined"):
+        streams.load_composition(
+            """
+            gizmos:
+                source:
+                    UndefinedClass: {}
+            connections:
+                - [source]
+            """
+        )
+
+    class FailingGizmo(streams.Gizmo):
+        pass
+
+    with pytest.raises(RuntimeError, match="error creating instance of"):
+        streams.load_composition(
+            """
+            gizmos:
+                source:
+                    FailingGizmo: {}
+            connections:
+                - [source]
+            """,
+            local_context=locals(),
+        )
+
+    def failing_func():
+        raise ValueError("Test exception")
+
+    with pytest.raises(RuntimeError, match="error creating instance from"):
+        streams.load_composition(
+            """
+            gizmos:
+                source: failing_func
+            connections:
+                - [source]
+            """,
+            local_context=locals(),
+        )
+
+    with pytest.raises(ValueError, match="does not define a Gizmo"):
+        streams.load_composition(
+            """
+            gizmos:
+                source: UndefinedClass
+            connections:
+                - [source]
+            """
+        )
+
+    with pytest.raises(ValueError, match="must have at least two elements"):
+        streams.load_composition(
+            """
+            gizmos:
+                source: VideoSourceGizmo
+            connections:
+                - [source]
+            """
+        )
+
+    with pytest.raises(ValueError, match="'unknown' gizmo is not defined"):
+        streams.load_composition(
+            """
+            gizmos:
+                source: VideoSourceGizmo
+            connections:
+                - [unknown, source]
+            """
+        )
+
+    with pytest.raises(ValueError, match="'unknown' gizmo is not defined"):
+        streams.load_composition(
+            """
+            gizmos:
+                source: VideoSourceGizmo
+            connections:
+                - [source, unknown]
+            """
+        )
