@@ -389,7 +389,7 @@ class Grid:
         return (scaled_x, scaled_y)
 
     def mostly_horizontal(self):
-        if len(self.points) > 1:
+        if len(self.points) >= 4:
             guide_top_r = self.points[-1]
             guide_top_l = self.points[0]
             return abs(guide_top_r[1] - guide_top_l[1]) < abs(
@@ -496,6 +496,7 @@ class FigureAnnotator:
         num_vertices: int = FigureAnnotatorType.QUADRILATERAL.value,
         image_path: str = "",
         results_file_name: str = "zones.json",
+        test_mode: bool = False,
     ):
         self.num_vertices = num_vertices  # Number of vertices for each polygon
         self.figure_type: str = (
@@ -513,130 +514,131 @@ class FigureAnnotator:
         self.darker_theme_color = "#89CFF0"
         self.lighter_theme_color = "lightblue"
 
-        self.root = tk.Tk()
-        self.root.title(f"{self.figure_type.capitalize()} Annotator")
-        self.root.geometry("700x410" if self.with_grid else "700x375")
-        self.root.resizable(False, False)
+        if not test_mode:
+            self.root = tk.Tk()
+            self.root.title(f"{self.figure_type.capitalize()} Annotator")
+            self.root.geometry("700x410" if self.with_grid else "700x375")
+            self.root.resizable(False, False)
 
-        # Override the close button event
-        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+            # Override the close button event
+            self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
-        # Set window icon
-        self.icon_image = ImageTk.PhotoImage(
-            file=str(Path(__file__).parent) + "/assets/logo.ico"
-        )
-        self.root.iconphoto(True, self.icon_image)
+            # Set window icon
+            self.icon_image = ImageTk.PhotoImage(
+                file=str(Path(__file__).parent) + "/assets/logo.ico"
+            )
+            self.root.iconphoto(True, self.icon_image)
 
-        # Set font
-        self.font = tkFont.Font(family="courier 10 pitch", size=12)
+            # Set font
+            self.font = tkFont.Font(family="courier 10 pitch", size=12)
 
-        # Create the main frame to hold the menu and canvas
-        self.main_frame = tk.Frame(self.root, bg=self.lighter_theme_color)
-        self.main_frame.pack(fill=tk.BOTH, expand=True)
+            # Create the main frame to hold the menu and canvas
+            self.main_frame = tk.Frame(self.root, bg=self.lighter_theme_color)
+            self.main_frame.pack(fill=tk.BOTH, expand=True)
 
-        self.menu_bar = tk.Menu(self.root, bg=self.darker_theme_color)
-        self.root.config(menu=self.menu_bar)
+            self.menu_bar = tk.Menu(self.root, bg=self.darker_theme_color)
+            self.root.config(menu=self.menu_bar)
 
-        self.file_menu = tk.Menu(self.menu_bar, tearoff=0)
-        self.file_menu.add_command(
-            label="Open...",
-            font=self.font,
-            command=self.open_image,
-            accelerator="Ctrl-O",
-        )
-        self.file_menu.add_command(
-            label="Save",
-            font=self.font,
-            command=self.save,
-            accelerator="Ctrl-S",
-            state=tk.DISABLED,
-        )
-        self.file_menu.add_command(
-            label="Save As...",
-            font=self.font,
-            command=self.save_to_file,
-            accelerator="Ctrl-Shift-S",
-            state=tk.DISABLED,
-        )
-        self.menu_bar.add_cascade(label="File", font=self.font, menu=self.file_menu)
-
-        self.edit_menu = tk.Menu(self.menu_bar, tearoff=0)
-        if self.with_grid:
-            self.edit_menu.add_command(
-                label="Add Grid",
+            self.file_menu = tk.Menu(self.menu_bar, tearoff=0)
+            self.file_menu.add_command(
+                label="Open...",
                 font=self.font,
-                command=self.add_grid,
-                accelerator="Ctrl-A",
-                state=tk.DISABLED,
-            )
-            self.edit_menu.add_command(
-                label="Remove Grid",
-                font=self.font,
-                command=self.remove_grid,
-                accelerator="Ctrl-D",
-                state=tk.DISABLED,
-            )
-        self.edit_menu.add_command(
-            label="Undo",
-            font=self.font,
-            command=self.undo,
-            accelerator="Ctrl-Z",
-            state=tk.DISABLED,
-        )
-        self.menu_bar.add_cascade(label="Edit", font=self.font, menu=self.edit_menu)
-
-        self.help_menu = tk.Menu(self.menu_bar, tearoff=0)
-        self.help_menu.add_command(label="Help", font=self.font, command=self.show_help)
-        self.menu_bar.add_cascade(label="Help", font=self.font, menu=self.help_menu)
-
-        if self.with_grid:
-            # Create a frame for the second menu and "Current Selection" OptionMenu
-            self.grid_selection_frame = tk.Frame(
-                self.main_frame, bg=self.lighter_theme_color
-            )
-            self.grid_selection_frame.pack(fill=tk.X, pady=5)
-
-            # Add "Active Grid" ComboBox to the grid_selection_frame
-            self.grid_selection_menu_label = tk.Label(
-                self.grid_selection_frame,
-                text="Active Grid",
-                font=self.font,
-                bg=self.lighter_theme_color,
-            )
-            self.grid_selection_menu_label.grid(row=0, column=0)
-            self.grid_selection_default_value = "Non-grid mode"
-            self.added_grid_id = ""
-            self.grid_selection_var = tk.StringVar(self.grid_selection_frame)
-            self.grid_selection_var.set(
-                self.grid_selection_default_value
-            )  # Default value
-            self.grid_selection_options = [self.grid_selection_default_value]
-
-            self.grid_selection_menu = ttk.Combobox(
-                self.grid_selection_frame,
-                textvariable=self.grid_selection_var,
-                values=self.grid_selection_options,
-                font=self.font,
-                state="readonly",
-            )
-            self.grid_selection_menu.grid(row=0, column=1, padx=10)
-
-        self.open_image_frame = None
-        if not self.image_path:
-            self.open_image_frame = tk.Frame(self.main_frame)
-            self.open_image_frame.pack(fill=tk.NONE, padx=150, pady=150)
-            self.open_button = tk.Button(
-                self.open_image_frame,
-                text="Open Image",
                 command=self.open_image,
-                font=tkFont.Font(family="courier 10 pitch", size=28),
-                bg=self.darker_theme_color,
-                fg="black",
+                accelerator="Ctrl-O",
             )
-            self.open_button.grid(row=0, column=3)
+            self.file_menu.add_command(
+                label="Save",
+                font=self.font,
+                command=self.save,
+                accelerator="Ctrl-S",
+                state=tk.DISABLED,
+            )
+            self.file_menu.add_command(
+                label="Save As...",
+                font=self.font,
+                command=self.save_to_file,
+                accelerator="Ctrl-Shift-S",
+                state=tk.DISABLED,
+            )
+            self.menu_bar.add_cascade(label="File", font=self.font, menu=self.file_menu)
 
-        self.canvas = tk.Canvas(self.main_frame, cursor="cross")
-        self.canvas.pack(fill=tk.BOTH, expand=True)
+            self.edit_menu = tk.Menu(self.menu_bar, tearoff=0)
+            if self.with_grid:
+                self.edit_menu.add_command(
+                    label="Add Grid",
+                    font=self.font,
+                    command=self.add_grid,
+                    accelerator="Ctrl-A",
+                    state=tk.DISABLED,
+                )
+                self.edit_menu.add_command(
+                    label="Remove Grid",
+                    font=self.font,
+                    command=self.remove_grid,
+                    accelerator="Ctrl-D",
+                    state=tk.DISABLED,
+                )
+            self.edit_menu.add_command(
+                label="Undo",
+                font=self.font,
+                command=self.undo,
+                accelerator="Ctrl-Z",
+                state=tk.DISABLED,
+            )
+            self.menu_bar.add_cascade(label="Edit", font=self.font, menu=self.edit_menu)
+
+            self.help_menu = tk.Menu(self.menu_bar, tearoff=0)
+            self.help_menu.add_command(label="Help", font=self.font, command=self.show_help)
+            self.menu_bar.add_cascade(label="Help", font=self.font, menu=self.help_menu)
+
+            if self.with_grid:
+                # Create a frame for the second menu and "Current Selection" OptionMenu
+                self.grid_selection_frame = tk.Frame(
+                    self.main_frame, bg=self.lighter_theme_color
+                )
+                self.grid_selection_frame.pack(fill=tk.X, pady=5)
+
+                # Add "Active Grid" ComboBox to the grid_selection_frame
+                self.grid_selection_menu_label = tk.Label(
+                    self.grid_selection_frame,
+                    text="Active Grid",
+                    font=self.font,
+                    bg=self.lighter_theme_color,
+                )
+                self.grid_selection_menu_label.grid(row=0, column=0)
+                self.grid_selection_default_value = "Non-grid mode"
+                self.added_grid_id = ""
+                self.grid_selection_var = tk.StringVar(self.grid_selection_frame)
+                self.grid_selection_var.set(
+                    self.grid_selection_default_value
+                )  # Default value
+                self.grid_selection_options = [self.grid_selection_default_value]
+
+                self.grid_selection_menu = ttk.Combobox(
+                    self.grid_selection_frame,
+                    textvariable=self.grid_selection_var,
+                    values=self.grid_selection_options,
+                    font=self.font,
+                    state="readonly",
+                )
+                self.grid_selection_menu.grid(row=0, column=1, padx=10)
+
+            self.open_image_frame = None
+            if not self.image_path:
+                self.open_image_frame = tk.Frame(self.main_frame)
+                self.open_image_frame.pack(fill=tk.NONE, padx=150, pady=150)
+                self.open_button = tk.Button(
+                    self.open_image_frame,
+                    text="Open Image",
+                    command=self.open_image,
+                    font=tkFont.Font(family="courier 10 pitch", size=28),
+                    bg=self.darker_theme_color,
+                    fg="black",
+                )
+                self.open_button.grid(row=0, column=3)
+
+            self.canvas = tk.Canvas(self.main_frame, cursor="cross")
+            self.canvas.pack(fill=tk.BOTH, expand=True)
 
         self.original_image: Optional[Image.Image] = None  # Store the original image
         self.image_tk: Optional[ImageTk.PhotoImage] = None
@@ -673,32 +675,33 @@ class FigureAnnotator:
         )
         self.dragging_point_idx: int = -1  # The index of the point being dragged
 
-        # Load image if path is provided
-        if self.image_path:
-            self.load_image()
+        if not test_mode:
+            # Load image if path is provided
+            if self.image_path:
+                self.load_image()
 
-        # Bind mouse-controlled actions
-        self.canvas.bind("<Button-1>", self.on_click)
-        self.canvas.bind("<Motion>", self.on_motion)
-        self.canvas.bind(
-            "<Button-3>", self.on_right_click
-        )  # Right-click to initiate drag or move point
-        self.canvas.bind(
-            "<Control-Button-3>", self.on_right_click_and_ctrl
-        )  # Right-click to initiate drag or move point
-        self.canvas.bind("<Configure>", self.on_resize)  # Bind to window resize
+            # Bind mouse-controlled actions
+            self.canvas.bind("<Button-1>", self.on_click)
+            self.canvas.bind("<Motion>", self.on_motion)
+            self.canvas.bind(
+                "<Button-3>", self.on_right_click
+            )  # Right-click to initiate drag or move point
+            self.canvas.bind(
+                "<Control-Button-3>", self.on_right_click_and_ctrl
+            )  # Right-click to initiate drag or move point
+            self.canvas.bind("<Configure>", self.on_resize)  # Bind to window resize
 
-        # Bind keyboard shortcuts
-        self.root.bind_all("<Control-o>", self.open_image)
-        self.root.bind_all("<Control-a>", self.add_grid)
-        self.root.bind_all("<Control-d>", self.remove_grid)
-        self.root.bind_all("<Control-s>", self.save)
-        self.root.bind_all("<Control-S>", self.save_to_file)
-        self.root.bind_all("<Control-z>", self.undo)
-        self.root.bind_all("<Escape>", self.process_esc)
+            # Bind keyboard shortcuts
+            self.root.bind_all("<Control-o>", self.open_image)
+            self.root.bind_all("<Control-a>", self.add_grid)
+            self.root.bind_all("<Control-d>", self.remove_grid)
+            self.root.bind_all("<Control-s>", self.save)
+            self.root.bind_all("<Control-S>", self.save_to_file)
+            self.root.bind_all("<Control-z>", self.undo)
+            self.root.bind_all("<Escape>", self.process_esc)
 
-        # Run application
-        self.root.mainloop()
+            # Run application
+            self.root.mainloop()
 
     def open_image(self, event=None):
         """Opens image."""
