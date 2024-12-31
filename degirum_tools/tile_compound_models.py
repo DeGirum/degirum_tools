@@ -11,7 +11,8 @@ from .compound_models import (
     NmsOptions,
     MotionDetectOptions,
     CroppingAndDetectingCompoundModel,
-    detect_motion)
+    detect_motion,
+)
 
 
 class _TileInfo:
@@ -98,9 +99,9 @@ class TileExtractorPseudoModel(ModelLike):
         return getattr(self._model2, attr)
 
     def _calculate_tile_parameters(self) -> List[float]:
-        model_aspect_ratio = (
-            self._model2.model_info.InputW[0] / self._model2.model_info.InputH[0]
-        )
+
+        _, h, w, _ = self._model2.input_shape[0]
+        model_aspect_ratio = w / h
 
         tile_width = self._width / (
             self._cols - self._overlap_percent * (self._cols - 1)
@@ -694,7 +695,9 @@ class BoxFusionTileModel(_EdgeMixin, TileModel):
                 )
 
             if isinstance(self._current_result.info, FrameInfo):
-                self._current_result._frame_info = self._current_result.info.original_info
+                self._current_result._frame_info = (
+                    self._current_result.info.original_info
+                )
 
             return self._current_result
         return None

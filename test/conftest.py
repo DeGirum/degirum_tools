@@ -40,6 +40,13 @@ def zoo_dir():
 
 
 @pytest.fixture()
+def dummy_model(zoo_dir):
+    """Load dummy model from local zoo"""
+    with dg.load_model("dummy", dg.LOCAL, zoo_dir) as model:
+        yield model
+
+
+@pytest.fixture()
 def detection_model_name():
     """Detection model name"""
     return "yolov5nu_relu6_car--128x128_float_n2x_cpu_1"
