@@ -65,8 +65,6 @@ def test_bf():
 
 
 def test_generate_tiles(dummy_model):
-    import degirum as dg
-
     """
     Tests for generating tiles.
     Includes variations of aspect ratios for the model and tiles, rows/cols, and overlap percentages.
