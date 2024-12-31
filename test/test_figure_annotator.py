@@ -7,9 +7,6 @@
 # Implements unit tests to test figure annotator functionality
 #
 
-import numpy as np
-from typing import List
-
 
 def test_figure_annotator():
     """
@@ -60,12 +57,12 @@ def test_figure_annotator():
     original_width, original_height = 1000, 1500
     current_width, current_height = 2000, 3000
     horizontal_grid_points = [
-        (100, 100),
-        (100, 300),
-        (500, 300),
-        (500, 100),
-        (200, 50),
-        (200, 250),
+        (100.0, 100.0),
+        (100.0, 300.0),
+        (500.0, 300.0),
+        (500.0, 100.0),
+        (200.0, 50.0),
+        (200.0, 250.0),
     ]
     horizontal_grid_points_displayed = [
         (
@@ -87,12 +84,12 @@ def test_figure_annotator():
         for idx, point in enumerate(horizontal_grid_points)
     ]
     vertical_grid_points = [
-        (400, 100),
-        (200, 100),
-        (200, 500),
-        (400, 500),
-        (500, 300),
-        (150, 300),
+        (400.0, 100.0),
+        (200.0, 100.0),
+        (200.0, 500.0),
+        (400.0, 500.0),
+        (500.0, 300.0),
+        (150.0, 300.0),
     ]
     vertical_grid_points_displayed = [
         (
@@ -516,7 +513,7 @@ def test_figure_annotator():
     assert (
         line_annotator.num_vertices == 2
         and line_annotator.figure_type == "line"
-        and line_annotator.with_grid == False
+        and not line_annotator.with_grid
         and line_annotator.points == []
         and line_annotator.displayed_points == []
         and line_annotator.original_width == 0
@@ -541,7 +538,7 @@ def test_figure_annotator():
     assert (
         zone_annotator.num_vertices == 4
         and zone_annotator.figure_type == "zone"
-        and zone_annotator.with_grid == True
+        and zone_annotator.with_grid
         and zone_annotator.points == []
         and zone_annotator.displayed_points == []
         and zone_annotator.original_width == 0

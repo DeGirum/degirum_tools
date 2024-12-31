@@ -527,7 +527,7 @@ class FigureAnnotator:
             self.icon_image = ImageTk.PhotoImage(
                 file=str(Path(__file__).parent) + "/assets/logo.ico"
             )
-            self.root.iconphoto(True, self.icon_image)
+            self.root.iconphoto(True, self.icon_image)  # type: ignore
 
             # Set font
             self.font = tkFont.Font(family="courier 10 pitch", size=12)
@@ -541,20 +541,20 @@ class FigureAnnotator:
 
             self.file_menu = tk.Menu(self.menu_bar, tearoff=0)
             self.file_menu.add_command(
-                label="Open...",
+                label="Open Image...",
                 font=self.font,
                 command=self.open_image,
                 accelerator="Ctrl-O",
             )
             self.file_menu.add_command(
-                label="Save",
+                label="Save JSON",
                 font=self.font,
                 command=self.save,
                 accelerator="Ctrl-S",
                 state=tk.DISABLED,
             )
             self.file_menu.add_command(
-                label="Save As...",
+                label="Save JSON As...",
                 font=self.font,
                 command=self.save_to_file,
                 accelerator="Ctrl-Shift-S",
@@ -588,7 +588,9 @@ class FigureAnnotator:
             self.menu_bar.add_cascade(label="Edit", font=self.font, menu=self.edit_menu)
 
             self.help_menu = tk.Menu(self.menu_bar, tearoff=0)
-            self.help_menu.add_command(label="Help", font=self.font, command=self.show_help)
+            self.help_menu.add_command(
+                label="Help", font=self.font, command=self.show_help
+            )
             self.menu_bar.add_cascade(label="Help", font=self.font, menu=self.help_menu)
 
             if self.with_grid:
@@ -742,8 +744,8 @@ class FigureAnnotator:
         self.root.geometry(f"{self.original_width}x{self.original_height}")
 
         self.update_image(self.original_image)
-        self.file_menu.entryconfig("Save", state=tk.NORMAL)
-        self.file_menu.entryconfig("Save As...", state=tk.NORMAL)
+        self.file_menu.entryconfig("Save JSON", state=tk.NORMAL)
+        self.file_menu.entryconfig("Save JSON As...", state=tk.NORMAL)
         if self.with_grid:
             self.edit_menu.entryconfig("Add Grid", state=tk.NORMAL)
 
@@ -802,7 +804,7 @@ class FigureAnnotator:
 
             # Resize the image to the new width and height
             resized_image = self.original_image.resize(
-                (new_width, new_height), Image.BILINEAR
+                (new_width, new_height), Image.BILINEAR     # type: ignore
             )
             self.update_image(resized_image)
 
