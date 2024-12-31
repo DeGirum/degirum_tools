@@ -64,7 +64,7 @@ def test_bf():
     assert len(fusion_result) == 1
 
 
-def test_generate_tiles():
+def test_generate_tiles(dummy_model):
     """
     Tests for generating tiles.
     Includes variations of aspect ratios for the model and tiles, rows/cols, and overlap percentages.
@@ -73,29 +73,8 @@ def test_generate_tiles():
     overlap_tolerance = 0.01
     aspect_ratio_tolerance = 0.002
 
-    class DummyModelParams:
-        InputW = [640]
-        InputH = [640]
-        InputC = [3]
-        InputImgFmt = ["RAW"]
-        InputRawDataType = ["DG_UINT8"]
-        InputColorSpace = ["RGB"]
-
-    class DummyModel:
-        image_backend = "auto"
-        input_image_format = "RAW"
-        _model_parameters = DummyModelParams()
-        model_info = _model_parameters
-        overlay_color = (0, 0, 0)
-        overlay_line_width = 1.0
-        overlay_show_labels = True
-        overlay_show_probabilities = True
-        overlay_alpha = False
-        overlay_font_scale = 1.0
-        input_letterbox_fill_color = (0, 0, 0)
-        label_dictionary = {0: 0}
-
-    dummy_model = DummyModel()
+    dummy_model._model_parameters.InputW = [640]
+    dummy_model._model_parameters.InputH = [640]
 
     # 1 x 1 no overlap square, matching aspect ratio, aspect ratio = 1
     tile_extractor = TileExtractorPseudoModel(1, 1, 0.0, dummy_model)

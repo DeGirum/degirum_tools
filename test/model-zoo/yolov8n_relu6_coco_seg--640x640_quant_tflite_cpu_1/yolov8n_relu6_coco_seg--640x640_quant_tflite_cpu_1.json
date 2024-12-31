@@ -1,5 +1,5 @@
 {
-    "ConfigVersion": 6,
+    "ConfigVersion": 7,
     "Checksum": "9bd137fddaefe943959e7f0cace4f0be4b8cded96f141225f667ce8027cdc79d",
     "DEVICE": [
         {
@@ -44,18 +44,7 @@
     ],
     "POST_PROCESS": [
         {
-            "OutputPostprocessType": "DetectionYoloV8",
-            "PythonFile": "segmentation.py",
-            "PostProcessorInputs": [
-                310,
-                314,
-                313,
-                311,
-                317,
-                312,
-                316,
-                315
-            ],
+            "OutputPostprocessType": "SegmentationYoloV8",
             "OutputNumClasses": 80,
             "LabelsPath": "labels_yolov8n_relu6_coco_seg.json",
             "OutputClassIDAdjustment": 0,

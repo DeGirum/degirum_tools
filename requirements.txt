@@ -21,3 +21,4 @@ ffmpegcv>=0.3.15;platform_system!='Windows'
 typing-extensions
 jsonschema
 apprise
+tk

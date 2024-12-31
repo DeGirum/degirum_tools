@@ -369,12 +369,12 @@ class CroppingCompoundModel(CompoundModelBase):
             bbox: bbox coordinates in [x1, y1, x2, y2] format
             image_sz: image size in (width, height) format
         """
-
+        _, h, w, _ = self.model2.input_shape[0]
         return extend_bbox(
             bbox,
             self._crop_extent_option,
             self._crop_extent,
-            self.model2.model_info.InputW[0] / self.model2.model_info.InputH[0],
+            w / h,
             image_sz,
         )
 
@@ -548,7 +548,9 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
                 )
 
             if isinstance(self._current_result.info, FrameInfo):
-                self._current_result._frame_info = self._current_result.info.original_info
+                self._current_result._frame_info = (
+                    self._current_result.info.original_info
+                )
 
             return self._current_result
         return None
