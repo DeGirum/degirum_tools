@@ -8,9 +8,6 @@
 # and the driver for this utility.
 #
 
-import tkinter as tk
-from tkinter import filedialog, messagebox, ttk, Toplevel, Scrollbar, Text
-import tkinter.font as tkFont
 from PIL import Image, ImageTk
 import json
 import argparse
@@ -20,6 +17,7 @@ from enum import Enum
 from typing import Tuple, List, Dict, Union, Optional
 from copy import deepcopy
 from pathlib import Path
+from . import environment as env
 
 
 help_message_line = """
@@ -515,7 +513,27 @@ class FigureAnnotator:
         self.lighter_theme_color = "lightblue"
 
         if not test_mode:
-            self.root = tk.Tk()
+            self.tk = env.import_optional_package(
+                "tkinter",
+                custom_message="'tkinter' is not available. Hint: install tkinter with "
+                + "'sudo apt install python3-tk' (Linux) or 'brew install tcl-tk' (macOS)",
+            )
+            self.tkFont = env.import_optional_package(
+                "tkinter.font",
+                custom_message="'tkinter' is not available. Hint: install tkinter with "
+                + "'sudo apt install python3-tk' (Linux) or 'brew install tcl-tk' (macOS)",
+            )
+            self.ttk = env.import_optional_package(
+                "tkinter.ttk",
+                custom_message="'tkinter' is not available. Hint: install tkinter with "
+                + "'sudo apt install python3-tk' (Linux) or 'brew install tcl-tk' (macOS)",
+            )
+            self.tkFiledialog = env.import_optional_package(
+                "tkinter.filedialog",
+                custom_message="'tkinter' is not available. Hint: install tkinter with "
+                + "'sudo apt install python3-tk' (Linux) or 'brew install tcl-tk' (macOS)",
+            )
+            self.root = self.tk.Tk()
             self.root.title(f"{self.figure_type.capitalize()} Annotator")
             self.root.geometry("700x410" if self.with_grid else "700x375")
             self.root.resizable(False, False)
@@ -530,16 +548,16 @@ class FigureAnnotator:
             self.root.iconphoto(True, self.icon_image)  # type: ignore
 
             # Set font
-            self.font = tkFont.Font(family="courier 10 pitch", size=12)
+            self.font = self.tkFont.Font(family="courier 10 pitch", size=12)
 
             # Create the main frame to hold the menu and canvas
-            self.main_frame = tk.Frame(self.root, bg=self.lighter_theme_color)
-            self.main_frame.pack(fill=tk.BOTH, expand=True)
+            self.main_frame = self.tk.Frame(self.root, bg=self.lighter_theme_color)
+            self.main_frame.pack(fill=self.tk.BOTH, expand=True)
 
-            self.menu_bar = tk.Menu(self.root, bg=self.darker_theme_color)
+            self.menu_bar = self.tk.Menu(self.root, bg=self.darker_theme_color)
             self.root.config(menu=self.menu_bar)
 
-            self.file_menu = tk.Menu(self.menu_bar, tearoff=0)
+            self.file_menu = self.tk.Menu(self.menu_bar, tearoff=0)
             self.file_menu.add_command(
                 label="Open Image...",
                 font=self.font,
@@ -551,43 +569,43 @@ class FigureAnnotator:
                 font=self.font,
                 command=self.save,
                 accelerator="Ctrl-S",
-                state=tk.DISABLED,
+                state=self.tk.DISABLED,
             )
             self.file_menu.add_command(
                 label="Save JSON As...",
                 font=self.font,
                 command=self.save_to_file,
                 accelerator="Ctrl-Shift-S",
-                state=tk.DISABLED,
+                state=self.tk.DISABLED,
             )
             self.menu_bar.add_cascade(label="File", font=self.font, menu=self.file_menu)
 
-            self.edit_menu = tk.Menu(self.menu_bar, tearoff=0)
+            self.edit_menu = self.tk.Menu(self.menu_bar, tearoff=0)
             if self.with_grid:
                 self.edit_menu.add_command(
                     label="Add Grid",
                     font=self.font,
                     command=self.add_grid,
                     accelerator="Ctrl-A",
-                    state=tk.DISABLED,
+                    state=self.tk.DISABLED,
                 )
                 self.edit_menu.add_command(
                     label="Remove Grid",
                     font=self.font,
                     command=self.remove_grid,
                     accelerator="Ctrl-D",
-                    state=tk.DISABLED,
+                    state=self.tk.DISABLED,
                 )
             self.edit_menu.add_command(
                 label="Undo",
                 font=self.font,
                 command=self.undo,
                 accelerator="Ctrl-Z",
-                state=tk.DISABLED,
+                state=self.tk.DISABLED,
             )
             self.menu_bar.add_cascade(label="Edit", font=self.font, menu=self.edit_menu)
 
-            self.help_menu = tk.Menu(self.menu_bar, tearoff=0)
+            self.help_menu = self.tk.Menu(self.menu_bar, tearoff=0)
             self.help_menu.add_command(
                 label="Help", font=self.font, command=self.show_help
             )
@@ -595,13 +613,13 @@ class FigureAnnotator:
 
             if self.with_grid:
                 # Create a frame for the second menu and "Current Selection" OptionMenu
-                self.grid_selection_frame = tk.Frame(
+                self.grid_selection_frame = self.tk.Frame(
                     self.main_frame, bg=self.lighter_theme_color
                 )
-                self.grid_selection_frame.pack(fill=tk.X, pady=5)
+                self.grid_selection_frame.pack(fill=self.tk.X, pady=5)
 
                 # Add "Active Grid" ComboBox to the grid_selection_frame
-                self.grid_selection_menu_label = tk.Label(
+                self.grid_selection_menu_label = self.tk.Label(
                     self.grid_selection_frame,
                     text="Active Grid",
                     font=self.font,
@@ -610,13 +628,13 @@ class FigureAnnotator:
                 self.grid_selection_menu_label.grid(row=0, column=0)
                 self.grid_selection_default_value = "Non-grid mode"
                 self.added_grid_id = ""
-                self.grid_selection_var = tk.StringVar(self.grid_selection_frame)
+                self.grid_selection_var = self.tk.StringVar(self.grid_selection_frame)
                 self.grid_selection_var.set(
                     self.grid_selection_default_value
                 )  # Default value
                 self.grid_selection_options = [self.grid_selection_default_value]
 
-                self.grid_selection_menu = ttk.Combobox(
+                self.grid_selection_menu = self.ttk.Combobox(
                     self.grid_selection_frame,
                     textvariable=self.grid_selection_var,
                     values=self.grid_selection_options,
@@ -627,20 +645,20 @@ class FigureAnnotator:
 
             self.open_image_frame = None
             if not self.image_path:
-                self.open_image_frame = tk.Frame(self.main_frame)
-                self.open_image_frame.pack(fill=tk.NONE, padx=150, pady=150)
-                self.open_button = tk.Button(
+                self.open_image_frame = self.tk.Frame(self.main_frame)
+                self.open_image_frame.pack(fill=self.tk.NONE, padx=150, pady=150)
+                self.open_button = self.tk.Button(
                     self.open_image_frame,
                     text="Open Image",
                     command=self.open_image,
-                    font=tkFont.Font(family="courier 10 pitch", size=28),
+                    font=self.tk.font.Font(family="courier 10 pitch", size=28),
                     bg=self.darker_theme_color,
                     fg="black",
                 )
                 self.open_button.grid(row=0, column=3)
 
-            self.canvas = tk.Canvas(self.main_frame, cursor="cross")
-            self.canvas.pack(fill=tk.BOTH, expand=True)
+            self.canvas = self.tk.Canvas(self.main_frame, cursor="cross")
+            self.canvas.pack(fill=self.tk.BOTH, expand=True)
 
         self.original_image: Optional[Image.Image] = None  # Store the original image
         self.image_tk: Optional[ImageTk.PhotoImage] = None
@@ -707,7 +725,7 @@ class FigureAnnotator:
 
     def open_image(self, event=None):
         """Opens image."""
-        self.image_path = filedialog.askopenfilename(
+        self.image_path = self.tkFiledialog.askopenfilename(
             filetypes=[("Image files", "*.jpg *.jpeg *.png")]
         )
         if self.image_path:
@@ -744,17 +762,17 @@ class FigureAnnotator:
         self.root.geometry(f"{self.original_width}x{self.original_height}")
 
         self.update_image(self.original_image)
-        self.file_menu.entryconfig("Save JSON", state=tk.NORMAL)
-        self.file_menu.entryconfig("Save JSON As...", state=tk.NORMAL)
+        self.file_menu.entryconfig("Save JSON", state=self.tk.NORMAL)
+        self.file_menu.entryconfig("Save JSON As...", state=self.tk.NORMAL)
         if self.with_grid:
-            self.edit_menu.entryconfig("Add Grid", state=tk.NORMAL)
+            self.edit_menu.entryconfig("Add Grid", state=self.tk.NORMAL)
 
     def update_image(self, image):
         """Helper function to update the image on the canvas."""
         self.current_width, self.current_height = image.size
         self.image_tk = ImageTk.PhotoImage(image)
         self.canvas.config(width=self.current_width, height=self.current_height)
-        self.canvas.create_image(0, 0, anchor=tk.NW, image=self.image_tk)
+        self.canvas.create_image(0, 0, anchor=self.tk.NW, image=self.image_tk)
 
         # After updating the image, redraw the points and lines with scaled coordinates
         self.update_displayed_points()
@@ -804,7 +822,7 @@ class FigureAnnotator:
 
             # Resize the image to the new width and height
             resized_image = self.original_image.resize(
-                (new_width, new_height), Image.BILINEAR     # type: ignore
+                (new_width, new_height), Image.BILINEAR  # type: ignore
             )
             self.update_image(resized_image)
 
@@ -865,7 +883,7 @@ class FigureAnnotator:
                     self.draw_polygon(self.displayed_points[-self.num_vertices :])
 
             if self.points or self.with_grid and self.grids:
-                self.edit_menu.entryconfig("Undo", state=tk.NORMAL)
+                self.edit_menu.entryconfig("Undo", state=self.tk.NORMAL)
 
     def on_motion(self, event):
         """Processes actions related to mouse movement."""
@@ -1186,7 +1204,7 @@ class FigureAnnotator:
             self.grids[new_grid_id] = Grid(str(new_grid_id))
             self.added_grid_id = self.grid_idx_to_key(new_grid_id)
             self.update_grid_menu()
-            self.edit_menu.entryconfig("Remove Grid", state=tk.NORMAL)
+            self.edit_menu.entryconfig("Remove Grid", state=self.tk.NORMAL)
 
     def remove_grid(self, event=None):
         """Remove grid."""
@@ -1211,9 +1229,9 @@ class FigureAnnotator:
                 self.grids.pop(cur_sel)
                 self.update_grid_menu()
                 if len(self.grids.values()) == 0:
-                    self.edit_menu.entryconfig("Remove Grid", state=tk.DISABLED)
+                    self.edit_menu.entryconfig("Remove Grid", state=self.tk.DISABLED)
                     if self.figures_empty():
-                        self.edit_menu.entryconfig("Undo", state=tk.DISABLED)
+                        self.edit_menu.entryconfig("Undo", state=self.tk.DISABLED)
 
     def draw_grid_label(self, grid: Grid):
         ref_point = grid.displayed_points[0]
@@ -1293,7 +1311,7 @@ class FigureAnnotator:
                     self.update_displayed_points()
             self.redraw_polygons()
             if self.figures_empty():
-                self.edit_menu.entryconfig("Undo", state=tk.DISABLED)
+                self.edit_menu.entryconfig("Undo", state=self.tk.DISABLED)
 
     def undo(self, event=None):
         """Processes point deletion."""
@@ -1307,7 +1325,9 @@ class FigureAnnotator:
                     self.grids.pop(cur_sel)
                     self.update_grid_menu()
                     if len(self.grids.values()) == 0:
-                        self.edit_menu.entryconfig("Remove Grid", state=tk.DISABLED)
+                        self.edit_menu.entryconfig(
+                            "Remove Grid", state=self.tk.DISABLED
+                        )
                 else:
                     if grid.complete():
                         self.canvas.delete(
@@ -1371,7 +1391,7 @@ class FigureAnnotator:
                         )
 
             if self.figures_empty():
-                self.edit_menu.entryconfig("Undo", state=tk.DISABLED)
+                self.edit_menu.entryconfig("Undo", state=self.tk.DISABLED)
 
     def figures_complete(self):
         return (
@@ -1398,7 +1418,9 @@ class FigureAnnotator:
                 and any([not grid.complete() for grid in self.grids.values()])
             )
         ):
-            messagebox.showerror("Error", "No points or insufficient points to save.")
+            self.tk.messagebox.showerror(
+                "Error", "No points or insufficient points to save."
+            )
             return False
         return True
 
@@ -1464,7 +1486,7 @@ class FigureAnnotator:
             if not self.check_completeness_on_save():
                 return
 
-            self.save_path = filedialog.asksaveasfilename(
+            self.save_path = self.tkFiledialog.asksaveasfilename(
                 initialfile=self.results_file_name,
                 defaultextension=".json",
                 filetypes=[("JSON files", "*.json")],
@@ -1475,7 +1497,7 @@ class FigureAnnotator:
     def on_close(self):
         """Prompt the user before closing the window if there are unsaved changes."""
         if not self.figures_empty() and self.data_updated():
-            response = messagebox.askyesnocancel(
+            response = self.tk.messagebox.askyesnocancel(
                 "Unsaved Changes", "You have unsaved changes. Save before exiting?"
             )
             if response:  # Yes: Save the changes
@@ -1500,20 +1522,20 @@ class FigureAnnotator:
                 return help_message_polygon
 
     def show_help(self):
-        help_window = Toplevel(self.root)
+        help_window = self.tk.Toplevel(self.root)
         help_window.title(f"About {self.figure_type.capitalize()} Annotator")
         help_window.geometry("1100x500")  # Set the size of the window
 
-        scrollbar = Scrollbar(help_window)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        scrollbar = self.tk.Scrollbar(help_window)
+        scrollbar.pack(side=self.tk.RIGHT, fill=self.tk.Y)
 
-        help_text = Text(
-            help_window, wrap=tk.WORD, yscrollcommand=scrollbar.set, font=self.font
+        help_text = self.tk.Text(
+            help_window, wrap=self.tk.WORD, yscrollcommand=scrollbar.set, font=self.font
         )
 
-        help_text.insert(tk.END, self.get_help_message())
-        help_text.config(state=tk.DISABLED)
-        help_text.pack(expand=True, fill=tk.BOTH)
+        help_text.insert(self.tk.END, self.get_help_message())
+        help_text.config(state=self.tk.DISABLED)
+        help_text.pack(expand=True, fill=self.tk.BOTH)
         scrollbar.config(command=help_text.yview)
 
 

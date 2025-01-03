@@ -63,6 +63,8 @@ setup(
         "build": ["build"],
         # external notifications
         "notifications": ["apprise", "minio"],
+        # annotation tool
+        "annotator": ["tk"],
     },
     include_package_data=True,
 )
