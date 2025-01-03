@@ -8,7 +8,7 @@
 # and the driver for this utility.
 #
 
-from PIL import Image, ImageTk
+from PIL import Image
 import json
 import argparse
 import cv2
@@ -83,7 +83,7 @@ help_message_grid = """
         polygon. Once a zone is complete, the user can modify the most recently
         added zone or draw a new zone.
 
-        In grid mode, the user can create a horizontal 1-by-N grid with N adjacent
+        In grid mode, the user can create a 1-by-N grid with N adjacent
         zones. Starting from the top-left corner of the grid and going
         counter-clockwise, the user left-clicks to select 4 corner points of the grid.
         At this point, this grid is minimally-complete and the user can save it as a
@@ -533,6 +533,11 @@ class FigureAnnotator:
                 custom_message="'tkinter' is not available. Hint: install tkinter with "
                 + "'sudo apt install python3-tk' (Linux) or 'brew install tcl-tk' (macOS)",
             )
+            self.imageTk = env.import_optional_package(
+                "PIL.ImageTk",
+                custom_message="'tkinter' is not available. Hint: install tkinter with "
+                + "'sudo apt install python3-tk' (Linux) or 'brew install tcl-tk' (macOS)",
+            )
             self.root = self.tk.Tk()
             self.root.title(f"{self.figure_type.capitalize()} Annotator")
             self.root.geometry("700x410" if self.with_grid else "700x375")
@@ -542,7 +547,7 @@ class FigureAnnotator:
             self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
             # Set window icon
-            self.icon_image = ImageTk.PhotoImage(
+            self.icon_image = self.imageTk.PhotoImage(
                 file=str(Path(__file__).parent) + "/assets/logo.ico"
             )
             self.root.iconphoto(True, self.icon_image)  # type: ignore
@@ -661,7 +666,7 @@ class FigureAnnotator:
             self.canvas.pack(fill=self.tk.BOTH, expand=True)
 
         self.original_image: Optional[Image.Image] = None  # Store the original image
-        self.image_tk: Optional[ImageTk.PhotoImage] = None
+        self.image_tk: Optional[self.imageTk.PhotoImage] = None
         self.points: List[Tuple] = []  # Points relative to the original image
         self.displayed_points: List[Tuple] = []  # Points relative to the resized image
         self.polygon_ids: List[int] = []  # Store polygon IDs for undo
@@ -737,7 +742,7 @@ class FigureAnnotator:
         if self.open_image_frame:
             self.open_image_frame.destroy()
             del self.open_button
-            del self.open_image_frame
+            self.open_image_frame = None
 
         self.root.resizable(True, True)
 
@@ -770,7 +775,7 @@ class FigureAnnotator:
     def update_image(self, image):
         """Helper function to update the image on the canvas."""
         self.current_width, self.current_height = image.size
-        self.image_tk = ImageTk.PhotoImage(image)
+        self.image_tk = self.imageTk.PhotoImage(image)
         self.canvas.config(width=self.current_width, height=self.current_height)
         self.canvas.create_image(0, 0, anchor=self.tk.NW, image=self.image_tk)
 
