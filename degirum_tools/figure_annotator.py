@@ -665,8 +665,10 @@ class FigureAnnotator:
             self.canvas = self.tk.Canvas(self.main_frame, cursor="cross")
             self.canvas.pack(fill=self.tk.BOTH, expand=True)
 
+        from PIL import ImageTk
+
         self.original_image: Optional[Image.Image] = None  # Store the original image
-        self.image_tk: Optional[self.imageTk.PhotoImage] = None
+        self.image_tk: Optional[ImageTk.PhotoImage] = None
         self.points: List[Tuple] = []  # Points relative to the original image
         self.displayed_points: List[Tuple] = []  # Points relative to the resized image
         self.polygon_ids: List[int] = []  # Store polygon IDs for undo
