@@ -359,6 +359,7 @@ def model_time_profile(
 
         with model:
             model(frame)  # run model once to warm up the system
+            model.reset_time_stats()
 
             # run batch prediction
             t = Timer()
