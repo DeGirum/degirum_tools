@@ -147,14 +147,17 @@ class VideoDisplayGizmo(Gizmo):
                 for w in self._window_titles
             ]
             first_run = [True] * ndisplays
+            input_done = [False] * ninputs
 
             di = -1  # di is display index
             try:
                 while True:
-                    if self._abort:
+                    if self._abort or all(input_done):
                         break
 
                     for ii, input in enumerate(self.get_inputs()):  # ii is input index
+                        if input_done[ii]:
+                            continue
                         try:
                             if ninputs > 1 and not test_mode:
                                 # non-multiplexing multi-input case (do not use it in test mode to avoid race conditions)
@@ -170,7 +173,7 @@ class VideoDisplayGizmo(Gizmo):
                         di = (di + 1) % ndisplays if self._multiplex else ii
 
                         if data == Stream._poison:
-                            self._abort = True
+                            input_done[ii] = True
                             break
 
                         img = data.data
