@@ -162,13 +162,14 @@ class ObjectSelector(ResultAnalyzerBase):
         )
 
         for obj in result._inference_results:
-            bbox = tuple(map(int, obj["bbox"]))
-
-            cv2.rectangle(
-                image,
-                bbox[:2],
-                bbox[2:],
-                rgb_to_bgr(color),
-                2,
-            )
+            bbox = obj.get("bbox")
+            if bbox is not None:
+                int_bbox = tuple(map(int, bbox))
+                cv2.rectangle(
+                    image,
+                    int_bbox[:2],
+                    int_bbox[2:],
+                    rgb_to_bgr(color),
+                    2,
+                )
         return image
