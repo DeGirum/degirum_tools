@@ -8,12 +8,18 @@
 #
 
 import queue, cv2, numpy as np, degirum as dg
+import inspect
+import copy
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Union, Optional, List
 from .image_tools import detect_motion
 from .math_support import nms, NmsBoxSelectionPolicy
-from .result_analyzer_base import ResultAnalyzerBase, image_overlay_substitute
+from .result_analyzer_base import (
+    ResultAnalyzerBase,
+    image_overlay_substitute,
+    clone_result,
+)
 from .crop_extent import CropExtentOptions, extend_bbox
 from .image_tools import crop_image, image_size
 
@@ -70,7 +76,6 @@ class FrameInfo:
 
     def __init__(self, result1, sub_result):
         self.result1 = result1  # model 1 result
-        self.original_info = result1.info  # original frame info
         self.sub_result = sub_result  # sub-result index in model 1 result
 
 
@@ -104,7 +109,6 @@ class CompoundModelBase(ModelLike):
         """
         self.model1 = model1
         self.model2 = model2
-        self._master_model = model2
         self.queue = CompoundModelBase.NonBlockingQueue()
         # soft limit for the queue size
         self._queue_soft_limit = model1.frame_queue_depth
@@ -130,7 +134,8 @@ class CompoundModelBase(ModelLike):
             result2: combined prediction result of the second model
 
         Returns:
-            Transformed result to be returned as compound model result
+            Transformed result to be returned as compound model result.
+            It should be derived from the result of the first model.
         """
 
     def predict_batch(self, data):
@@ -153,22 +158,16 @@ class CompoundModelBase(ModelLike):
         # iterator over predictions of nested model
         model2_iter = self.model2.predict_batch(self.queue)
 
-        def result2_apply_final_steps(result2, transformed_result2):
-
-            # restore original frame info to support nested compound models
-            if isinstance(transformed_result2.info, FrameInfo):
-                transformed_result2._frame_info = transformed_result2.info.original_info
-            else:
-                transformed_result2._frame_info = transformed_result2.info
+        def result_apply_final_steps(transformed_result):
 
             # apply analyzers if any
             if self._analyzers:
                 for analyzer in self._analyzers:
-                    analyzer.analyze(transformed_result2)
+                    analyzer.analyze(transformed_result)
 
-                image_overlay_substitute(transformed_result2, self._analyzers)
+                image_overlay_substitute(transformed_result, self._analyzers)
 
-            return transformed_result2
+            return transformed_result
 
         for result1 in self.model1.predict_batch(data):
             # put result of the first model into the queue
@@ -180,9 +179,9 @@ class CompoundModelBase(ModelLike):
                 no_results = True
                 while result2 := next(model2_iter):
                     if (
-                        transformed_result2 := self.transform_result2(result2)
+                        transformed_result := self.transform_result2(result2)
                     ) is not None:
-                        yield result2_apply_final_steps(result2, transformed_result2)
+                        yield result_apply_final_steps(transformed_result)
                         no_results = False
 
                 if no_results and self.model1.non_blocking_batch_predict:
@@ -196,8 +195,8 @@ class CompoundModelBase(ModelLike):
 
         # process all remaining results
         for result2 in model2_iter:
-            if (transformed_result2 := self.transform_result2(result2)) is not None:
-                yield result2_apply_final_steps(result2, transformed_result2)
+            if (transformed_result := self.transform_result2(result2)) is not None:
+                yield result_apply_final_steps(transformed_result)
 
     # explicitly redirect setting of `non_blocking_batch_predict` to the first model
     @property
@@ -234,25 +233,31 @@ class CompoundModelBase(ModelLike):
 
     # fallback all getters of model-like attributes to the master model
     def __getattr__(self, attr):
-        return getattr(self._master_model, attr)
+        return getattr(self.model1, attr)
 
     # fallback all setters of model-like attributes to the master model if it is defined
-    def __setattr__(self, name, value):
-        if "_master_model" not in self.__dict__:
-            return super().__setattr__(name, value)
+    def __setattr__(self, key, value):
 
-        model_class = self._master_model.__class__
-        is_model_class_attr = hasattr(model_class, name)
-        if not is_model_class_attr and not hasattr(self._master_model, name):
-            # this is to set attributes of the compound model itself
-            return super().__setattr__(name, value)
-
-        if is_model_class_attr:
-            attr = getattr(model_class, name)
-            if isinstance(attr, property) and attr.fset:
-                return attr.fset(self._master_model, value)
-
-        setattr(self._master_model, name, value)
+        # we allow setting existing attributes/properties; we allow creating new attributes but only in __init__
+        # note: we cannot use hasattr() here because it will trigger __getattr__ call, which redirects to the master model
+        if (
+            key in self.__dict__
+            or key in self.__class__.__dict__
+            or (
+                (cur_frame := inspect.currentframe()) is not None
+                and (f_back := cur_frame.f_back) is not None
+                and f_back.f_code.co_name == "__init__"
+            )
+        ):
+            super().__setattr__(key, value)
+        else:
+            # otherwise we redirecting attributes setting to the master model, if it is assigned
+            if "model1" in self.__dict__:
+                setattr(self.model1, key, value)
+            else:
+                raise AttributeError(
+                    f"Attempt to add new attribute '{key}' to {self.__class__}: it is prohibited for compound models to add new attributes outside of __init__"
+                )
 
 
 class CombiningCompoundModel(CompoundModelBase):
@@ -279,16 +284,17 @@ class CombiningCompoundModel(CompoundModelBase):
         """
         Transform result of the second model.
 
-        This implementation appends result of the first model to the result of the second model.
+        This implementation appends result of the second model to the result of the first model.
 
         Args:
             result2: prediction result of the second model
 
         Returns:
-            Combined result of both models. It's `info` property is the result of the first model.
+            Combined result of both models.
         """
-        result2.results.extend(result2.info.result1.results)
-        return result2
+        result1 = result2.info.result1
+        result1.results.extend(result2.results)
+        return result1
 
 
 class CroppingCompoundModel(CompoundModelBase):
@@ -346,20 +352,6 @@ class CroppingCompoundModel(CompoundModelBase):
                 cropped_img = crop_image(result1.image, adj_bbox)
                 self.queue.put((cropped_img, FrameInfo(result1, idx)))
 
-    def transform_result2(self, result2):
-        """
-        Transform result of the second model.
-
-        This implementation appends result of the first model to the result of the second model.
-
-        Args:
-            result2: prediction result of the second model
-
-        Returns:
-            Result of second model. It's `info` property is the result of the first model.
-        """
-        return result2
-
     def _adjust_bbox(self, bbox, image_sz):
         """
         Inflate bbox coordinates to crop extent according to chosen crop extent approach
@@ -414,8 +406,15 @@ class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
             )
 
         super().__init__(model1, model2, crop_extent, crop_extent_option)
-        self._current_result = None
-        self._master_model = model1  # because we yield results of the first model
+        self._current_result: Optional[list] = None
+        self._current_result1: Optional[dg.postprocessor.InferenceResults] = None
+
+    def _finalize_current_result(self):
+        if self._current_result is not None and self._current_result1 is not None:
+            ret = copy.copy(self._current_result1)
+            ret._inference_results = self._current_result
+            return ret
+        return None
 
     def transform_result2(self, result2):
         """
@@ -435,25 +434,26 @@ class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
         result1 = result2.info.result1
         idx = result2.info.sub_result
 
-        if idx >= 0:
+        ret = None
+        if result1 is not self._current_result1:
+            # new frame comes: compute combined result of previous frame
+            ret = self._finalize_current_result()
+            self._current_result = copy.deepcopy(result1._inference_results)
+            self._current_result1 = result1
+
+        if idx >= 0 and self._current_result is not None:
             # patch bbox label with recognized class label and adjust probability
             r = result2.results[0]
             label = r.get("label")
             if label is not None:
-                result1.results[idx]["label"] = label
+                self._current_result[idx]["label"] = label
             score = r.get("score")
             if score is not None:
-                result1.results[idx]["score"] = score
+                self._current_result[idx]["score"] = score
             category_id = r.get("category_id")
             if category_id is not None:
-                result1.results[idx]["category_id"] = category_id
+                self._current_result[idx]["category_id"] = category_id
 
-        # return result when frame changes
-        ret = None
-        if result1 is not self._current_result:
-            if self._current_result is not None:
-                ret = self._current_result
-            self._current_result = result1
         return ret
 
     def predict_batch(self, data):
@@ -470,10 +470,11 @@ class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
             This allows you directly using the result in `for` loops.
         """
         self._current_result = None
+        self._current_result1 = None
         for result in super().predict_batch(data):
             yield result
         if self._current_result is not None:
-            yield self._current_result
+            yield self._finalize_current_result()
 
 
 @dataclass
@@ -493,7 +494,7 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
     and then passes cropped images to the second detection model, which performs detections
     in each bbox and combines detection results from multiple bboxes from the same frame.
     It returns the combined results of the **second** model where bbox coordinates are translated
-    to original image coordinates.
+    to original image coordinates, optionally augmented with the results of the first model.
 
     Restriction: first model should be of object detection type
     (or pseudo object detection type like `RegionExtractionPseudoModel),
@@ -528,31 +529,29 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
             )
 
         super().__init__(model1, model2, crop_extent, crop_extent_option)
-        self._current_result: Optional[dg.postprocessor.InferenceResults] = None
+        self._current_result: Optional[list] = None
         self._current_result1: Optional[dg.postprocessor.InferenceResults] = None
         self._add_model1_results = add_model1_results
         self._nms_options: Optional[NmsOptions] = nms_options
 
-    def _finalize_current_result(self, result1):
-        if self._current_result is not None:
-            # patch combined result image to be original image
-            self._current_result._input_image = result1.image
+    def _finalize_current_result(self):
+        if self._current_result is not None and self._current_result1 is not None:
+            if self._add_model1_results:
+                ret = clone_result(self._current_result1)
+                ret._inference_results.extend(self._current_result)
+            else:
+                ret = copy.copy(self._current_result1)
+                ret._inference_results = self._current_result
 
             if self._nms_options is not None:
                 # apply NMS to combined result
                 nms(
-                    self._current_result,
+                    ret,
                     iou_threshold=self._nms_options.threshold,
                     use_iou=self._nms_options.use_iou,
                     box_select=self._nms_options.box_select,
                 )
-
-            if isinstance(self._current_result.info, FrameInfo):
-                self._current_result._frame_info = (
-                    self._current_result.info.original_info
-                )
-
-            return self._current_result
+            return ret
         return None
 
     def transform_result2(self, result2):
@@ -575,6 +574,7 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
 
         if idx >= 0:
             # adjust bbox coordinates to original image coordinates
+            result2 = clone_result(result2)
             x, y = result1.results[idx]["bbox"][:2]
             for r in result2._inference_results:
                 if "bbox" in r:
@@ -585,22 +585,15 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
                         m["landmark"][0] += x
                         m["landmark"][1] += y
 
-            if self._add_model1_results:
-                # prepend result from the first model to the combined result if requested
-                result2._inference_results.insert(0, result1.results[idx])
-
         ret = None
         if result1 is self._current_result1:
             # frame continues: append second model results to the combined result
             if self._current_result is not None and idx >= 0:
-                self._current_result._inference_results.extend(
-                    result2._inference_results
-                )
-
+                self._current_result.extend(result2._inference_results)
         else:
             # new frame comes: return combined result of previous frame
-            ret = self._finalize_current_result(self._current_result1)
-            self._current_result = result2
+            ret = self._finalize_current_result()
+            self._current_result = copy.deepcopy(result2._inference_results)
             self._current_result1 = result1
 
         return ret
@@ -619,10 +612,11 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
             This allows you directly using the result in `for` loops.
         """
         self._current_result = None
+        self._current_result1 = None
         for result in super().predict_batch(data):
             yield result
         if self._current_result is not None:
-            yield self._finalize_current_result(self._current_result1)
+            yield self._finalize_current_result()
 
 
 @dataclass
