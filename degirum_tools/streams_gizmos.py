@@ -17,7 +17,7 @@ from .environment import get_test_mode
 from .video_support import open_video_stream, open_video_writer
 from .ui_support import Display
 from .image_tools import crop_image, resize_image, image_size, to_opencv
-from .result_analyzer_base import image_overlay_substitute
+from .result_analyzer_base import image_overlay_substitute, clone_result
 from .crop_extent import CropExtentOptions, extend_bbox
 from .notifier import EventNotifier
 from .event_detector import EventDetector
@@ -32,13 +32,6 @@ tag_inference = "dgt_inference"  # tag for inference result
 tag_preprocess = "dgt_preprocess"  # tag for preprocessor result
 tag_crop = "dgt_crop"  # tag for cropping result
 tag_analyzer = "dgt_analyzer"  # tag for analyzer result
-
-
-def clone_result(result):
-    """Create a clone of PySDK result object. Clone inherits image references, but duplicates inference results."""
-    clone = copy.copy(result)
-    clone._inference_results = copy.deepcopy(result._inference_results)
-    return clone
 
 
 class VideoSourceGizmo(Gizmo):
