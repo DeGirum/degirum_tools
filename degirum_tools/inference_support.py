@@ -115,7 +115,7 @@ def _create_analyzing_postprocessor_class(
             if "_result" in self.__dict__:
                 return getattr(self._result, attr)
             else:
-                raise AttributeError(f"Attribute _result not found")
+                raise AttributeError("Attribute _result not found")
 
         def __setattr__(self, attr, value):
             if attr in self.__dict__ or attr == "_result":
