@@ -4,8 +4,9 @@ from typing import List, MutableSequence, Optional, Sequence, Tuple, Union
 import cv2, numpy as np, degirum as dg
 
 from .math_support import nms, edge_box_fusion
+from .image_tools import image_size
+from .result_analyzer_base import clone_result
 from .compound_models import (
-    FrameInfo,
     CropExtentOptions,
     ModelLike,
     NmsOptions,
@@ -445,11 +446,9 @@ class TileModel(CroppingAndDetectingCompoundModel):
         self.output_postprocess_type = self.model2.output_postprocess_type
 
     def __enter__(self):
-        self.model2._in_context = True
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.model2._in_context = False
         self.model2._release_runtime()
 
 
@@ -531,6 +530,7 @@ class LocalGlobalTileModel(TileModel):
 
         if idx >= 0:
             # adjust bbox coordinates to original image coordinates
+            result2 = clone_result(result2)
             is_global = True if result1.results[idx]["label"] == "GLOBAL" else False
             overlap_percent = result1.results[0]["tile_info"].overlap
 
@@ -553,22 +553,15 @@ class LocalGlobalTileModel(TileModel):
                     if _is_large_object(r["bbox"], self._large_obj_thr):
                         del result2._inference_results[i]
 
-            if self._add_model1_results:
-                # prepend result from the first model to the combined result if requested
-                result2._inference_results.insert(0, result1.results[idx])
-
         ret = None
         if result1 is self._current_result1:
             # frame continues: append second model results to the combined result
             if self._current_result is not None and idx >= 0:
-                self._current_result._inference_results.extend(
-                    result2._inference_results
-                )
-
+                self._current_result.extend(result2._inference_results)
         else:
             # new frame comes: return combined result of previous frame
-            ret = self._finalize_current_result(self._current_result1)
-            self._current_result = result2
+            ret = self._finalize_current_result()
+            self._current_result = copy.deepcopy(result2._inference_results)
             self._current_result1 = result1
 
         return ret
@@ -655,25 +648,26 @@ class BoxFusionTileModel(_EdgeMixin, TileModel):
 
         return central_boxes, edge_boxes
 
-    def _finalize_current_result(self, result1):
-        if self._current_result is not None:
-            # patch combined result image to be original image
-            self._current_result._input_image = result1.image
+    def _finalize_current_result(self):
+        if self._current_result is not None and self._current_result1 is not None:
+            if self._add_model1_results:
+                ret = clone_result(self._current_result1)
+                ret._inference_results.extend(self._current_result)
+            else:
+                ret = copy.copy(self._current_result1)
+                ret._inference_results = self._current_result
 
-            try:
-                height, width, _ = result1.image.shape
-            except AttributeError:
-                width, height = result1.image.size
+            height, width = image_size(ret.image)
 
             # Perform fusion of boxes labeled as edge detections.
             edge_boxes = []
-            for i, r in _reverse_enumerate(self._current_result._inference_results):
+            for i, r in _reverse_enumerate(ret._inference_results):
                 if "wbf_info" in r:
                     # Normalize
                     r["wbf_info"] = np.divide(
                         r["wbf_info"], [width, height, width, height]
                     ).tolist()
-                    edge_boxes.append(self._current_result._inference_results.pop(i))
+                    edge_boxes.append(ret._inference_results.pop(i))
 
             edge_boxes = edge_box_fusion(edge_boxes, self._fusion_thr)
 
@@ -683,23 +677,18 @@ class BoxFusionTileModel(_EdgeMixin, TileModel):
                     r["bbox"], [width, height, width, height]
                 ).tolist()
 
-            self._current_result._inference_results.extend(edge_boxes)
+            ret._inference_results.extend(edge_boxes)
 
             if self._nms_options is not None:
                 # apply NMS to combined result
                 nms(
-                    self._current_result,
+                    ret,
                     iou_threshold=self._nms_options.threshold,
                     use_iou=self._nms_options.use_iou,
                     box_select=self._nms_options.box_select,
                 )
 
-            if isinstance(self._current_result.info, FrameInfo):
-                self._current_result._frame_info = (
-                    self._current_result.info.original_info
-                )
-
-            return self._current_result
+            return ret
         return None
 
     def transform_result2(self, result2):
@@ -757,26 +746,22 @@ class BoxFusionTileModel(_EdgeMixin, TileModel):
                     ).tolist()
 
             # adjust bbox coordinates to original image coordinates
+            result2 = clone_result(result2)
             for r in result2._inference_results:
                 if "bbox" not in r:
                     continue
                 r["bbox"] = np.add(r["bbox"], [x, y, x, y]).tolist()
-            if self._add_model1_results:
-                # prepend result from the first model to the combined result if requested
-                result2._inference_results.insert(0, result1.results[idx])
 
         ret = None
         if result1 is self._current_result1:
             # frame continues: append second model results to the combined result
             if self._current_result is not None and idx >= 0:
-                self._current_result._inference_results.extend(
-                    result2._inference_results
-                )
+                self._current_result.extend(result2._inference_results)
 
         else:
             # new frame comes: return combined result of previous frame
-            ret = self._finalize_current_result(self._current_result1)
-            self._current_result = result2
+            ret = self._finalize_current_result()
+            self._current_result = copy.deepcopy(result2._inference_results)
             self._current_result1 = result1
 
         return ret
@@ -897,22 +882,16 @@ class BoxFusionLocalGlobalTileModel(BoxFusionTileModel):
 
                 return super().transform_result2(result2)
 
-            if self._add_model1_results:
-                # prepend result from the first model to the combined result if requested
-                result2._inference_results.insert(0, result1.results[idx])
-
         ret = None
         if result1 is self._current_result1:
             # frame continues: append second model results to the combined result
             if self._current_result is not None and idx >= 0:
-                self._current_result._inference_results.extend(
-                    result2._inference_results
-                )
+                self._current_result.extend(result2._inference_results)
 
         else:
             # new frame comes: return combined result of previous frame
-            ret = self._finalize_current_result(self._current_result1)
-            self._current_result = result2
+            ret = self._finalize_current_result()
+            self._current_result = result2._inference_results
             self._current_result1 = result1
 
         return ret

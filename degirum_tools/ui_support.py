@@ -431,7 +431,10 @@ class Display:
     def __exit__(self, exc_type, exc_val, exc_tb):
         # close OpenCV window in any
         if self._window_created:
-            cv2.destroyWindow(self._capt)
+            try:
+                cv2.destroyWindow(self._capt)
+            except Exception:
+                pass
 
         # close video writer if any, and show video in Colab
         if self._video_writer is not None:

@@ -7,6 +7,7 @@
 
 from abc import ABC, abstractmethod
 import numpy as np
+import copy
 from typing import List
 
 
@@ -93,3 +94,10 @@ def image_overlay_substitute(result, analyzers: List[ResultAnalyzerBase]):
         },
     )
     setattr(result, "_analyzers", analyzers)
+
+
+def clone_result(result):
+    """Create a clone of PySDK result object. Clone inherits image references, but duplicates inference results."""
+    clone = copy.copy(result)
+    clone._inference_results = copy.deepcopy(result._inference_results)
+    return clone

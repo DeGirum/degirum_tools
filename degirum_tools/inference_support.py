@@ -112,10 +112,13 @@ def _create_analyzing_postprocessor_class(
 
         # delegate all other attributes to wrapped postprocessor
         def __getattr__(self, attr):
-            return getattr(self._result, attr)
+            if "_result" in self.__dict__:
+                return getattr(self._result, attr)
+            else:
+                raise AttributeError("Attribute _result not found")
 
         def __setattr__(self, attr, value):
-            if attr in self.__dict__:
+            if attr in self.__dict__ or attr == "_result":
                 super().__setattr__(attr, value)
             else:
                 setattr(self._result, attr, value)

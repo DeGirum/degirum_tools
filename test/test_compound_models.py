@@ -17,11 +17,13 @@ def test_compound_model_properties(zoo_dir, detection_model, classification_mode
         detection_model, classification_model
     )
 
-    assert model._master_model == detection_model
+    assert model.model1 == detection_model
+    assert model.model2 == classification_model
+    master_model = model.model1
 
     all_props = {
         k
-        for cls in model._master_model.__class__.__mro__
+        for cls in master_model.__class__.__mro__
         for k, v in cls.__dict__.items()
         if isinstance(v, property) and not k.startswith("__")
     }
@@ -29,20 +31,20 @@ def test_compound_model_properties(zoo_dir, detection_model, classification_mode
     # check that all properties can be read from the compound model
     # and they are equal to the master model
     for prop in all_props:
-        master_value = getattr(model._master_model, prop)
+        master_value = getattr(master_model, prop)
         compound_value = getattr(model, prop)
         if not isinstance(master_value, dg.aiclient.ModelParams):
             assert master_value == compound_value
 
     # check few properties that they can be set in the compound model
-    assert not model._master_model.measure_time
+    assert not master_model.measure_time
     model.measure_time = True
-    assert model._master_model.measure_time
+    assert master_model.measure_time
     assert not classification_model.measure_time
 
-    assert model._master_model.input_pad_method == "letterbox"
+    assert master_model.input_pad_method == "letterbox"
     model.input_pad_method = "stretch"
-    assert model._master_model.input_pad_method == "stretch"
+    assert master_model.input_pad_method == "stretch"
     assert classification_model.input_pad_method == "letterbox"
 
 
