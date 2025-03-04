@@ -7,6 +7,7 @@
 
 import json, os, degirum as dg, numpy as np
 from typing import List, Optional
+from collections.abc import Collection
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 from pycocotools.mask import encode
@@ -40,6 +41,8 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
         self.classmap: Optional[dict] = None
         # path to save the predictions as a JSON file
         self.pred_path: Optional[str] = None
+        # sigma values for each keypoint.
+        self.kpt_sigmas: Optional[Collection] = None
 
         if model.output_postprocess_type not in [
             "Detection",
@@ -127,7 +130,7 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
             # pose keypoint map calculation
             if ObjectDetectionModelEvaluator._is_pose_model(jdict[0]):
                 kp_stats = ObjectDetectionModelEvaluator._evaluate_coco(
-                    anno, pred, mAP_type="keypoints", img_id_list=sorted_img_id_list
+                    anno, pred, mAP_type="keypoints", img_id_list=sorted_img_id_list, kpt_sigmas=self.kpt_sigmas
                 )
                 stats.append(kp_stats)
             # instance segmentation map calculation
@@ -214,7 +217,11 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
 
     @staticmethod
     def _evaluate_coco(
-        anno: COCO, pred: COCO, mAP_type: str = "bbox", img_id_list: List[str] = []
+        anno: COCO,
+        pred: COCO,
+        mAP_type: str = "bbox",
+        img_id_list: List[str] = [],
+        kpt_sigmas: Optional[Collection] = None
     ):
         """
         Evaluation process based on the ground truth COCO object and the prediction object
@@ -230,6 +237,10 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
         eval_obj = COCOeval(anno, pred, mAP_type)
         if img_id_list:
             eval_obj.params.imgIds = [id for id in img_id_list]  # image IDs to evaluate
+
+        if mAP_type == "keypoints" and kpt_sigmas is not None:
+            eval_obj.params.kpt_oks_sigmas = np.array(kpt_sigmas)
+
         eval_obj.evaluate()
         eval_obj.accumulate()
         eval_obj.summarize()
