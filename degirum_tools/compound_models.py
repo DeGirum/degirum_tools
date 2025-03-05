@@ -40,7 +40,7 @@ class ModelLike(ABC):
         Args:
             data (iterator):
                 Inference input data iterator object such as a list or a generator function.
-                Each element returned by this iterator should be compatible with what 
+                Each element returned by this iterator should be compatible with what
                 regular PySDK models accept.
 
         Returns:
@@ -246,7 +246,7 @@ class CompoundModelBase(ModelLike):
         """
         Custom postprocessor is not supported for compound models.
         This property will always return None.
-    
+
         Note:
             Attempting to set this property will raise an Exception,
             because compound models do not support custom postprocessors.
@@ -279,9 +279,9 @@ class CompoundModelBase(ModelLike):
 
     def __setattr__(self, key, value):
         """
-        Intercepts attempts to set attributes. If the attribute already exists on the instance, the class, or 
-        is being set inside `__init__`, the attribute is set normally. Otherwise, the attribute assignment is 
-        delegated to the primary model (`model1`) if defined. This prevents adding new attributes outside 
+        Intercepts attempts to set attributes. If the attribute already exists on the instance, the class, or
+        is being set inside `__init__`, the attribute is set normally. Otherwise, the attribute assignment is
+        delegated to the primary model (`model1`) if defined. This prevents adding new attributes outside
         of `__init__`.
         """
         if (
@@ -388,7 +388,7 @@ class CroppingCompoundModel(CompoundModelBase):
                 Prediction result of the first (object detection) model.
         """
         if len(result1.results) == 0 or "bbox" not in result1.results[0]:
-	        # No bbox detected: put a small black image into the queue to keep things going
+            # No bbox detected: put a small black image into the queue to keep things going
             self.queue.put(
                 (np.zeros((2, 2, 3), dtype=np.uint8), FrameInfo(result1, -1))
             )
@@ -427,6 +427,7 @@ class CroppingCompoundModel(CompoundModelBase):
         )
 
 class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
+
     """
     Compound model class which:
 
@@ -736,7 +737,7 @@ class RegionExtractionPseudoModel(ModelLike):
 
         Args:
             roi_list (Union[list, np.ndarray]):
-                Can be: 
+                Can be:
                     - list of ROI boxes in `[x1, y1, x2, y2]` format,
                     - 2D NumPy array of shape (N, 4),
                     - 3D NumPy array of shape (K, M, 4), which will be flattened.
@@ -751,7 +752,7 @@ class RegionExtractionPseudoModel(ModelLike):
 
         self._roi_list = roi_list
         self._model2 = model2
-        self._base_img: list = [] # base image for motion detection
+        self._base_img: list = []  # base image for motion detection
         self._motion_detect = motion_detect
         self._non_blocking_batch_predict = False
         self._custom_postprocessor: Optional[type] = None
