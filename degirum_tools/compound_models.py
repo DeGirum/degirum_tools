@@ -426,8 +426,8 @@ class CroppingCompoundModel(CompoundModelBase):
             image_sz,
         )
 
-class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
 
+class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
     """
     Compound model class which:
 
