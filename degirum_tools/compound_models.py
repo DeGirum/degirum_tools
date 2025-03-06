@@ -30,12 +30,24 @@ from .image_tools import crop_image, image_size
 class ModelLike(ABC):
     """
     A base class which provides a common interface for all models, similar to PySDK model class.
+    
+    When calling `predict_batch(data)`, each item in `data` can be:
+         - A single frame (image/array/etc.), or
+         - A 2-element tuple in the form `(frame, frame_info)`.
+
+        The `frame_info` object (of any type) then appears in the final `InferenceResults.info`
+        attribute, allowing you to carry custom metadata through the pipeline.    
+
     """
 
     @abstractmethod
     def predict_batch(self, data):
         """
         Perform a whole inference lifecycle for all objects in the given iterator object (for example, `list`).
+
+        Each item in `data` can be a **single frame** (any type acceptable to the model) or
+        a **2-element tuple** `(frame, frame_info)`. In the latter case, `frame_info` is
+        carried through and placed in `InferenceResults.info` for that frame.
 
         Args:
             data (iterator):
@@ -55,8 +67,7 @@ class ModelLike(ABC):
 
         Args:
             data (any):
-                Inference input data. The data type depends on the model.
-                Should be compatible wit what regular PySDK models accept.
+                Inference input data, typically an image or array, or a tuple `(frame, frame_info)`.
 
         Returns:
             Combined inference result object.
@@ -71,8 +82,7 @@ class ModelLike(ABC):
 
         Args:
             data (any):
-                Inference input data. The data type depends on the model.
-                Should be compatible wit what regular PySDK models accept.
+                Inference input data, typically an image or array, or a tuple `(frame, frame_info)`.
 
         Returns:
             Combined inference result object.
@@ -83,12 +93,17 @@ class ModelLike(ABC):
 class FrameInfo:
     """
     Class to hold frame info.
+    
+    By default, DeGirum PySDK allows you to pass any arbitrary object as 'frame info'
+    alongside each frame in `predict_batch()`.
 
     Attributes:
         result1 (any):
-            Result object of the first model in the pipeline.
+            The result object produced by the first model in a compound pipeline.
+            For instance, an `InferenceResults` object.
         sub_result (int):
-            Index of the sub-result in the first model's results.
+            The index of a sub-result within `result1` (e.g., which bounding box led
+            to this cropped image).
     """
 
     def __init__(self, result1, sub_result):
@@ -101,6 +116,10 @@ class CompoundModelBase(ModelLike):
     Compound model class which combines two models into one pipeline.
 
     One model is considered *primary* (model1), and the other is *nested* (model2).
+    
+    The primarily model (`model1`) processes the input frames. Its results
+    are then passed to the nested model (`model2`). 
+    
     """
 
     class NonBlockingQueue(queue.Queue):
@@ -169,6 +188,12 @@ class CompoundModelBase(ModelLike):
     def predict_batch(self, data):
         """
         Perform a whole inference lifecycle for all objects in the given iterator object (for example, `list`).
+        
+        Works in a pipeline fashion:
+        1. Pass input frames (or `(frame, frame_info)` tuples) to `model1`.
+        2. Use `queue_result1(result1)` to feed `model2`.
+        3. Collect `model2` results, transform them with `transform_result2(result2)`,
+        4. Yield the final output.
 
         Args:
             data (iterator):
@@ -198,13 +223,13 @@ class CompoundModelBase(ModelLike):
 
             return transformed_result
 
-        # Feed data to model1, and queue the results for model2
+        # 1. Run model1 on input data
         for result1 in self.model1.predict_batch(data):
             if result1 is not None:
                 self.queue_result1(result1)
 
             while True:
-                # Process all results available so far from model2
+                # 2. Process all results available so far from model2
                 no_results = True
                 while result2 := next(model2_iter):
                     if (transformed_result := self.transform_result2(result2)) is not None:
@@ -219,11 +244,11 @@ class CompoundModelBase(ModelLike):
                     # If under the queue soft limit, break to feed the next data to model1
                     break
 
-        # Signal end of queue to the nested model
+        # 3. Signal end of queue to model2
         self.queue.put(None)
         self.model2.non_blocking_batch_predict = False  # restore blocking mode
 
-        # Process any remaining results in model2's iterator
+        # 4. Process any remaining results in model2's iterator
         for result2 in model2_iter:
             if (transformed_result := self.transform_result2(result2)) is not None:
                 yield result_apply_final_steps(transformed_result)
@@ -313,20 +338,19 @@ class CombiningCompoundModel(CompoundModelBase):
 
     def queue_result1(self, result1):
         """
-        Process the result of the first model and put it into the queue.
-
-        This implementation puts the **original image** into the queue,
-        supplying `FrameInfo` as auxiliary data.
+        Queues the original image from `result1` and a new `FrameInfo` instance
+        that references `result1`. This `(frame, frame_info)` tuple is then read by `model2`.
 
         Args:
             result1 (InferenceResults):
-                Prediction result of the first model.
+                Inference result from model1. We extract `result1.image` as the frame,
+                and create a `FrameInfo` so we know which `result1` this frame corresponds to.
         """
         self.queue.put((result1.image, FrameInfo(result1, -1)))
 
     def transform_result2(self, result2):
         """
-        Transform the result of the second model.
+        Merges results from `model2` into `result1` that was stored in `FrameInfo`.
 
         This implementation appends the second model's inference results
         to the first model's result list.
