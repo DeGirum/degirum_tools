@@ -30,13 +30,13 @@ from .image_tools import crop_image, image_size
 class ModelLike(ABC):
     """
     A base class which provides a common interface for all models, similar to PySDK model class.
-    
+
     When calling `predict_batch(data)`, each item in `data` can be:
          - A single frame (image/array/etc.), or
          - A 2-element tuple in the form `(frame, frame_info)`.
 
         The `frame_info` object (of any type) then appears in the final `InferenceResults.info`
-        attribute, allowing you to carry custom metadata through the pipeline.    
+        attribute, allowing you to carry custom metadata through the pipeline.
 
     """
 
@@ -93,7 +93,7 @@ class ModelLike(ABC):
 class FrameInfo:
     """
     Class to hold frame info.
-    
+
     By default, DeGirum PySDK allows you to pass any arbitrary object as 'frame info'
     alongside each frame in `predict_batch()`.
 
@@ -116,10 +116,10 @@ class CompoundModelBase(ModelLike):
     Compound model class which combines two models into one pipeline.
 
     One model is considered *primary* (model1), and the other is *nested* (model2).
-    
+
     The primarily model (`model1`) processes the input frames. Its results
-    are then passed to the nested model (`model2`). 
-    
+    are then passed to the nested model (`model2`).
+
     """
 
     class NonBlockingQueue(queue.Queue):
@@ -188,7 +188,7 @@ class CompoundModelBase(ModelLike):
     def predict_batch(self, data):
         """
         Perform a whole inference lifecycle for all objects in the given iterator object (for example, `list`).
-        
+
         Works in a pipeline fashion:
         1. Pass input frames (or `(frame, frame_info)` tuples) to `model1`.
         2. Use `queue_result1(result1)` to feed `model2`.
