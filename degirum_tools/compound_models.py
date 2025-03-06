@@ -610,7 +610,7 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
 
         Args:
             model1 (ModelLike):
-                Object detection model (or pseudo detection).
+                Object detection model (or pseudo-detection).
             model2 (ModelLike):
                 Object detection model.
             crop_extent (float):
@@ -746,7 +746,7 @@ class MotionDetectOptions:
 
 class RegionExtractionPseudoModel(ModelLike):
     """
-    Pseudo model class which extracts regions from a given image according to given ROI boxes.
+    Pseudo-model class which extracts regions from a given image according to given ROI boxes.
     """
 
     def __init__(
@@ -798,7 +798,7 @@ class RegionExtractionPseudoModel(ModelLike):
     @property
     def custom_postprocessor(self) -> Optional[type]:
         """
-        Custom postprocessor class for region extraction.
+        Custom postprocessor class. Required for attaching analyzers to the pseudo-model.
 
         When set, this replaces the default postprocessor with a user-defined postprocessor.
 
@@ -891,7 +891,7 @@ class RegionExtractionPseudoModel(ModelLike):
                 if motion_detected[idx]
             ]
 
-            # Generate pseudo inference results
+            # Generate pseudo-inference results
             pp = (
                 self._custom_postprocessor
                 if self._custom_postprocessor
