@@ -7,7 +7,10 @@
 # Implements classes for multi-model aggregation.
 #
 
-import queue, cv2, numpy as np, degirum as dg
+import queue
+import cv2
+import numpy as np
+import degirum as dg
 import inspect
 import copy
 from abc import ABC, abstractmethod
@@ -26,30 +29,45 @@ from .image_tools import crop_image, image_size
 
 class ModelLike(ABC):
     """
-    A base class which provides a common interface for all models, similar to PySDK model class
+    A base class which provides a common interface for all models, similar to PySDK model class.
+
+    When calling `predict_batch(data)`, each item in `data` can be:
+         - A single frame (image/array/etc.), or
+         - A 2-element tuple in the form `(frame, frame_info)`.
+
+        The `frame_info` object (of any type) then appears in the final `InferenceResults.info`
+        attribute, allowing you to carry custom metadata through the pipeline.
+
     """
 
     @abstractmethod
     def predict_batch(self, data):
         """
-        Perform whole inference lifecycle for all objects in given iterator object (for example, `list`).
+        Perform a whole inference lifecycle for all objects in the given iterator object (for example, `list`).
+
+        Each item in `data` can be a **single frame** (any type acceptable to the model) or
+        a **2-element tuple** `(frame, frame_info)`. In the latter case, `frame_info` is
+        carried through and placed in `InferenceResults.info` for that frame.
 
         Args:
-            data (iterator): Inference input data iterator object such as list or generator function.
-            Each element returned by this iterator should be compatible to that regular PySDK model
-            accepts
+            data (iterator):
+                Inference input data iterator object such as a list or a generator function.
+                Each element returned by this iterator should be compatible with what
+                regular PySDK models accept.
 
         Returns:
-            Generator object which iterates over combined inference result objects.
-            This allows you directly using the result in `for` loops.
+            iterator:
+                A generator or iterator over the inference result objects.
+                This allows you to use the result in `for` loops.
         """
 
     def predict(self, data):
-        """Perform whole inference lifecycle on a single frame.
+        """
+        Perform a whole inference lifecycle on a single frame.
 
         Args:
-            data (any): Inference input data. Input data type depends on the model.
-            It should be compatible to that regular PySDK model accepts.
+            data (any):
+                Inference input data, typically an image or array, or a tuple `(frame, frame_info)`.
 
         Returns:
             Combined inference result object.
@@ -59,11 +77,12 @@ class ModelLike(ABC):
         return None
 
     def __call__(self, data):
-        """Perform whole inference lifecycle on a single frame.
+        """
+        Perform a whole inference lifecycle on a single frame (callable alias to `predict()`).
 
         Args:
-            data (any): Inference input data. Input data type depends on the model.
-            It should be compatible to that regular PySDK model accepts.
+            data (any):
+                Inference input data, typically an image or array, or a tuple `(frame, frame_info)`.
 
         Returns:
             Combined inference result object.
@@ -72,7 +91,20 @@ class ModelLike(ABC):
 
 
 class FrameInfo:
-    """Class to hold frame info"""
+    """
+    Class to hold frame info.
+
+    By default, DeGirum PySDK allows you to pass any arbitrary object as 'frame info'
+    alongside each frame in `predict_batch()`.
+
+    Attributes:
+        result1 (any):
+            The result object produced by the first model in a compound pipeline.
+            For instance, an `InferenceResults` object.
+        sub_result (int):
+            The index of a sub-result within `result1` (e.g., which bounding box led
+            to this cropped image).
+    """
 
     def __init__(self, result1, sub_result):
         self.result1 = result1  # model 1 result
@@ -82,14 +114,26 @@ class FrameInfo:
 class CompoundModelBase(ModelLike):
     """
     Compound model class which combines two models into one pipeline.
+
+    One model is considered *primary* (model1), and the other is *nested* (model2).
+
+    The primarily model (`model1`) processes the input frames. Its results
+    are then passed to the nested model (`model2`).
+
     """
 
     class NonBlockingQueue(queue.Queue):
         """
-        Specialized non-blocking queue which acts as iterator.
+        Specialized non-blocking queue which acts as an iterator to feed data to the nested model.
         """
 
         def __iter__(self):
+            """
+            Yield items from the queue until a `None` sentinel is reached.
+
+            Yields:
+                any or None: The item from the queue, or `None` if the queue is empty.
+            """
             while True:
                 try:
                     value = self.get_nowait()
@@ -104,63 +148,73 @@ class CompoundModelBase(ModelLike):
         Constructor.
 
         Args:
-            model1: PySDK model to be used for the first step of the pipeline
-            model2: PySDK model to be used for the second step of the pipeline
+            model1 (ModelLike):
+                Model to be used for the first step of the pipeline.
+            model2 (ModelLike):
+                Model to be used for the second step of the pipeline.
         """
         self.model1 = model1
         self.model2 = model2
         self.queue = CompoundModelBase.NonBlockingQueue()
-        # soft limit for the queue size
+        # Soft limit for the queue size
         self._queue_soft_limit = model1.frame_queue_depth
         self._analyzers: List[ResultAnalyzerBase] = []
 
     @abstractmethod
     def queue_result1(self, result1):
         """
-        Process result of the first model and put it into the queue.
-        To be implemented in derived classes.
+        Process the result of the first model and put it into the queue.
 
         Args:
-            result1: prediction result of the first model
+            result1 (InferenceResults):
+                Prediction result of the first model.
         """
 
     @abstractmethod
     def transform_result2(self, result2):
         """
-        Transform result of the second model.
-        To be implemented in derived classes.
+        Transform (or integrate) the result of the second model.
 
         Args:
-            result2: combined prediction result of the second model
+            result2 (InferenceResults):
+                Prediction result of the second model.
 
         Returns:
-            Transformed result to be returned as compound model result.
-            It should be derived from the result of the first model.
+            InferenceResults or None:
+                Transformed/combined result to be returned by the compound model.
+                If None, that means no result is produced at this iteration.
         """
 
     def predict_batch(self, data):
         """
-        Perform whole inference lifecycle for all objects in given iterator object (for example, `list`).
+        Perform a whole inference lifecycle for all objects in the given iterator object (for example, `list`).
+
+        Works in a pipeline fashion:
+        1. Pass input frames (or `(frame, frame_info)` tuples) to `model1`.
+        2. Use `queue_result1(result1)` to feed `model2`.
+        3. Collect `model2` results, transform them with `transform_result2(result2)`,
+        4. Yield the final output.
 
         Args:
-            data (iterator): Inference input data iterator object such as list or generator function.
-            Each element returned by this iterator should be compatible to that regular PySDK model
-            accepts
+            data (iterator):
+                Inference input data iterator object such as a list or a generator function.
+                Each element returned should be compatible with model inference requirements.
 
         Returns:
-            Generator object which iterates over combined inference result objects.
-            This allows you directly using the result in `for` loops.
+            iterator:
+                Generator object which iterates over the combined inference result objects.
+                This allows you to use the result in `for` loops.
         """
-
-        # use non-blocking mode for nested model and regular mode for the first model
+        # Use non-blocking mode for nested model and regular mode for the first model
         self.model2.non_blocking_batch_predict = True
 
-        # iterator over predictions of nested model
+        # Iterator over predictions of the nested model
         model2_iter = self.model2.predict_batch(self.queue)
 
         def result_apply_final_steps(transformed_result):
-
-            # apply analyzers if any
+            """
+            Apply analyzers to the transformed result, if any are attached.
+            """
             if self._analyzers:
                 for analyzer in self._analyzers:
                     analyzer.analyze(transformed_result)
@@ -169,38 +223,43 @@ class CompoundModelBase(ModelLike):
 
             return transformed_result
 
+        # 1. Run model1 on input data
         for result1 in self.model1.predict_batch(data):
-            # put result of the first model into the queue
             if result1 is not None:
                 self.queue_result1(result1)
 
             while True:
-                # process all results ready so far
+                # 2. Process all results available so far from model2
                 no_results = True
                 while result2 := next(model2_iter):
-                    if (
-                        transformed_result := self.transform_result2(result2)
-                    ) is not None:
+                    if (transformed_result := self.transform_result2(result2)) is not None:
                         yield result_apply_final_steps(transformed_result)
                         no_results = False
 
                 if no_results and self.model1.non_blocking_batch_predict:
-                    yield None  # in case of empty queue, yield None to let things moving
+                    # If no result has come through, yield None in non-blocking mode
+                    yield None
 
                 if self.queue.qsize() < self._queue_soft_limit:
+                    # If under the queue soft limit, break to feed the next data to model1
                     break
 
-        self.queue.put(None)  # signal end of queue to nested model
+        # 3. Signal end of queue to model2
+        self.queue.put(None)
         self.model2.non_blocking_batch_predict = False  # restore blocking mode
 
-        # process all remaining results
+        # 4. Process any remaining results in model2's iterator
         for result2 in model2_iter:
             if (transformed_result := self.transform_result2(result2)) is not None:
                 yield result_apply_final_steps(transformed_result)
 
-    # explicitly redirect setting of `non_blocking_batch_predict` to the first model
     @property
     def non_blocking_batch_predict(self):
+        """
+        Flag controlling whether `predict_batch()` operates in non-blocking mode
+        for model1. In non-blocking mode, `predict_batch()` can yield `None`
+        when no results are immediately available.
+        """
         return self.model1.non_blocking_batch_predict
 
     @non_blocking_batch_predict.setter
@@ -209,21 +268,27 @@ class CompoundModelBase(ModelLike):
 
     @property
     def _custom_postprocessor(self) -> Optional[type]:
+        """
+        Custom postprocessor is not supported for compound models.
+        This property will always return None.
+
+        Note:
+            Attempting to set this property will raise an Exception,
+            because compound models do not support custom postprocessors.
+        """
         return None
 
     @_custom_postprocessor.setter
     def _custom_postprocessor(self, val: type):
         raise Exception("Custom postprocessor is not supported for compound models")
 
-    def attach_analyzers(
-        self, analyzers: Union[ResultAnalyzerBase, List[ResultAnalyzerBase], None]
-    ):
+    def attach_analyzers(self, analyzers: Union[ResultAnalyzerBase, List[ResultAnalyzerBase], None]):
         """
         Attach analyzers to a model.
 
         Args:
-            analyzers: List of analyzer objects to attach to model,
-                or `None` to detach all analyzers if any were attached before
+            analyzers (Union[ResultAnalyzerBase, list[ResultAnalyzerBase], None]):
+                A single analyzer, or a list of analyzer objects, or `None` to detach all analyzers.
         """
         self._analyzers = (
             []
@@ -231,15 +296,19 @@ class CompoundModelBase(ModelLike):
             else (analyzers if isinstance(analyzers, list) else [analyzers])
         )
 
-    # fallback all getters of model-like attributes to the master model
     def __getattr__(self, attr):
+        """
+        Fallback for getters of model-like attributes to the primary model (model1).
+        """
         return getattr(self.model1, attr)
 
-    # fallback all setters of model-like attributes to the master model if it is defined
     def __setattr__(self, key, value):
-
-        # we allow setting existing attributes/properties; we allow creating new attributes but only in __init__
-        # note: we cannot use hasattr() here because it will trigger __getattr__ call, which redirects to the master model
+        """
+        Intercepts attempts to set attributes. If the attribute already exists on the instance, the class, or
+        is being set inside `__init__`, the attribute is set normally. Otherwise, the attribute assignment is
+        delegated to the primary model (`model1`) if defined. This prevents adding new attributes outside
+        of `__init__`.
+        """
         if (
             key in self.__dict__
             or key in self.__class__.__dict__
@@ -251,7 +320,6 @@ class CompoundModelBase(ModelLike):
         ):
             super().__setattr__(key, value)
         else:
-            # otherwise we redirecting attributes setting to the master model, if it is assigned
             if "model1" in self.__dict__:
                 setattr(self.model1, key, value)
             else:
@@ -262,35 +330,39 @@ class CompoundModelBase(ModelLike):
 
 class CombiningCompoundModel(CompoundModelBase):
     """
-    Compound model class which combines two models into one pipeline simple way:
-    both models are executed in parallel on the same input data and results are combined.
+    Compound model class which executes two models in parallel on the same input data
+    and merges their results.
 
-    Restriction: both models should have the same result types.
+    Restriction: both models should produce the same type of inference results (e.g., both detection).
     """
 
     def queue_result1(self, result1):
         """
-        Process result of the first model and put it into the queue.
-
-        This implementation puts the original image into the queue,
-        supplying result as a frame info.
+        Queues the original image from `result1` and a new `FrameInfo` instance
+        that references `result1`. This `(frame, frame_info)` tuple is then read by `model2`.
 
         Args:
-            result1: prediction result of the first model
+            result1 (InferenceResults):
+                Inference result from model1. We extract `result1.image` as the frame,
+                and create a `FrameInfo` so we know which `result1` this frame corresponds to.
         """
         self.queue.put((result1.image, FrameInfo(result1, -1)))
 
     def transform_result2(self, result2):
         """
-        Transform result of the second model.
+        Merges results from `model2` into `result1` that was stored in `FrameInfo`.
 
-        This implementation appends result of the second model to the result of the first model.
+        This implementation appends the second model's inference results
+        to the first model's result list.
 
         Args:
-            result2: prediction result of the second model
+            result2 (InferenceResults):
+                Inference result of the second model, which has `info` attribute containing
+                the `FrameInfo`.
 
         Returns:
-            Combined result of both models.
+            InferenceResults:
+                The merged inference results (model1 + model2).
         """
         result1 = result2.info.result1
         result1.results.extend(result2.results)
@@ -299,11 +371,10 @@ class CombiningCompoundModel(CompoundModelBase):
 
 class CroppingCompoundModel(CompoundModelBase):
     """
-    Compound model class which crops original image according to results of the first model
-    and then passes cropped images to the second model.
-    It returns the result of the second model as a compound model result.
+    Compound model class which crops the original image according to results of the first model
+    and then passes these cropped images to the second model.
 
-    Restriction: first model should be of object detection type.
+    Restriction: the first model should be of **object detection** type.
     """
 
     def __init__(
@@ -317,28 +388,31 @@ class CroppingCompoundModel(CompoundModelBase):
         Constructor.
 
         Args:
-            model1: PySDK object detection model
-            model2: PySDK classification model
-            crop_extent: extent of cropping in percent of bbox size
-            crop_extent_option: method of applying extending crop to the input image for model2
+            model1 (ModelLike):
+                Object detection model that produces bounding boxes.
+            model2 (ModelLike):
+                Classification model that will process each cropped region.
+            crop_extent (float):
+                Extent of cropping (in percent of bbox size) to expand the bbox.
+            crop_extent_option (CropExtentOptions):
+                Method of applying extended crop to the input image for model2.
         """
-
         super().__init__(model1, model2)
         self._crop_extent = crop_extent
         self._crop_extent_option = crop_extent_option
 
     def queue_result1(self, result1):
         """
-        Process result of the first model and put it into the queue.
+        Put the original image into the queue, along with bounding boxes from the first model.
 
-        This implementation puts the original image into the queue,
-        supplying result as a frame info.
+        If no bounding boxes are detected, puts a small black image to keep the pipeline in sync.
 
         Args:
-            result1: prediction result of the first model
+            result1 (InferenceResults):
+                Prediction result of the first (object detection) model.
         """
         if len(result1.results) == 0 or "bbox" not in result1.results[0]:
-            # no bbox detected: put black image into the queue to keep things going
+            # No bbox detected: put a small black image into the queue to keep things going
             self.queue.put(
                 (np.zeros((2, 2, 3), dtype=np.uint8), FrameInfo(result1, -1))
             )
@@ -346,7 +420,7 @@ class CroppingCompoundModel(CompoundModelBase):
             image_sz = image_size(result1.image)
             for idx, obj in enumerate(result1.results):
                 adj_bbox = self._adjust_bbox(obj["bbox"], image_sz)
-                # patch bbox in the result with extended bbox
+                # Patch bbox in the result with extended bbox
                 obj["bbox"] = adj_bbox
 
                 cropped_img = crop_image(result1.image, adj_bbox)
@@ -354,12 +428,18 @@ class CroppingCompoundModel(CompoundModelBase):
 
     def _adjust_bbox(self, bbox, image_sz):
         """
-        Inflate bbox coordinates to crop extent according to chosen crop extent approach
-        and adjust to image size
+        Inflate bbox coordinates to the crop extent according to the chosen approach
+        and adjust to image size.
 
         Args:
-            bbox: bbox coordinates in [x1, y1, x2, y2] format
-            image_sz: image size in (width, height) format
+            bbox (list[float]):
+                Bbox coordinates in [x1, y1, x2, y2] format.
+            image_sz (tuple[int, int]):
+                Image size (width, height) of the original image.
+
+        Returns:
+            list[float]:
+                Adjusted bbox coordinates.
         """
         _, h, w, _ = self.model2.input_shape[0]
         return extend_bbox(
@@ -373,14 +453,14 @@ class CroppingCompoundModel(CompoundModelBase):
 
 class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
     """
-    Compound model class which crops original image according to results of the first model
-    and then passes cropped images to the second classification model, which adjusts bbox labels
-    according to classification results.
-    It returns the result of the **first** model where bbox labels are patched with
-    label results of the second model.
+    Compound model class which:
 
-    Restriction: first model should be of object detection type,
-    second model should be of classification type.
+    1. Runs an **object detection** (model1) to generate bounding boxes.
+    2. Crops each bounding box from the original image.
+    3. Runs a **classification** (model2) on each cropped image.
+    4. Patches the original detection results with the classification labels.
+
+    Restriction: first model must be **object detection**, second model must be **classification**.
     """
 
     def __init__(
@@ -394,12 +474,15 @@ class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
         Constructor.
 
         Args:
-            model1: PySDK object detection model
-            model2: PySDK classification model
-            crop_extent: extent of cropping in percent of bbox size
-            crop_extent_option: method of applying extending crop to the input image for model2
+            model1 (ModelLike):
+                An object detection model producing bounding boxes.
+            model2 (ModelLike):
+                A classification model to classify each cropped region.
+            crop_extent (float):
+                Extent of cropping (in percent of bbox size).
+            crop_extent_option (CropExtentOptions):
+                Specifies how to adjust the bounding box before cropping.
         """
-
         if model1.image_backend != model2.image_backend:
             raise Exception(
                 f"Image backends of both models should be the same, but got {model1.image_backend} and {model2.image_backend}"
@@ -410,6 +493,10 @@ class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
         self._current_result1: Optional[dg.postprocessor.InferenceResults] = None
 
     def _finalize_current_result(self):
+        """
+        Finalize the current results by returning a copy of the first model results
+        patched with classification labels.
+        """
         if self._current_result is not None and self._current_result1 is not None:
             ret = copy.copy(self._current_result1)
             ret._inference_results = self._current_result
@@ -418,31 +505,28 @@ class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
 
     def transform_result2(self, result2):
         """
-        Transform result of the second model.
-
-        This implementation adjusts bbox labels detected by the first model according to
-        classification results of the second model.
+        Transform (patch) the classification result into the original detection results.
 
         Args:
-            result2: prediction result of the second model
+            result2 (InferenceResults):
+                Classification result of model2.
 
         Returns:
-            Result of the first model with patched labels according to
-            classification results of the second model.
+            InferenceResults or None:
+                Returns the detection result patched with classification output if a new
+                frame has started, otherwise None.
         """
-
         result1 = result2.info.result1
         idx = result2.info.sub_result
 
         ret = None
         if result1 is not self._current_result1:
-            # new frame comes: compute combined result of previous frame
+            # new frame comes; yield the finalized previous frame
             ret = self._finalize_current_result()
             self._current_result = copy.deepcopy(result1._inference_results)
             self._current_result1 = result1
 
         if idx >= 0 and self._current_result is not None:
-            # patch bbox label with recognized class label and adjust probability
             r = result2.results[0]
             label = r.get("label")
             if label is not None:
@@ -458,16 +542,16 @@ class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
 
     def predict_batch(self, data):
         """
-        Perform whole inference lifecycle for all objects in given iterator object (for example, `list`).
+        Perform the full inference lifecycle for all objects in the given iterator (for example, `list`),
+        but patch model1 bounding box labels with classification results from model2.
 
         Args:
-            data (iterator): Inference input data iterator object such as list or generator function.
-            Each element returned by this iterator should be compatible to that regular PySDK model
-            accepts
-
+            data (iterator):
+                Iterator of input frames for model1.
+                Each element returned by this iterator should be compatible with regular PySDK models.
         Returns:
-            Generator object which iterates over combined inference result objects.
-            This allows you directly using the result in `for` loops.
+            iterator:
+                Yields the detection results with patched classification labels after each frame completes.
         """
         self._current_result = None
         self._current_result1 = None
@@ -481,24 +565,34 @@ class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
 class NmsOptions:
     """
     Options for non-maximum suppression (NMS) algorithm.
+
+    Attributes:
+        threshold (float):
+            IoU or IoS threshold for box clustering (range [0..1]).
+        use_iou (bool):
+            If True, use IoU for box clustering, otherwise IoS.
+        box_select (NmsBoxSelectionPolicy):
+            Box selection policy (e.g., keep the box with the highest probability).
     """
 
-    threshold: float  # IoU or IoS threshold for box clustering [0..1]
-    use_iou: bool = True  # use IoU for box clustering (otherwise use IoS)
+    threshold: float
+    use_iou: bool = True
     box_select: NmsBoxSelectionPolicy = NmsBoxSelectionPolicy.MOST_PROBABLE
 
 
 class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
     """
-    Compound model class which crops original image according to results of the first model
-    and then passes cropped images to the second detection model, which performs detections
-    in each bbox and combines detection results from multiple bboxes from the same frame.
-    It returns the combined results of the **second** model where bbox coordinates are translated
-    to original image coordinates, optionally augmented with the results of the first model.
+    Compound model class which:
 
-    Restriction: first model should be of object detection type
-    (or pseudo object detection type like `RegionExtractionPseudoModel),
-    second model should be of object detection type.
+    1. Uses an **object detection** model (model1) to generate bounding boxes (ROIs).
+    2. Crops each bounding box from the original image.
+    3. Uses another **object detection** model (model2) to further detect objects in each cropped region.
+    4. Combines the results of the second model from all cropped regions, mapping coords back to the original image.
+
+    Optionally, you can add model1 detections to the final result and/or apply NMS.
+
+    Restriction: first model should be object detection or pseudo-detection model like `RegionExtractionPseudoModel`,
+    second model should be object detection.
     """
 
     def __init__(
@@ -515,14 +609,19 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
         Constructor.
 
         Args:
-            model1: PySDK object detection model
-            model2: PySDK object detection model
-            crop_extent: extent of cropping in percent of bbox size
-            crop_extent_option: method of applying extending crop to the input image for model2
-            add_model1_results: True to add detections of model1 to the combined result
-            nms_options: non-maximum suppression (NMS) options
+            model1 (ModelLike):
+                Object detection model (or pseudo-detection).
+            model2 (ModelLike):
+                Object detection model.
+            crop_extent (float):
+                Extent of cropping in percent of bbox size.
+            crop_extent_option (CropExtentOptions):
+                Method of applying extended crop to the input image for model2.
+            add_model1_results (bool):
+                If True, merges model1 detections into the final combined result.
+            nms_options (Optional[NmsOptions]):
+                If provided, applies non-maximum suppression (NMS) to the combined result.
         """
-
         if model1.image_backend != model2.image_backend:
             raise Exception(
                 f"Image backends of both models should be the same, but got {model1.image_backend} and {model2.image_backend}"
@@ -535,6 +634,10 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
         self._nms_options: Optional[NmsOptions] = nms_options
 
     def _finalize_current_result(self):
+        """
+        Finalize the combined detection results from model2
+        (optionally merged with model1 results). Apply NMS if requested.
+        """
         if self._current_result is not None and self._current_result1 is not None:
             if self._add_model1_results:
                 ret = clone_result(self._current_result1)
@@ -544,7 +647,6 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
                 ret._inference_results = self._current_result
 
             if self._nms_options is not None:
-                # apply NMS to combined result
                 nms(
                     ret,
                     iou_threshold=self._nms_options.threshold,
@@ -556,24 +658,23 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
 
     def transform_result2(self, result2):
         """
-        Transform result of the second model.
-
-        This implementation combines results of the **second** model over all bboxes detected by the first model,
-        translating bbox coordinates to original image coordinates.
+        Combine detection results from model2 for each bbox from model1, translating
+        coordinates back to the original image space.
 
         Args:
-            result2: detection result of the second model
+            result2 (InferenceResults):
+                Detection result of the second model.
 
         Returns:
-            Combined results of the **second** model over all bboxes detected by the first model,
-            where bbox coordinates are translated to original image coordinates.
+            InferenceResults or None:
+                Combined detection results for the **previous** frame, if a new frame has arrived.
+                Otherwise, None.
         """
-
         result1 = result2.info.result1
         idx = result2.info.sub_result
 
         if idx >= 0:
-            # adjust bbox coordinates to original image coordinates
+            # Adjust bbox coordinates to the original image coordinate space
             result2 = clone_result(result2)
             x, y = result1.results[idx]["bbox"][:2]
             for r in result2._inference_results:
@@ -587,11 +688,11 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
 
         ret = None
         if result1 is self._current_result1:
-            # frame continues: append second model results to the combined result
+            # Frame continues: append second model results to the combined result
             if self._current_result is not None and idx >= 0:
                 self._current_result.extend(result2._inference_results)
         else:
-            # new frame comes: return combined result of previous frame
+            # New frame comes: return combined result of previous frame
             ret = self._finalize_current_result()
             self._current_result = copy.deepcopy(result2._inference_results)
             self._current_result1 = result1
@@ -600,16 +701,23 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
 
     def predict_batch(self, data):
         """
-        Perform whole inference lifecycle for all objects in given iterator object (for example, `list`).
+        Perform the full inference lifecycle for all objects in the given iterator object (for example, `list`):
+
+        1. model1 detects or extracts bounding boxes (ROIs).
+        2. Each ROI is passed to model2 for detection.
+        3. model2 results for each ROI are merged and mapped back to original coordinates.
+        4. (Optional) NMS is applied and results from model1 can be included.
 
         Args:
-            data (iterator): Inference input data iterator object such as list or generator function.
-            Each element returned by this iterator should be compatible to that regular PySDK model
-            accepts
+            data (iterator):
+                Iterator of input frames for model1.
+                Each element returned by this iterator should be compatible with regular PySDK models.
 
         Returns:
-            Generator object which iterates over combined inference result objects.
-            This allows you directly using the result in `for` loops.
+            iterator:
+                Generator object which iterates over final detection results with possibly merged bounding boxes,
+                adjusted to original image coordinates.
+                This allows you to directly use the result in `for` loops.
         """
         self._current_result = None
         self._current_result1 = None
@@ -623,15 +731,22 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
 class MotionDetectOptions:
     """
     Options for motion detection algorithm.
+
+    Attributes:
+        threshold (float):
+            Threshold for motion detection [0..1], representing
+            fraction of changed pixels relative to frame size.
+        look_back (int):
+            Number of frames to look back to detect motion.
     """
 
-    threshold: float  # threshold for motion detection [0..1]: fraction of changed pixels in respect to frame size
-    look_back: int = 1  # number of frames to look back to detect motion
+    threshold: float
+    look_back: int = 1
 
 
 class RegionExtractionPseudoModel(ModelLike):
     """
-    Pseudo model class which extracts regions from given image according to given ROI boxes.
+    Pseudo-model class which extracts regions from a given image according to given ROI boxes.
     """
 
     def __init__(
@@ -645,17 +760,18 @@ class RegionExtractionPseudoModel(ModelLike):
         Constructor.
 
         Args:
-            roi_list: list of ROI boxes in [x1, y1, x2, y2] format
-                or 2D array of shape (N,4)
-                or 3D array of shape (K,M,4)
-            model2: model, which will be used as a second step of the compound model pipeline
-            motion_detect: motion detection options.
-                When None, motion detection is disabled.
-                When enabled, ROI boxes where motion is not detected will be skipped.
+            roi_list (Union[list, np.ndarray]):
+                Can be:
+                    - list of ROI boxes in `[x1, y1, x2, y2]` format,
+                    - 2D NumPy array of shape (N, 4),
+                    - 3D NumPy array of shape (K, M, 4), which will be flattened.
+            model2 (dg.model.Model):
+                The second model in the pipeline.
+            motion_detect (Optional[MotionDetectOptions]):
+                - When None, disabled motion detection.
+                - When not None, applies motion detection before extracting ROI boxes. Boxes without motion are skipped.
         """
-
         if isinstance(roi_list, np.ndarray) and len(roi_list.shape) == 3:
-            # flatten 3D array to 2D array
             roi_list = roi_list.reshape(-1, roi_list.shape[-1])
 
         self._roi_list = roi_list
@@ -667,6 +783,12 @@ class RegionExtractionPseudoModel(ModelLike):
 
     @property
     def non_blocking_batch_predict(self):
+        """
+        Controls non-blocking mode for `predict_batch()`.
+
+        Returns:
+            bool: True if non-blocking mode is enabled; otherwise False.
+        """
         return self._non_blocking_batch_predict
 
     @non_blocking_batch_predict.setter
@@ -675,36 +797,49 @@ class RegionExtractionPseudoModel(ModelLike):
 
     @property
     def custom_postprocessor(self) -> Optional[type]:
+        """
+        Custom postprocessor class. Required for attaching analyzers to the pseudo-model.
+
+        When set, this replaces the default postprocessor with a user-defined postprocessor.
+
+        Returns:
+            Optional[type]:
+                The user-defined postprocessor class, or None if not set.
+        """
         return self._custom_postprocessor
 
     @custom_postprocessor.setter
     def custom_postprocessor(self, val: type):
         self._custom_postprocessor = val
 
-    # fallback all getters of model-like attributes to the second model
     def __getattr__(self, attr):
+        """
+        Fallback for getters of model-like attributes to `model2`.
+        """
         return getattr(self._model2, attr)
 
     def predict_batch(self, data):
         """
-        Perform whole inference lifecycle for all objects in given iterator object (for example, `list`).
+        Perform a pseudo-inference that outputs bounding boxes defined in `roi_list`.
+
+        If motion detection is enabled, skip ROIs where motion is not detected.
 
         Args:
-            data (iterator): Inference input data iterator object such as list or generator function.
-            Each element returned by this iterator should be compatible to that regular PySDK model
-            accepts
+            data (iterator):
+                Iterator over the input images or frames.
+                Each element returned by this iterator should be compatible with regular PySDK models.
 
         Returns:
-            Generator object which iterates over combined inference result objects.
-            This allows you directly using the result in `for` loops.
+            iterator:
+                Yields pseudo-inference results containing ROIs as bounding boxes.
+                This allows you to directly use the result in `for` loops.
         """
-
         preprocessor = dg._preprocessor.create_image_preprocessor(
-            self._model2.model_info,  # we do copy here to avoid modifying original model parameters
+            self._model2.model_info,
             image_backend=self._model2.image_backend,
-            pad_method="",  # to disable resizing/padding
+            pad_method="",  # disable resizing/padding
         )
-        preprocessor.image_format = "RAW"  # to avoid unnecessary JPEG encoding
+        preprocessor.image_format = "RAW"  # avoid unnecessary JPEG encoding
 
         all_rois = [True] * len(self._roi_list)
 
@@ -716,20 +851,19 @@ class RegionExtractionPseudoModel(ModelLike):
                     raise Exception(
                         "Model misconfiguration: input data iterator returns None but non-blocking batch predict mode is not enabled"
                     )
+                continue
 
-            # extract frame and frame info from data
+            # Extract frame and info
             if isinstance(element, tuple):
-                # if data is tuple, we treat first element as frame data and second element as frame info
                 frame, frame_info = element
             else:
-                # otherwise we treat data as frame data and if it is string, we set frame info equal to frame data
                 frame, frame_info = element, element if isinstance(element, str) else ""
 
-            # do pre-processing
+            # Do pre-processing
             preprocessed_data = preprocessor.forward(frame)
-
             image = preprocessed_data["image_input"]
 
+            # Optionally detect motion
             if self._motion_detect is not None:
                 motion_img, base_img = detect_motion(
                     self._base_img[0] if self._base_img else None, image
@@ -757,7 +891,7 @@ class RegionExtractionPseudoModel(ModelLike):
                 if motion_detected[idx]
             ]
 
-            # generate pseudo inference results
+            # Generate pseudo-inference results
             pp = (
                 self._custom_postprocessor
                 if self._custom_postprocessor
