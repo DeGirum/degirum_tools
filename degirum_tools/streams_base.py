@@ -1,50 +1,48 @@
-#
 # streams_base.py: streaming toolkit: base classes
-#
 # Copyright DeGirum Corporation 2024
 # All rights reserved
-#
 # Implements base classes for streaming toolkit:
 #  - StreamMeta class is used to pass metainfo objects between gizmos.
 #  - StreamData class is used to pass data and metainfo objects between gizmos.
 #  - Stream class is a queue-based iterable class with optional item drop.
 #  - Gizmo class is a base class for all gizmos: streaming pipeline processing blocks.
-#  - Composition class is a class, which holds and animates multiple connected gizmos.
-#
+#  - Composition class is a class that holds and animates multiple connected gizmos.
 
 import threading, queue, copy, time
 from abc import ABC, abstractmethod
 from typing import Optional, Any, List, Dict, Union, Iterator
 from .environment import get_test_mode
 
-
 class StreamMeta:
-    """Stream metainfo class
+    """Stream metainfo class.
 
-    Keeps a list of metainfo objects, which are produced by Gizmos in the pipeline.
-    A gizmo appends its own metainfo to the end of the list tagging it with a set of tags.
-    Tags are used to find metainfo objects by a specific tag combination.
+    Keeps a list of metainfo objects produced by gizmos in the pipeline. A gizmo appends its own metainfo 
+    to the end of the list, tagging it with one or more tags. Tags are used to retrieve metainfo objects 
+    by specific criteria.
 
-    CAUTION: never modify received metainfo object, always do clone() before modifying it
-    to avoid side effects in upstream gizmos.
-
+    CAUTION: Never modify a received metainfo object in place. Always call clone() to avoid side effects 
+    upstream.
     """
 
     def __init__(self, meta: Optional[Any] = None, tags: Union[str, List[str]] = []):
         """Constructor.
 
-        - meta: initial metainfo object (optional)
-        - tags: tag or list of tags associated with this metainfo object
+        Args:
+            meta (Any, optional): Initial metainfo object. Defaults to None.
+            tags (Union[str, List[str]]): Tag or list of tags to associate with the initial metainfo object.
         """
-
         self._meta_list: list = []
         self._tags: Dict[str, List[int]] = {}
         if meta is not None:
             self.append(meta, tags)
 
     def clone(self):
-        """Shallow clone metainfo object: clones all internal structures, but only references to
-        metainfo objects, not the objects themselves.
+        """Shallow clone this StreamMeta.
+
+        This creates a copy of the internal list and tags dictionary, but does not deep-copy the metainfo objects.
+
+        Returns:
+            StreamMeta (streams_base.StreamMeta): A cloned StreamMeta instance.
         """
         ret = StreamMeta()
         ret._meta_list = copy.copy(self._meta_list)
@@ -52,10 +50,11 @@ class StreamMeta:
         return ret
 
     def append(self, meta: Any, tags: Union[str, List[str]] = []):
-        """Append a metainfo object to the list and tag it with a set of tags.
+        """Append a metainfo object to this StreamMeta.
 
-        - meta: metainfo object
-        - tags: tag or list of tags associated with this metainfo object
+        Args:
+            meta (Any): The metainfo object to append.
+            tags (Union[str, List[str]]): Tag or list of tags to associate with the metainfo object.
         """
         idx = len(self._meta_list)
         self._meta_list.append(meta)
@@ -66,37 +65,46 @@ class StreamMeta:
                 self._tags[tag] = [idx]
 
     def find(self, tag: str) -> List[Any]:
-        """Find metainfo objects by a set of tags.
+        """Find metainfo objects by tag.
 
-        - tags: tag or list of tags to search for
+        Args:
+            tag (str): The tag to search for.
 
-        Returns a list of metainfo objects matching this tag(s).
+        Returns:
+            List[Any]: A list of metainfo objects that have the given tag (empty if none).
         """
-
         tag_indexes = self._tags.get(tag)
         return [self._meta_list[idx] for idx in tag_indexes] if tag_indexes else []
 
     def find_last(self, tag: str):
-        """Find metainfo objects by a set of tags.
+        """Find the last metainfo object with a given tag.
 
-        - tags: tag or list of tags to search for
+        Args:
+            tag (str): The tag to search for.
 
-        Returns last metainfo object matching this tag(s) or None.
+        Returns:
+            Any (optional): The last metainfo object associated with the tag, or None if not found.
         """
-
         tag_indexes = self._tags.get(tag)
         return self._meta_list[tag_indexes[-1]] if tag_indexes else None
 
     def get(self, idx: int) -> Any:
-        """Get metainfo object by index"""
+        """Get a metainfo object by index.
+
+        Args:
+            idx (int): The index of the metainfo object in the list.
+
+        Returns:
+            Any: The metainfo object at the specified index.
+        """
         return self._meta_list[idx]
 
     def remove_last(self, tag: str):
-        """Remove last metainfo object by tag
+        """Remove the last metainfo object associated with a tag.
 
-        - tag: tag to search for
+        Args:
+            tag (str): The tag whose last associated metainfo object should be removed.
         """
-
         tag_indexes = self._tags.get(tag)
         if tag_indexes:
             del tag_indexes[-1]
@@ -105,41 +113,50 @@ class StreamMeta:
 
 
 class StreamData:
-    """Single data element of the streaming pipelines"""
+    """Single data element of the streaming pipeline."""
 
     def __init__(self, data: Any, meta: StreamMeta = StreamMeta()):
         """Constructor.
 
-        - data: data payload
-        - meta: metainfo"""
+        Args:
+            data (Any): The data payload.
+            meta (StreamMeta, optional): The metainfo associated with the data. Defaults to a new empty StreamMeta.
+        """
         self.data = data
         self.meta = meta
 
     def append_meta(self, meta: Any, tags: List[str] = []):
-        """Append metainfo to the existing metainfo"""
+        """Append an additional metainfo object to this StreamData's metadata.
+
+        Args:
+            meta (Any): The metainfo object to append.
+            tags (List[str], optional): Tags to associate with this metainfo object. Defaults to [].
+        """
         self.meta.append(meta, tags)
 
 
 class Stream(queue.Queue):
-    """Queue-based iterable class with optional item drop"""
+    """Queue-based iterable stream with optional item drop."""
 
-    # minimum queue size to avoid deadlocks:
+    # Minimum queue size to avoid deadlocks:
     # one for stray result, one for poison pill in request_stop(),
-    # and one for poison pill gizmo_run()
+    # and one for poison pill in gizmo_run().
     min_queue_size = 3
 
-    def __init__(self, maxsize=0, allow_drop: bool = False):
-        """Constructor
+    def __init__(self, maxsize: int = 0, allow_drop: bool = False):
+        """Constructor.
 
-        - maxsize: maximum stream depth; 0 for unlimited depth
-        - allow_drop: allow dropping elements on put() when stream is full
+        Args:
+            maxsize (int): Maximum stream depth (queue size); use 0 for unlimited depth. Defaults to 0.
+            allow_drop (bool): If True, allow dropping the oldest item when the stream is full on put(). Defaults to False.
+
+        Raises:
+            Exception: If maxsize is non-zero and less than `min_queue_size`.
         """
-
         if maxsize < self.min_queue_size and maxsize != 0:
             raise Exception(
                 f"Incorrect stream depth: {maxsize}. Should be 0 (unlimited) or at least {self.min_queue_size}"
             )
-
         super().__init__(maxsize)
         self.allow_drop = allow_drop
         self.dropped_cnt = 0  # number of dropped items
@@ -149,11 +166,14 @@ class Stream(queue.Queue):
     def put(
         self, item: Any, block: bool = True, timeout: Optional[float] = None
     ) -> None:
-        """Put an item into the stream
+        """Put an item into the stream, with optional dropping.
 
-        - item: item to put
-        If there is no space left, and allow_drop flag is set, then oldest item will
-        be popped to free space
+        If the stream is full and `allow_drop` is True, the oldest item will be removed to make room.
+
+        Args:
+            item (Any): The item to put.
+            block (bool): Whether to block if the stream is full (ignored if dropping is enabled). Defaults to True.
+            timeout (float, optional): Timeout in seconds for the blocking put. Defaults to None (no timeout).
         """
         if self.allow_drop:
             while True:
@@ -170,47 +190,38 @@ class Stream(queue.Queue):
             super().put(item, block, timeout)
 
     def __iter__(self):
-        """Iterator method"""
+        """Return an iterator over the stream's items."""
         return iter(self.get, self._poison)
 
     def close(self):
-        """Close stream: put poison pill"""
+        """Close the stream by inserting a poison pill."""
         self.put(self._poison)
 
 
 class Gizmo(ABC):
-    """Base class for all gizmos: streaming pipeline processing blocks.
-    Each gizmo owns zero of more input streams, which are used to deliver
-    the data to that gizmo for processing. For data-generating gizmos
-    there is no input stream.
+    """Base class for all gizmos (streaming pipeline processing blocks).
 
-    A gizmo can be connected to other gizmo to receive a data from that
-    gizmo into one of its own input streams. Multiple gizmos can be connected to
-    a single gizmo, so one gizmo can broadcast data to multiple destinations.
+    Each gizmo owns zero or more input streams that deliver data for processing (data-generating gizmos have no input stream).
 
-    A data element is a tuple containing raw data object as a first element, and meta info
-    object as a second element.
+    A gizmo can be connected to other gizmos to receive data from them. One gizmo can broadcast data to multiple others (a single gizmo's output feeding multiple destinations).
 
-    Abstract run() method should be implemented in derived classes to run gizmo
-    processing loop. It is not called directly, but is launched by Composition class
-    in a separate thread.
+    A data element moving through the pipeline is a tuple `(data, meta)` where `data` is the raw data and `meta` is a StreamMeta object.
 
-    run() implementation should periodically check for _abort flag (set by abort())
-    and run until there will be no more data in its input(s).
+    Subclasses must implement the abstract `run()` method to define the gizmo’s processing loop. The `run()` method is launched in a separate thread by the Composition and should run until no more data is available or until an abort signal is set.
 
+    The `run()` implementation should periodically check the `_abort` flag (set via `abort()`) and handle any poison pills in the input streams to terminate gracefully.
     """
 
     def __init__(self, input_stream_sizes: List[tuple] = []):
-        """Constructor
+        """Constructor.
 
-        - input_stream_size: a list of tuples containing constructor parameters of input streams;
-            pass empty list to have no inputs; zero means unlimited depth
+        Args:
+            input_stream_sizes (List[tuple]): List of (maxsize, allow_drop) tuples for each input stream. 
+                Use an empty list for no inputs. Each tuple defines the input stream's depth (0 means unlimited) and whether dropping is allowed.
         """
-
         self._inputs: List[Stream] = []
         for s in input_stream_sizes:
             self._inputs.append(Stream(*s))
-
         self._output_refs: List[Stream] = []
         self._connected_gizmos: set = set()
         self._abort = False
@@ -223,26 +234,46 @@ class Gizmo(ABC):
         self.fps = 0  # achieved FPS rate
 
     def get_tags(self) -> List[str]:
-        """Get list of tags assigned to this gizmo"""
+        """Get the list of meta tags for this gizmo.
+
+        Returns:
+            List[str]: Tags associated with this gizmo (by default, just its class name).
+        """
         return [self.name]
 
     def get_input(self, inp: int) -> Stream:
-        """Get inp-th input stream"""
+        """Get a specific input stream by index.
+
+        Args:
+            inp (int): Index of the input stream to retrieve.
+
+        Returns:
+            Stream: The input stream at the given index.
+
+        Raises:
+            Exception: If the requested input index does not exist.
+        """
         if inp >= len(self._inputs):
             raise Exception(f"Input {inp} is not assigned")
         return self._inputs[inp]
 
     def get_inputs(self) -> List[Stream]:
-        """Get list of input streams"""
+        """Get all input streams of this gizmo.
+
+        Returns:
+            List[Stream]: List of input stream objects.
+        """
         return self._inputs
 
     def connect_to(self, other_gizmo, inp: Union[int, Stream] = 0):
-        """Connect given input to other gizmo.
+        """Connect an input stream of this gizmo to another gizmo's output.
 
-        - other_gizmo: gizmo to connect to
-        - inp: input stream or input index to use for connection
+        Args:
+            other_gizmo (Gizmo): The source gizmo to connect from.
+            inp (int or Stream): The input index of this gizmo (or an input Stream) to use for the connection. Defaults to 0.
 
-        Returns self
+        Returns:
+            Gizmo: This gizmo (to allow chaining).
         """
         inp_stream = self.get_input(inp) if isinstance(inp, int) else inp
         if inp_stream not in other_gizmo._output_refs:
@@ -252,8 +283,11 @@ class Gizmo(ABC):
         return self
 
     def get_connected(self) -> set:
-        """Get a set of all gizmos recursively connected to this gizmo"""
+        """Recursively gather all gizmos connected to this gizmo.
 
+        Returns:
+            set: A set of Gizmo objects that are connected (directly or indirectly) to this gizmo.
+        """
         def _get_connected(gizmo, visited):
             visited.add(gizmo)
             for g in gizmo._connected_gizmos:
@@ -261,39 +295,42 @@ class Gizmo(ABC):
                     _get_connected(g, visited)
             return visited
 
-        ret: set = set()
-        return _get_connected(self, ret)
+        return _get_connected(self, set())
 
     def __getitem__(self, index):
-        """Overloaded operator [], which returns tuple of self and input stream which corresponds to provided index.
-        Used to connect gizmos by `>>` operator: `g1 >> g2[1]`
+        """Enable `gizmo[index]` syntax for specifying connections.
 
-        - index: input index
+        Returns a tuple `(self, input_stream)` which can be used on the right side of the `>>` operator 
+        for connecting gizmos (e.g., `source_gizmo >> target_gizmo[index]`).
 
-        Returns tuple of self and input stream object
+        Args:
+            index (int): The input stream index on this gizmo.
+
+        Returns:
+            tuple: A tuple of (this gizmo, the Stream at the given input index).
         """
         return (self, self.get_input(index))
 
     def __rshift__(self, other_gizmo: Union[Any, tuple]):
-        """Operator antonym for connect_to(): connects other_gizmo to self
+        """Connect another gizmo to this gizmo using the `>>` operator.
 
-        - other_gizmo: either gizmo object or a tuple of a gizmo and it's input stream to connect to;
-            if tuple is provided, input stream is taken from the second element of tuple, otherwise input 0 is assumed.
+        This implements the right-shift operator, allowing syntax like `source >> target` or `source >> target[input_index]`.
 
-        When combined with `>>` operator, it allows to connect gizmos like this: `g1 >> g2[1]`
+        Args:
+            other_gizmo (Gizmo or tuple): Either a Gizmo to connect (assumes input 0), or a tuple `(gizmo, inp)` where `inp` is the input index or Stream of that gizmo.
 
-        Returns gizmo object, passed as an argument.
+        Returns:
+            Gizmo: The source gizmo (other_gizmo), enabling chaining of connections.
         """
-
         g, inp = other_gizmo if isinstance(other_gizmo, tuple) else (other_gizmo, 0)
         g.connect_to(self, inp)
         return g
 
     def send_result(self, data: Optional[StreamData]):
-        """Send result to all connected outputs.
+        """Send a result to all connected output streams.
 
-        - data: a tuple containing raw data object as a first element, and meta info object as a second element.
-        When None is passed, all outputs will be closed.
+        Args:
+            data (StreamData or None): The data result to send. If None (or a poison pill) is provided, all connected outputs will be closed.
         """
         if data != Stream._poison:
             self.result_cnt += 1
@@ -305,18 +342,14 @@ class Gizmo(ABC):
 
     @abstractmethod
     def run(self):
-        """Run gizmo: get data from input(s), if any, process it,
-        and send results to outputs (if any).
+        """Run the gizmo's processing loop.
 
-        The properly-behaving implementation should check for `self._abort` flag
-        and exit `run()` when `self._abort` is set.
+        This method should retrieve data from input streams (if any), process it, and send results to outputs. Subclasses implement this method to define the gizmo's behavior.
 
-        Also, in case when retrieving data from input streams by `get()` or `get_nowait()`
-        (as opposed to using input stream as iterator), the received value(s) should be
-        compared with `Stream._poison`, and if poison pill is detected, need to exit `run()`
-        as well.
-
-        Typical single-input loop should look like this:
+        Important guidelines for implementing `run()`:
+        - Check `self._abort` periodically and exit the loop if it becomes True.
+        - If reading from an input stream via `get()` or `get_nowait()`, check for the poison pill (`Stream._poison`). If encountered, exit the loop.
+        - For example, a typical single-input loop could be:
 
         ```
         for data in self.get_input(0):
@@ -326,27 +359,37 @@ class Gizmo(ABC):
             self.send_result(result)
         ```
 
-        No need to send poison pill to outputs: `Composition` class will do it automatically.
+        There is no need to send a poison pill to outputs; the `Composition` will handle closing output streams.
         """
+        pass
 
     def abort(self, abort: bool = True):
-        """Set abort flag"""
+        """Set or clear the abort flag to stop the run loop.
+
+        Args:
+            abort (bool): True to request aborting the run loop, False to clear the abort signal.
+        """
         self._abort = abort
 
 
 class Composition:
-    """Class, which holds and animates multiple connected gizmos.
-    First you add all necessary gizmos to your composition using add() or __call()__ method.
-    Then you connect all added gizmos in proper order using connect_to() method or `>>` operator.
-    Then you start your composition by calling start() method.
-    You may stop your composition by calling stop() method."""
+    """Orchestrates and runs a set of connected gizmos.
+
+    Usage:
+    1. Add all gizmos to the composition using `add()` or by calling the composition instance.
+    2. Connect the gizmos together using `connect_to()` or the `>>` operator.
+    3. Start the execution by calling `start()`.
+    4. To stop the execution, call `stop()` (or use the composition as a context manager).
+    """
 
     def __init__(self, *gizmos: Union[Gizmo, Iterator[Gizmo]]):
-        """Constructor.
+        """Initialize the Composition with optional initial gizmos.
 
-        - gizmos: optional list of gizmos or tuples of gizmos to add to composition
+        Args:
+            *gizmos (Gizmo or Iterator[Gizmo]): Optional gizmos (or iterables of gizmos) to add initially. 
+                If a Gizmo is provided, all gizmos connected to it (including itself) are added. 
+                If an iterator of gizmos is provided, all those gizmos (and their connected gizmos) are added.
         """
-
         self._threads: List[threading.Thread] = []
 
         # collect all connected gizmos
@@ -365,24 +408,39 @@ class Composition:
             g.composition = self
 
     def add(self, gizmo: Gizmo) -> Gizmo:
-        """Add a gizmo to composition
+        """Add a gizmo to this composition.
 
-        - gizmo: gizmo to add
+        Args:
+            gizmo (Gizmo): The gizmo to add.
 
-        Returns same gizmo
+        Returns:
+            Gizmo: The same gizmo, for convenience.
         """
         gizmo.composition = self
         self._gizmos.append(gizmo)
         return gizmo
 
     def __call__(self, gizmo: Gizmo) -> Gizmo:
-        """Operator synonym for add()"""
+        """Add a gizmo to this composition (callable syntax).
+
+        Equivalent to calling `add(gizmo)`.
+
+        Args:
+            gizmo (Gizmo): The gizmo to add.
+
+        Returns:
+            Gizmo: The same gizmo.
+        """
         return self.add(gizmo)
 
     def _do_start(self):
-        """Start gizmo animation (internal method):
-        launch run() method of every registered gizmo in a separate thread."""
+        """Internal helper to start all gizmo threads.
 
+        Launches the `run()` method of every added gizmo in a separate thread.
+
+        Raises:
+            Exception: If the composition is already started.
+        """
         if len(self._threads) > 0:
             raise Exception("Composition already started")
 
@@ -410,28 +468,28 @@ class Composition:
             t.start()
 
     def start(self, *, wait: bool = True, detect_bottlenecks: bool = False):
-        """Start gizmo animation: launch run() method of every registered gizmo in a separate thread.
+        """Start the execution of all gizmos (each in its own thread): launch run() method of every registered gizmo.
 
         Args:
-            wait: True to wait until all gizmos finished.
-            detect_bottlenecks: True to switch all streams into dropping mode to detect bottlenecks.
-            Use get_bottlenecks() method to return list of gizmos-bottlenecks
+            wait (bool): If True, wait until all gizmos have finished. Defaults to True.
+            detect_bottlenecks (bool): If True, enable frame dropping on all streams to detect bottlenecks (see `get_bottlenecks()`). Defaults to False.
         """
-
         if detect_bottlenecks:
             for gizmo in self._gizmos:
                 for i in gizmo.get_inputs():
                     i.allow_drop = True
 
         self._do_start()
-
         if wait or get_test_mode():
             self.wait()
 
     def get_bottlenecks(self) -> List[dict]:
-        """Return a list of gizmos, which experienced bottlenecks during last run.
-        Each list element is a dictionary. Key is gizmo name, value is # of dropped frames.
-        Composition should be started with detect_bottlenecks=True to use this feature.
+        """Get gizmos that experienced input queue bottlenecks in the last run.
+
+        For this to be meaningful, the composition must have been started with `detect_bottlenecks=True`.
+
+        Returns:
+            List[dict]: A list of dictionaries where each key is a gizmo name and the value is the number of frames dropped for that gizmo.
         """
         ret = []
         for gizmo in self._gizmos:
@@ -442,9 +500,11 @@ class Composition:
         return ret
 
     def get_current_queue_sizes(self) -> List[dict]:
-        """Return a list of gizmo input queue size at point of call.
-        Can be used to analyze deadlocks
-        Each list element is a dictionary. Key is gizmo name, value is a list of current queue sizes.
+        """Get current sizes of each gizmo's input queues.
+        Can be used to analyze deadlocks.
+        
+        Returns:
+            List[dict]: A list of dictionaries where each key is a gizmo name and the value is a list containing the gizmo's result count followed by the size of each of its input queues.
         """
         ret = []
         for gizmo in self._gizmos:
@@ -455,13 +515,15 @@ class Composition:
         return ret
 
     def request_stop(self):
-        """Signal abort to all registered gizmos"""
+        """Signal all gizmos in this composition to stop (abort).
 
-        # first signal abort to all gizmos
+        This sets each gizmo's abort flag, clears all remaining items from their input queues, and sends poison pills to unblock any waiting gets. This method does not wait for threads to finish; call `wait()` to join threads.
+        """
+        # signal abort to all gizmos
         for gizmo in self._gizmos:
             gizmo.abort()
 
-        # then empty all streams to speedup completion
+        # empty all streams to speed up completion
         for gizmo in self._gizmos:
             for i in gizmo._inputs:
                 while not i.empty():
@@ -470,23 +532,23 @@ class Composition:
                     except queue.Empty:
                         break
 
-        # finally, send poison pills from all gizmos to unblock all gets()
+        # send poison pills from all gizmos to unblock gets()
         for gizmo in self._gizmos:
             gizmo.send_result(Stream._poison)
 
     def wait(self):
-        """Wait until all threads stopped"""
+        """Wait for all gizmo threads in the composition to finish.
 
+        Raises:
+            Exception: If the composition has not been started, or if any gizmo raised an error during execution (the exception message will contain details).
+        """
         if len(self._threads) == 0:
             raise Exception("Composition not started")
-
         # wait for completion of all threads
         for t in self._threads:
             if t.name != threading.current_thread().name:
                 t.join()
-
         self._threads = []
-
         # error handling
         errors = ""
         for gizmo in self._gizmos:
@@ -496,16 +558,23 @@ class Composition:
             raise Exception(errors)
 
     def stop(self):
-        """Signal abort to all registered gizmos and wait until all threads stopped"""
-
+        """Stop the composition by aborting all gizmos and waiting for all threads to finish.
+        """
         self.request_stop()
         self.wait()
 
     def __enter__(self):
-        """Context manager enter handler: start composition but do not wait for completion"""
+        """Start the composition when entering a context (without waiting).
+
+        Returns:
+            Composition: The composition itself (so that context manager usage is possible).
+        """
         self._do_start()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit handler: wait for composition completion"""
+        """On exiting a context, wait for all gizmos to finish (and raise any errors).
+
+        Automatically calls `wait()` to ensure all threads have completed.
+        """
         self.wait()

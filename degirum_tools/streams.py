@@ -1,12 +1,8 @@
-#
 # streams.py: streaming toolkit
-#
 # Copyright DeGirum Corporation 2024
 # All rights reserved
-#
 # Implements streaming toolkit for multi-threaded processing.
 # Please refer to `dgstreams_demo.ipynb` PySDKExamples notebook for examples of toolkit usage.
-#
 
 import yaml
 from typing import Union, Optional, Dict
@@ -90,17 +86,20 @@ def load_composition(
     global_context: Optional[dict] = None,
     local_context: Optional[dict] = None,
 ) -> Composition:
-    """Load composition from provided description of gizmos and connections.
-    The description can be either JSON file, YAML file, YAML string, or Python dictionary
-    conforming to JSON schema defined in `composition_definition_schema`.
+    """Load a composition of gizmos and connections from a description.
 
-    - description: text description of the composition in YAML format, or a file name with .json, .yaml, or .yml extension
-      containing such text description, or Python dictionary with the same structure
-    - global_context, local_context: optional contexts to use for expression evaluations (like globals(), locals())
+    The description can be provided as a JSON or YAML file path, a YAML string, or a Python dictionary 
+    conforming to the JSON schema defined in `composition_definition_schema`.
 
-    Returns: composition object
+    Args:
+        description (str or dict): Text description of the composition in YAML format, or a path to a .json, .yaml, or .yml file 
+            containing such a description, or a Python dictionary with the same structure.
+        global_context (dict, optional): Global context for evaluating expressions (like using globals()). Defaults to None.
+        local_context (dict, optional): Local context for evaluating expressions (like using locals()). Defaults to None.
+
+    Returns:
+        Composition: A Composition object representing the described gizmo pipeline.
     """
-
     import jsonschema, copy
 
     # load description
@@ -203,7 +202,7 @@ def load_composition(
                     ) from e
                 return obj
 
-        # else treat is as potential expression result or just return as-is
+        # else treat it as potential expression result or just return as-is
         return replace_vars(desc, local_context)
 
     # create all variables and put them into local context
@@ -221,7 +220,7 @@ def load_composition(
         gizmos[name] = g
         composition.add(g)
 
-    # create pipelines
+    # create pipelines (connections between gizmos)
     for p in description_dict[Key_Connections]:
         if len(p) < 2:
             raise ValueError(
