@@ -952,6 +952,7 @@ class AiAnalyzerGizmo(Gizmo):
         for analyzer in self._analyzers:
             analyzer.finalize()
 
+
 class SinkGizmo(Gizmo):
     """Sink gizmo that receives results and accumulates them in an internal queue.
 

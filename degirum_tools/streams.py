@@ -88,11 +88,11 @@ def load_composition(
 ) -> Composition:
     """Load a composition of gizmos and connections from a description.
 
-    The description can be provided as a JSON or YAML file path, a YAML string, or a Python dictionary 
+    The description can be provided as a JSON or YAML file path, a YAML string, or a Python dictionary
     conforming to the JSON schema defined in `composition_definition_schema`.
 
     Args:
-        description (str or dict): Text description of the composition in YAML format, or a path to a .json, .yaml, or .yml file 
+        description (str or dict): Text description of the composition in YAML format, or a path to a .json, .yaml, or .yml file
             containing such a description, or a Python dictionary with the same structure.
         global_context (dict, optional): Global context for evaluating expressions (like using globals()). Defaults to None.
         local_context (dict, optional): Local context for evaluating expressions (like using locals()). Defaults to None.
