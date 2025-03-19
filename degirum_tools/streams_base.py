@@ -13,14 +13,15 @@ from abc import ABC, abstractmethod
 from typing import Optional, Any, List, Dict, Union, Iterator
 from .environment import get_test_mode
 
+
 class StreamMeta:
     """Stream metainfo class.
 
-    Keeps a list of metainfo objects produced by gizmos in the pipeline. A gizmo appends its own metainfo 
-    to the end of the list, tagging it with one or more tags. Tags are used to retrieve metainfo objects 
+    Keeps a list of metainfo objects produced by gizmos in the pipeline. A gizmo appends its own metainfo
+    to the end of the list, tagging it with one or more tags. Tags are used to retrieve metainfo objects
     by specific criteria.
 
-    CAUTION: Never modify a received metainfo object in place. Always call clone() to avoid side effects 
+    CAUTION: Never modify a received metainfo object in place. Always call clone() to avoid side effects
     upstream.
     """
 
@@ -216,7 +217,7 @@ class Gizmo(ABC):
         """Constructor.
 
         Args:
-            input_stream_sizes (List[tuple]): List of (maxsize, allow_drop) tuples for each input stream. 
+            input_stream_sizes (List[tuple]): List of (maxsize, allow_drop) tuples for each input stream.
                 Use an empty list for no inputs. Each tuple defines the input stream's depth (0 means unlimited) and whether dropping is allowed.
         """
         self._inputs: List[Stream] = []
@@ -300,7 +301,7 @@ class Gizmo(ABC):
     def __getitem__(self, index):
         """Enable `gizmo[index]` syntax for specifying connections.
 
-        Returns a tuple `(self, input_stream)` which can be used on the right side of the `>>` operator 
+        Returns a tuple `(self, input_stream)` which can be used on the right side of the `>>` operator
         for connecting gizmos (e.g., `source_gizmo >> target_gizmo[index]`).
 
         Args:
@@ -386,8 +387,8 @@ class Composition:
         """Initialize the Composition with optional initial gizmos.
 
         Args:
-            *gizmos (Gizmo or Iterator[Gizmo]): Optional gizmos (or iterables of gizmos) to add initially. 
-                If a Gizmo is provided, all gizmos connected to it (including itself) are added. 
+            *gizmos (Gizmo or Iterator[Gizmo]): Optional gizmos (or iterables of gizmos) to add initially.
+                If a Gizmo is provided, all gizmos connected to it (including itself) are added.
                 If an iterator of gizmos is provided, all those gizmos (and their connected gizmos) are added.
         """
         self._threads: List[threading.Thread] = []
@@ -502,7 +503,7 @@ class Composition:
     def get_current_queue_sizes(self) -> List[dict]:
         """Get current sizes of each gizmo's input queues.
         Can be used to analyze deadlocks.
-        
+
         Returns:
             List[dict]: A list of dictionaries where each key is a gizmo name and the value is a list containing the gizmo's result count followed by the size of each of its input queues.
         """

@@ -20,12 +20,13 @@ from .event_detector import EventDetector
 from .environment import get_token
 
 # predefined meta tags
-tag_video = "dgt_video"         # tag for video source data
-tag_resize = "dgt_resize"       # tag for resizer result
-tag_inference = "dgt_inference" # tag for inference result
-tag_preprocess = "dgt_preprocess" # tag for preprocessor result
-tag_crop = "dgt_crop"           # tag for cropping result
-tag_analyzer = "dgt_analyzer"   # tag for analyzer result
+tag_video = "dgt_video"            # tag for video source data
+tag_resize = "dgt_resize"          # tag for resizer result
+tag_inference = "dgt_inference"    # tag for inference result
+tag_preprocess = "dgt_preprocess"  # tag for preprocessor result
+tag_crop = "dgt_crop"              # tag for cropping result
+tag_analyzer = "dgt_analyzer"      # tag for analyzer result
+
 
 class VideoSourceGizmo(Gizmo):
     """OpenCV-based video source gizmo.
@@ -45,7 +46,7 @@ class VideoSourceGizmo(Gizmo):
         """Constructor.
 
         Args:
-            video_source (int or str, optional): A cv2.VideoCapture-compatible video source 
+            video_source (int or str, optional): A cv2.VideoCapture-compatible video source
                 (device index as int, or file path/URL as str). Defaults to None.
             stop_composition_on_end (bool): If True, stop the composition when the video source is over. Defaults to False.
         """
@@ -89,6 +90,7 @@ class VideoSourceGizmo(Gizmo):
                 if self.composition is not None and not self._abort:
                     self.composition.stop()
 
+
 class VideoDisplayGizmo(Gizmo):
     """OpenCV-based video display gizmo.
 
@@ -108,7 +110,7 @@ class VideoDisplayGizmo(Gizmo):
         """Constructor.
 
         Args:
-            window_titles (str or List[str]): Title or list of titles for the display window(s). 
+            window_titles (str or List[str]): Title or list of titles for the display window(s).
                 If a list is provided, multiple windows are opened (one per title). Defaults to "Display".
             show_ai_overlay (bool): If True, overlay AI inference results on the displayed frame (when available). Defaults to False.
             show_fps (bool): If True, show the FPS on the display window(s). Defaults to False.
@@ -187,6 +189,7 @@ class VideoDisplayGizmo(Gizmo):
                 if self.composition is not None:
                     self.composition.stop()
 
+
 class VideoSaverGizmo(Gizmo):
     """OpenCV-based video saving gizmo.
 
@@ -234,6 +237,7 @@ class VideoSaverGizmo(Gizmo):
                 if self._abort:
                     break
                 writer.write(get_img(data))
+
 
 class ResizingGizmo(Gizmo):
     """OpenCV-based image resizing/padding gizmo.
@@ -308,6 +312,7 @@ class ResizingGizmo(Gizmo):
             new_meta = data.meta.clone()
             new_meta.append(my_meta, self.get_tags())
             self.send_result(StreamData(resized, new_meta))
+
 
 class AiGizmoBase(Gizmo):
     """Base class for AI model inference gizmos.
@@ -401,6 +406,7 @@ class AiGizmoBase(Gizmo):
             result (dg.postprocessor.InferenceResults): The inference result object from the model.
         """
 
+
 class AiSimpleGizmo(AiGizmoBase):
     """AI inference gizmo with no custom result processing.
 
@@ -416,6 +422,7 @@ class AiSimpleGizmo(AiGizmoBase):
         new_meta = result.info.clone()
         new_meta.append(result, self.get_tags())
         self.send_result(StreamData(result.image, new_meta))
+
 
 class AiObjectDetectionCroppingGizmo(Gizmo):
     """Gizmo that crops detected objects from frames of an object detection model.
@@ -557,6 +564,7 @@ class AiObjectDetectionCroppingGizmo(Gizmo):
         """
         return True
 
+
 class CropCombiningGizmo(Gizmo):
     """Gizmo to combine original frames with their after-crop results.
 
@@ -598,7 +606,7 @@ class CropCombiningGizmo(Gizmo):
             video_meta = full_frame.meta.find_last(tag_video)
             if video_meta is None:
                 raise Exception(
-                    f"{self.__class__.__name__}: video meta not found: you need to have {VideoSourceGizmo.__class__.__name__} in upstream of input 0" 
+                    f"{self.__class__.__name__}: video meta not found: you need to have {VideoSourceGizmo.__class__.__name__} in upstream of input 0"
                 )
             frame_id = video_meta[VideoSourceGizmo.key_frame_id]
             # Collect all crop results for this frame (matching frame_id)
@@ -618,12 +626,12 @@ class CropCombiningGizmo(Gizmo):
                 video_metas = [crop.meta.find_last(tag_video) for crop in crops]
                 if None in video_metas:
                     raise Exception(
-                        f"{self.__class__.__name__}: video meta not found: you need to have {VideoSourceGizmo.__class__.__name__} in upstream of all crop inputs" 
+                        f"{self.__class__.__name__}: video meta not found: you need to have {VideoSourceGizmo.__class__.__name__} in upstream of all crop inputs"
                     )
                 crop_frame_ids = [vm[VideoSourceGizmo.key_frame_id] for vm in video_metas if vm]
                 if len(set(crop_frame_ids)) != 1:
                     raise Exception(
-                        f"{self.__class__.__name__}: crop frame IDs are not synchronized. Make sure all crop inputs have the same {AiObjectDetectionCroppingGizmo.__class__.__name__} in upstream" 
+                        f"{self.__class__.__name__}: crop frame IDs are not synchronized. Make sure all crop inputs have the same {AiObjectDetectionCroppingGizmo.__class__.__name__} in upstream"
                     )
                 crop_frame_id = crop_frame_ids[0]
                 if crop_frame_id > frame_id:
@@ -638,13 +646,13 @@ class CropCombiningGizmo(Gizmo):
                 crop_metas = [crop.meta.find_last(tag_crop) for crop in crops]
                 if None in crop_metas:
                     raise Exception(
-                        f"{self.__class__.__name__}: crop meta(s) not found: you need to have {AiObjectDetectionCroppingGizmo.__class__.__name__} in upstream of all crop inputs" 
+                        f"{self.__class__.__name__}: crop meta(s) not found: you need to have {AiObjectDetectionCroppingGizmo.__class__.__name__} in upstream of all crop inputs"
                     )
                 crop_meta = crop_metas[0]
                 assert crop_meta
                 if not all(crop_meta == cm for cm in crop_metas[1:]):
                     raise Exception(
-                        f"{self.__class__.__name__}: crop metas are not synchronized. Make sure all crop inputs have the same {AiObjectDetectionCroppingGizmo.__class__.__name__} in upstream" 
+                        f"{self.__class__.__name__}: crop metas are not synchronized. Make sure all crop inputs have the same {AiObjectDetectionCroppingGizmo.__class__.__name__} in upstream"
                     )
                 orig_result = crop_meta[
                     AiObjectDetectionCroppingGizmo.key_original_result
@@ -664,7 +672,7 @@ class CropCombiningGizmo(Gizmo):
                     ]
                     if any(im is orig_result for im in inference_metas):
                         raise Exception(
-                            f"{self.__class__.__name__}: after-crop inference meta(s) not found: you need to have some inference-type gizmo in upstream of all crop inputs" 
+                            f"{self.__class__.__name__}: after-crop inference meta(s) not found: you need to have some inference-type gizmo in upstream of all crop inputs"
                         )
                     result = combined_meta.find_last(tag_inference)
                     assert result is not None
@@ -745,6 +753,7 @@ class CropCombiningGizmo(Gizmo):
         )
         return clone
 
+
 class AiResultCombiningGizmo(Gizmo):
     """Gizmo to combine inference results from multiple AI gizmos of the same type."""
 
@@ -804,6 +813,7 @@ class AiResultCombiningGizmo(Gizmo):
             new_meta = base_data.meta.clone()
             new_meta.append(base_result, self.get_tags())
             self.send_result(StreamData(base_data.data, new_meta))
+
 
 class AiPreprocessGizmo(Gizmo):
     """Preprocessing gizmo that applies a model's preprocessor to input images.
@@ -867,10 +877,11 @@ class AiPreprocessGizmo(Gizmo):
             new_meta.append(res[1], self.get_tags())
             self.send_result(StreamData(res[0], new_meta))
 
+
 class AiAnalyzerGizmo(Gizmo):
     """Gizmo to apply a chain of analyzers to an inference result, with optional filtering.
 
-    Each analyzer (e.g., EventDetector, EventNotifier) processes the inference result and may add events or notifications. 
+    Each analyzer (e.g., EventDetector, EventNotifier) processes the inference result and may add events or notifications.
     If filters are provided, only results that contain at least one of the specified events/notifications are passed through.
     """
 
@@ -910,7 +921,7 @@ class AiAnalyzerGizmo(Gizmo):
         for data in self.get_input(0):
             if self._abort:
                 break
-            keep = True
+            filter_ok = True
             new_meta = data.meta.clone()
             inference_meta = new_meta.find_last(tag_inference)
             if inference_meta is not None and isinstance(
