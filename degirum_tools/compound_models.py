@@ -21,33 +21,33 @@ A **compound model** orchestrates multiple underlying models into a pipeline to 
 
 ## Key Concepts
 
-- **Model Composition**:  
+- **Model Composition**:
   Compound models sequentially (or concurrently) invoke multiple models. Typically, results from the first model (e.g., bounding boxes from detection) feed into subsequent models (classification or refined detection).
 
-- **Pipeline Workflow**:  
+- **Pipeline Workflow**:
   A typical workflow involves:
     1. Run `model1` to identify regions of interest (ROIs).
     2. Crop these ROIs and run them through `model2`.
     3. Integrate or transform outputs from `model2` back into the original context.
 
-- **Unified Model Interface**:  
+- **Unified Model Interface**:
   All compound models follow the same interface as regular models in DeGirum SDK, providing `.predict()` for single frames and `.predict_batch()` for iterators of frames.
 
 ## Included Compound Models
 
-- **CombiningCompoundModel**:  
+- **CombiningCompoundModel**:
   Combines results from two models run concurrently on the same input.
 
-- **CroppingCompoundModel**:  
+- **CroppingCompoundModel**:
   Crops regions identified by `model1` and feeds them into `model2`.
 
-- **CroppingAndClassifyingCompoundModel**:  
+- **CroppingAndClassifyingCompoundModel**:
   Specialized pipeline: object detection (`model1`) followed by classification (`model2`) of each detected object.
 
-- **CroppingAndDetectingCompoundModel**:  
+- **CroppingAndDetectingCompoundModel**:
   Pipeline for refined detection: initial coarse detection (`model1`) followed by detailed detection (`model2`) within each ROI.
 
-- **RegionExtractionPseudoModel**:  
+- **RegionExtractionPseudoModel**:
   Extracts predefined regions of interest without actual inference, optionally filtering by motion detection.
 
 ## Basic Usage Examples
