@@ -7,6 +7,144 @@
 # Implements classes for multi-model aggregation.
 #
 
+"""
+Compound Models Module Overview
+======================
+
+This module provides a toolkit for creating **compound models** using the DeGirum Python SDK.
+
+A **compound model** orchestrates multiple underlying models into a pipeline to enable complex inference scenarios. Common examples include:
+
+- Detecting objects and then classifying each detected object.
+- Running coarse detection first, then applying a refined detection model on specific regions.
+- Combining outputs from multiple independent models into a unified inference result.
+
+## Key Concepts
+
+- **Model Composition**:  
+  Compound models sequentially (or concurrently) invoke multiple models. Typically, results from the first model (e.g., bounding boxes from detection) feed into subsequent models (classification or refined detection).
+
+- **Pipeline Workflow**:  
+  A typical workflow involves:
+    1. Run `model1` to identify regions of interest (ROIs).
+    2. Crop these ROIs and run them through `model2`.
+    3. Integrate or transform outputs from `model2` back into the original context.
+
+- **Unified Model Interface**:  
+  All compound models follow the same interface as regular models in DeGirum SDK, providing `.predict()` for single frames and `.predict_batch()` for iterators of frames.
+
+## Included Compound Models
+
+- **CombiningCompoundModel**:  
+  Combines results from two models run concurrently on the same input.
+
+- **CroppingCompoundModel**:  
+  Crops regions identified by `model1` and feeds them into `model2`.
+
+- **CroppingAndClassifyingCompoundModel**:  
+  Specialized pipeline: object detection (`model1`) followed by classification (`model2`) of each detected object.
+
+- **CroppingAndDetectingCompoundModel**:  
+  Pipeline for refined detection: initial coarse detection (`model1`) followed by detailed detection (`model2`) within each ROI.
+
+- **RegionExtractionPseudoModel**:  
+  Extracts predefined regions of interest without actual inference, optionally filtering by motion detection.
+
+## Basic Usage Examples
+
+**Detection + Classification**:
+```python
+import degirum as dg
+from degirum_tools.compound_models import CroppingAndClassifyingCompoundModel
+
+# Declaring variables
+your_detection_model = "yolov8n_relu6_coco--640x640_quant_n2x_orca1_1"
+your_classification_model = "resnet50_imagenet--224x224_pruned_quant_n2x_orca1_1"
+your_host_address = dg.CLOUD  # Can be dg.CLOUD, host:port, or dg.LOCAL
+your_model_zoo = "degirum/degirum"
+your_token = "<token>"
+
+# Specify images for inference
+your_image = "path/image1.jpg"
+your_images = ["path/image2.jpg", "path/image3.jpg"]
+
+# Loading the individual models
+detector = dg.load_model(
+    model_name=your_detection_model,
+    inference_host_address=your_host_address,
+    zoo_url=your_model_zoo,
+    token=your_token
+)
+
+classifier = dg.load_model(
+    model_name=your_classification_model,
+    inference_host_address=your_host_address,
+    zoo_url=your_model_zoo,
+    token=your_token
+)
+
+# Creating a compound model pipeline
+compound_model = CroppingAndClassifyingCompoundModel(detector, classifier)
+
+# Single frame inference using predict()
+print("Using predict():")
+single_result = compound_model(your_image)
+print(single_result)
+
+# Batch inference using predict_batch()
+print("Using predict_batchc():")
+for batch_result in compound_model.predict_batch(your_images):
+    print(batch_result)
+```
+
+**Detection + Detection**:
+```python
+import degirum as dg
+from degirum_tools.compound_models import CombiningCompoundModel
+
+# Declaring variables
+your_detection_model_1 = "yolov8n_relu6_car--640x640_quant_n2x_orca1_1"
+your_detection_model_2 = "yolov8n_relu6_coco--640x640_quant_n2x_orca1_1"
+your_host_address = dg.CLOUD  # Can be dg.CLOUD, host:port, or dg.LOCAL
+your_model_zoo = "degirum/degirum"
+your_token = "<token>"
+
+# Specify images for inference
+your_image = "path/image1.jpg"
+your_images = ["path/image2.jpg", "path/image3.jpg"]
+
+# Loading the individual detection models
+detector1 = dg.load_model(
+    model_name=your_detection_model_1,
+    inference_host_address=your_host_address,
+    zoo_url=your_model_zoo,
+    token=your_token
+)
+
+detector2 = dg.load_model(
+    model_name=your_detection_model_2,
+    inference_host_address=your_host_address,
+    zoo_url=your_model_zoo,
+    token=your_token
+)
+
+# Creating a compound model that merges results from both detectors
+compound_detector = CombiningCompoundModel(detector1, detector2)
+
+# Single frame inference using predict()
+print("Using predict():")
+single_result = compound_detector(your_image)
+print(single_result.results)
+
+# Batch inference using predict_batch()
+print("Using predict_batch():")
+for batch_result in compound_detector.predict_batch(your_images):
+    print(batch_result.results)
+```
+
+See class-level documentation below for details on individual classes and additional configuration options.
+"""
+
 import queue
 import cv2
 import numpy as np
