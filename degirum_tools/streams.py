@@ -4,6 +4,100 @@
 # Implements streaming toolkit for multi-threaded processing.
 # Please refer to `dgstreams_demo.ipynb` PySDKExamples notebook for examples of toolkit usage.
 
+"""
+Streaming Toolkit Overview
+==========================
+
+This module provides a **streaming toolkit** for building multi-threaded processing pipelines, where data (images, video frames, or arbitrary objects) flows through a series of *processing blocks* called **gizmos**. The toolkit allows you to:
+
+- Acquire or generate data from one or more sources (e.g., camera feeds, video files).
+- Process the data in a pipeline (possibly in parallel), chaining multiple gizmos together.
+- Optionally display or save the processed data, or feed it into AI inference models.
+- Orchestrate everything in a **Composition**, which manages the lifecycle (threads) of all connected gizmos.
+
+Core Concepts
+------------
+
+1. **Stream**
+    - Represents a queue of data items (`StreamData`), such as frames from a camera or images from a directory.
+    - Gizmos push (`put`) data into Streams or read (`get`) data from them.
+    - Streams can optionally drop data (the oldest item) if they reach a specified maximum queue size, preventing pipeline bottlenecks.
+
+2. **Gizmo**
+    - A **gizmo** is a discrete processing node in the pipeline.
+    - Each gizmo runs in its own thread, pulling data from its input stream(s), processing it, and pushing results to its output stream(s).
+    - Example gizmos include:
+        - Video-sourcing gizmos that read frames from a webcam or file.
+        - AI inference gizmos that run a model on incoming frames.
+        - Video display or saving gizmos that show or store processed frames.
+        - Gizmos that perform transformations (resizing, cropping, analyzing) on data.
+    - Gizmos communicate via Streams. One gizmo’s output Stream can feed multiple downstream gizmos.
+
+3. **Composition**
+    - A **Composition** is a container that holds and manages multiple gizmos (and their Streams).
+    - Once gizmos are connected, you can call `composition.start()` to begin processing. Each gizmo’s `run()` method executes in a dedicated thread.
+    - Call `composition.stop()` to gracefully stop processing and wait for threads to finish.
+
+4. **StreamData** and **StreamMeta**
+    - Each item in the pipeline is encapsulated by a `StreamData` object, which holds:
+       - `data`: The actual payload (e.g., an image array, a frame, a detection result).
+       - `meta`: A `StreamMeta` object that can hold extra metadata from each gizmo (e.g., timestamps, bounding boxes, etc.).
+    - Gizmos can append to `StreamMeta` so that metadata accumulates across the pipeline.
+
+Basic Usage Example
+-------------------
+
+A simple pipeline might look like this:
+
+```python
+import degirum as dg
+from degirum_tools.streams import Composition
+from degirum_tools.streams_gizmos import VideoSourceGizmo, VideoDisplayGizmo
+import cv2
+import time
+
+# Create gizmos
+video_source = VideoSourceGizmo(0)
+video_display = VideoDisplayGizmo("Camera Preview")
+
+# Connect them
+video_source >> video_display
+
+# Build composition
+comp = Composition(video_source, video_display)
+comp.start(wait=False)  # Don't block main thread
+
+start_time = time.time()
+while time.time() - start_time < 10:  # Run for 10 seconds
+    cv2.waitKey(5)  # Wait time of 5 ms. Let OpenCV handle window events
+
+comp.stop()
+cv2.destroyAllWindows()
+```
+
+Key Steps
+--------------
+1. **Create** your gizmos (e.g., `VideoSourceGizmo`, `VideoDisplayGizmo`, AI inference gizmos, etc.).
+2. **Connect** them together using the `>>` operator (or `connect_to()` method) to form a processing graph.
+   E.g.:
+   ```python
+   source >> processor >> sink
+   ```
+3. **Initialize** a `Composition` with the top-level gizmo(s).
+4. **Start** the composition to launch each gizmo in its own thread.
+5. (Optional) **Wait** for the pipeline to finish or perform other tasks. You can query statuses, queue sizes, or get partial results in real time.
+6. **Stop** the pipeline when done.
+
+Advanced Topics
+--------------
+- **Non-blocking vs Blocking**: Streams can drop items if configured (`allow_drop=True`) to handle real-time feeds.
+- **Multiple Inputs or Outputs**: Some gizmos can have multiple input streams and/or broadcast results to multiple outputs.
+- **Error Handling**: If any gizmo encounters an error, the `Composition` can stop the whole pipeline, allowing you to handle exceptions centrally.
+
+For practical code examples, see the `dgstreams_demo.ipynb` notebook in the PySDKExamples.
+
+"""
+
 import yaml
 from typing import Union, Optional, Dict
 from .streams_base import Gizmo, Composition
