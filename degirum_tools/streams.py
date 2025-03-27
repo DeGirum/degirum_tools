@@ -32,6 +32,8 @@ Core Concepts
         - Video display or saving gizmos that show or store processed frames.
         - Gizmos that perform transformations (resizing, cropping, analyzing) on data.
     - Gizmos communicate via Streams. One gizmo’s output Stream can feed multiple downstream gizmos.
+    - Gizmos keep a list of input streams that they are connected to.
+    - Gizmos own their input streams.
 
 3. **Composition**
     - A **Composition** is a container that holds and manages multiple gizmos (and their Streams).
@@ -40,8 +42,8 @@ Core Concepts
 
 4. **StreamData** and **StreamMeta**
     - Each item in the pipeline is encapsulated by a `StreamData` object, which holds:
-       - `data`: The actual payload (e.g., an image array, a frame, a detection result).
-       - `meta`: A `StreamMeta` object that can hold extra metadata from each gizmo (e.g., timestamps, bounding boxes, etc.).
+       - `data`: The actual payload (e.g., an image array, a frame).
+       - `meta`: A `StreamMeta` object that can hold extra metadata from each gizmo (e.g., a detection result, timestamps, bounding boxes, etc.).
     - Gizmos can append to `StreamMeta` so that metadata accumulates across the pipeline.
 
 Basic Usage Example
@@ -56,7 +58,7 @@ from degirum_tools.streams_gizmos import VideoSourceGizmo, VideoDisplayGizmo
 import cv2
 import time
 
-# Create gizmos
+# Create gizmos. If you are on a laptop or have a webcam attached, VideoSourceGizmo(0) will typically create a gizmo that uses your camera as a video source.
 video_source = VideoSourceGizmo(0)
 video_display = VideoDisplayGizmo("Camera Preview")
 
