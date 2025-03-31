@@ -11,13 +11,16 @@
 Compound Models Module Overview
 ======================
 
-This module provides a toolkit for creating **compound models** using the DeGirum Python SDK.
+This module provides a toolkit for creating **compound models** using the DeGirum PySDK.
 
 A **compound model** orchestrates multiple underlying models into a pipeline to enable complex inference scenarios. Common examples include:
 
 - Detecting objects and then classifying each detected object.
 - Running coarse detection first, then applying a refined detection model on specific regions.
 - Combining outputs from multiple independent models into a unified inference result.
+
+Compound models run in a single thread and are intended primarily for simple usage scenarios. Compound models still provide efficient batch prediction pipelining using batch_predict() in non-blocking mode.
+For more performant applications requiring better scalability and more flexible connections, we recommend using Gizmos, which in multiple threads.
 
 ## Key Concepts
 
@@ -92,7 +95,7 @@ single_result = compound_model(your_image)
 print(single_result)
 
 # Batch inference using predict_batch()
-print("Using predict_batchc():")
+print("Using predict_batch():")
 for batch_result in compound_model.predict_batch(your_images):
     print(batch_result)
 ```
