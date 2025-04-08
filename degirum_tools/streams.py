@@ -59,7 +59,7 @@ Core Concepts
         - An AI inference gizmo downstream takes `StreamData(data=frame, meta=...)`, runs inference, then:
              1. Clones the metadata container.
              2. Appends its inference results under the `"dgt_inference"` tag.
-        - If *two* AI gizmos run in series, both will append metadata with the same `"dgt_inference"` tag. A later consumer can call `meta.find("dgt_inference")` to get both sets of results or `meta.find_last("dgt_inference")` to get the most recent result. 
+        - If *two* AI gizmos run in series, both will append metadata with the same `"dgt_inference"` tag. A later consumer can call `meta.find("dgt_inference")` to get both sets of results or `meta.find_last("dgt_inference")` to get the most recent result.
 
 Basic Usage Example
 -------------------
