@@ -46,6 +46,21 @@ Core Concepts
        - `meta`: A `StreamMeta` object that can hold extra metadata from each gizmo (e.g., a detection result, timestamps, bounding boxes, etc.).
     - Gizmos can append to `StreamMeta` so that metadata accumulates across the pipeline.
 
+5. **Metadata Flow (`StreamMeta`)**
+    - How `StreamMeta` works:
+        - `StreamMeta` itself is a container that can hold any number of "meta info" objects.
+        - Each meta info object is "tagged" with one or more string tags, such as `"dgt_video"`, `"dgt_inference"`, etc.
+        - You append new meta info by calling `meta.append(my_info, [list_of_tags])`.
+        - You can retrieve meta info objects by searching with `meta.find("tag")` (returns *all* matches) or `meta.find_last("tag")` (returns the *most recent* match).
+        - **Important**: A gizmo generally clones (`.clone()`) the incoming `StreamMeta` before appending its own metadata to avoid upstream side effects.
+        - This design lets each gizmo add new metadata, while preserving what was provided by upstream gizmos.
+    - High-Level Example:
+        - A camera gizmo outputs frames with meta tagged `"dgt_video"` containing properties like FPS, width, height, etc.
+        - An AI inference gizmo downstream takes `StreamData(data=frame, meta=...)`, runs inference, then:
+             1. Clones the metadata container.
+             2. Appends its inference results under the `"dgt_inference"` tag.
+        - If *two* AI gizmos run in series, both will append metadata with the same `"dgt_inference"` tag. A later consumer can call `meta.find("dgt_inference")` to get both sets of results or `meta.find_last("dgt_inference")` to get the most recent result. 
+
 Basic Usage Example
 -------------------
 

@@ -15,14 +15,71 @@ from .environment import get_test_mode
 
 
 class StreamMeta:
-    """Stream metainfo class.
+    """Stream metainfo class (metadata container).
 
-    Keeps a list of metainfo objects produced by gizmos in the pipeline. A gizmo appends its own metainfo
-    to the end of the list, tagging it with one or more tags. Tags are used to retrieve metainfo objects
-    by specific criteria.
+    **Overview**
 
-    CAUTION: Never modify a received metainfo object in place. Always call clone() to avoid side effects
-    upstream.
+    - A **StreamMeta** instance is a container that holds a chronologically ordered list
+      of metainfo objects (called "meta infos") produced by gizmos in a streaming pipeline.
+    - Each time a gizmo adds new metadata (e.g., inference results, resizing information),
+      it is *appended* to the tail of this list.
+    - The gizmo may associate the appended metadata with one or more *tags*, so that
+      downstream gizmos or the user can retrieve specific metadata objects by those tags.
+
+    **Appending and Tagging**
+
+    - To store new metadata, a gizmo calls `self.meta.append(meta_obj, tags)`,
+      where `meta_obj` is the metadata to attach, and `tags` is a string or list of strings
+      labeling that metadata (e.g., "tag_inference", "tag_resize").
+    - Internally, **StreamMeta** keeps track of a list of appended objects and a mapping
+      of tags to the indices in that list.
+
+    **Retrieving Metadata**
+
+    - You can retrieve all metadata objects tagged with a certain tag via `find(tag)`,
+      which returns a list of all matching objects in the order they were appended.
+    - You can retrieve only the most recently appended object with `find_last(tag)`.
+    - For example, an inference gizmo might attach an inference result with the tag
+      `"tag_inference"`, so a downstream gizmo can do:
+      `inference_result = stream_data.meta.find_last("tag_inference")`.
+    - If no metadata matches the requested tag, these methods return `[]` or `None`.
+
+    **Modifications and Cloning**
+
+    - **Important**: Never modify a received `StreamMeta` or its stored objects in-place,
+      because it may create side effects for upstream components.
+      Call `clone()` if you need to make changes.
+      `clone()` creates a shallow copy of the metainfo list and a copy of the tag-index map.
+    - If you want to remove the most recent entry associated with a certain tag,
+      call `remove_last(tag)` (occasionally useful in advanced pipeline scenarios).
+
+    **Typical Usage**
+
+    A typical processing pipeline might look like:
+    1. A video source gizmo creates a new `StreamMeta`, appends frame info under tag `"Video"`.
+    2. A resizing gizmo appends new dimension info under tag `"Resize"`.
+    3. An AI inference gizmo appends the inference result under tag `"Inference"`.
+    4. A display gizmo reads the final metadata to overlay bounding boxes, etc.
+
+    This incremental metadata accumulation is extremely flexible and allows each gizmo
+    to contribute to a unified record of the data's journey.
+
+    **Example**:
+
+    ```python
+    # In a gizmo, produce meta and append:
+    data.meta.append({"new_width": 640, "new_height": 480}, "Resize")
+
+    # In a downstream gizmo:
+    resize_info = data.meta.find_last("Resize")
+    if resize_info:
+        w, h = resize_info["new_width"], resize_info["new_height"]
+    ```
+
+    **CAUTION**:
+    Never modify the existing metadata objects in place. If you need to
+    adapt previously stored metadata for your own use, first copy the
+    data structure or call `clone()` on the `StreamMeta`.
     """
 
     def __init__(self, meta: Optional[Any] = None, tags: Union[str, List[str]] = []):
@@ -202,15 +259,70 @@ class Stream(queue.Queue):
 class Gizmo(ABC):
     """Base class for all gizmos (streaming pipeline processing blocks).
 
-    Each gizmo owns zero or more input streams that deliver data for processing (data-generating gizmos have no input stream).
+    Each gizmo owns zero or more input streams that deliver data for processing (data-generating gizmos have
+    no input stream).
 
-    A gizmo can be connected to other gizmos to receive data from them. One gizmo can broadcast data to multiple others (a single gizmo's output feeding multiple destinations).
+    A gizmo can be connected to other gizmos to receive data from them. One gizmo can broadcast data to
+    multiple others (a single gizmo’s output feeding multiple destinations).
 
-    A data element moving through the pipeline is a tuple `(data, meta)` where `data` is the raw data and `meta` is a StreamMeta object.
+    A data element moving through the pipeline is a tuple `(data, meta)` where:
+      - `data` is the raw data (e.g., an image, a frame, or any object),
+      - `meta` is a `StreamMeta` object containing accumulated metadata.
 
-    Subclasses must implement the abstract `run()` method to define the gizmo’s processing loop. The `run()` method is launched in a separate thread by the Composition and should run until no more data is available or until an abort signal is set.
+    Subclasses must implement the abstract `run()` method to define the gizmo’s processing loop. The `run()`
+    method is launched in a separate thread by the `Composition` and should run until no more data is available
+    or until an abort signal is set.
 
-    The `run()` implementation should periodically check the `_abort` flag (set via `abort()`) and handle any poison pills in the input streams to terminate gracefully.
+    The `run()` implementation should:
+      - Periodically check the `_abort` flag (set via `abort()`) to see if it should terminate.
+      - Handle poison pills (`Stream._poison`) if they appear in the input streams, which signal "no more data."
+
+    Below is a minimal example, similar to `ResizingGizmo`. This gizmo simply reads items from its single input,
+    processes them, and sends results downstream until either `_abort` is set or the input stream is exhausted:
+
+    ```python
+        def run(self):
+            # For a single-input gizmo, iterate over all data in input #0
+            for item in self.get_input(0):
+                # If we were asked to abort, break out immediately
+                if self._abort:
+                    break
+
+                # If we detect a poison pill, it means "no more data," so exit loop
+                if item == Stream._poison:
+                    break
+
+                # item is a StreamData object: item.data is the image/frame, item.meta is the metadata
+                input_image = item.data
+
+                # 1) Do the resizing (your logic can use OpenCV, PIL, etc.)
+                resized_image = do_resize(input_image, width=640, height=480)
+                # 'do_resize' is just a placeholder; you'd implement your own resizing function.
+
+                # 2) Update the metadata
+                #    - Typically clone the existing metadata so you don't modify it upstream
+                out_meta = item.meta.clone()
+                out_meta.append(
+                    {
+                        "frame_width": 640,
+                        "frame_height": 480,
+                        "method": "your_resize_method"
+                    },
+                    tags=[self.name]  # or your chosen tags
+                )
+
+                # 3) Send the processed item downstream
+                self.send_result(StreamData(resized_image, out_meta))
+    ```
+
+    Notes:
+      - If your gizmo has multiple inputs, you can call `self.get_input(i)` for each input or iterate over
+        `self.get_inputs()` if you need to merge or synchronize multiple streams.
+      - Always check `_abort` periodically inside your main loop if your gizmo could run for a long time or
+        block on I/O.
+      - When done, you do not need to manually send poison pills; the `Composition` handles closing any
+        downstream streams once each gizmo’s `run()` completes.
+
     """
 
     def __init__(self, input_stream_sizes: List[tuple] = []):
