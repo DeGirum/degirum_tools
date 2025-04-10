@@ -53,7 +53,7 @@ from degirum_tools.inference_support import (
 from degirum_tools.result_analyzer_base import ResultAnalyzerBase
 
 # Declaring model variable
-# If you will use the DeGirum AI Hub model zoo, set the CLOUD_ZOO_URL environmental variable to a model zoo path such as degirum/degirum. 
+# If you will use the DeGirum AI Hub model zoo, set the CLOUD_ZOO_URL environmental variable to a model zoo path such as degirum/degirum.
 # CLOUD_ZOO_URL will default to degirum/public if left empty.
 your_detection_model = "yolov8n_relu6_coco--640x640_quant_n2x_orca1_1"
 your_video = "<path to your video>"
@@ -330,7 +330,7 @@ def attach_analyzers(
         # Create a dynamic wrapper postprocessor class
         analyzing_postprocessor = _create_analyzing_postprocessor_class(
             analyzers, model
-            )
+        )
 
         if analyzers:
             # Attach the custom postprocessor to the model
