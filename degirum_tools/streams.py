@@ -42,7 +42,7 @@ Core Concepts
 
 4. **StreamData** and **StreamMeta**:
     - Each item in the pipeline is encapsulated by a `StreamData` object, which holds:
-    
+
         - `data`: The actual payload (e.g., an image array, a frame).
         - `meta`: A `StreamMeta` object that can hold extra metadata from each gizmo (e.g., a detection result, timestamps, bounding boxes, etc.).
     - Gizmos can append to `StreamMeta` so that metadata accumulates across the pipeline.
@@ -55,7 +55,7 @@ Core Concepts
         - You can retrieve meta info objects by searching with `meta.find("tag")` (returns *all* matches) or `meta.find_last("tag")` (returns the *most recent* match).
         - **Important**: A gizmo generally clones (`.clone()`) the incoming `StreamMeta` before appending its own metadata to avoid upstream side effects.
         - This design lets each gizmo add new metadata, while preserving what was provided by upstream gizmos.
-        
+
     - High-Level Example:
         - A camera gizmo outputs frames with meta tagged `"dgt_video"` containing properties like FPS, width, height, etc.
         - An AI inference gizmo downstream takes `StreamData(data=frame, meta=...)`, runs inference, then:
@@ -144,20 +144,18 @@ properties:
         patternProperties:
             "^[a-zA-Z_][a-zA-Z0-9_]*$":
                 oneOf:
-                
-                    - type: [string, number, boolean, array]
-                        description: The variable value; can be $(expression) to evaluate
-                        
-                    - type: object
-                        description: The only object key is the class name to instantiate; value are the constructor parameters
-                        additionalProperties: false
-                        minProperties: 1
-                        maxProperties: 1
-                        patternProperties:
-                            "^[a-zA-Z_][a-zA-Z0-9_.]*$":
-                                type: object
-                                description: The constructor parameters of the object
-                                additionalProperties: true
+                  - type: [string, number, boolean, array]
+                    description: The variable value; can be $(expression) to evaluate
+                  - type: object
+                    description: The only object key is the class name to instantiate; value are the constructor parameters
+                    additionalProperties: false
+                    minProperties: 1
+                    maxProperties: 1
+                    patternProperties:
+                        "^[a-zA-Z_][a-zA-Z0-9_.]*$":
+                            type: object
+                            description: The constructor parameters of the object
+                            additionalProperties: true
     {Key_Gizmos}:
         type: object
         description: The collection of gizmos, keyed by gizmo instance name
@@ -165,20 +163,18 @@ properties:
         patternProperties:
             "^[a-zA-Z_][a-zA-Z0-9_]*$":
                 oneOf:
-                
-                    - type: string
-                        description: The gizmo class name to instantiate, if no parameters are needed
-                        
-                    - type: object
-                        description: The only object key is the class name to instantiate; value are the constructor parameters
-                        additionalProperties: false
-                        minProperties: 1
-                        maxProperties: 1
-                        patternProperties:
-                            "^[a-zA-Z_][a-zA-Z0-9_.]*$":
-                                type: object
-                                description: The constructor parameters of the gizmo
-                                additionalProperties: true
+                  - type: string
+                    description: The gizmo class name to instantiate, if no parameters are needed
+                  - type: object
+                    description: The only object key is the class name to instantiate; value are the constructor parameters
+                    additionalProperties: false
+                    minProperties: 1
+                    maxProperties: 1
+                    patternProperties:
+                        "^[a-zA-Z_][a-zA-Z0-9_.]*$":
+                            type: object
+                            description: The constructor parameters of the gizmo
+                            additionalProperties: true
     {Key_Connections}:
         type: array
         description: The list of connections between gizmos
@@ -187,17 +183,13 @@ properties:
             description: The connection between gizmos
             items:
                 oneOf:
-                
                     - type: string
-                    
                     - type: array
-                        description: Gizmo with input index
-                        prefixItems:
-                        
-                            - type: string
-                            
-                            - type: number
-                        items: false
+                      description: Gizmo with input index
+                      prefixItems:
+                        - type: string
+                        - type: number
+                      items: false
 """
 composition_definition_schema = yaml.safe_load(composition_definition_schema_text)
 
