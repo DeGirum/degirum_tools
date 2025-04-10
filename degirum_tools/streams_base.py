@@ -410,7 +410,7 @@ class Gizmo(ABC):
 
         return _get_connected(self, set())
 
-    def __getitem__(self, index) -> Tuple["Gizmo", Stream]:
+    def __getitem__(self, index):
         """Enable `gizmo[index]` syntax for specifying connections.
 
         Returns a tuple `(self, input_stream)` which can be used on the right side of the `>>` operator
@@ -419,8 +419,9 @@ class Gizmo(ABC):
         Args:
             index (int): The input stream index on this gizmo.
 
-        Returns:
-            tuple: A tuple of (this gizmo, the Stream at the given input index).
+        Returns: 
+            (Gizmo, Stream):
+                tuple: A tuple of (this gizmo, the Stream at the given input index).
         """
         return (self, self.get_input(index))
 
