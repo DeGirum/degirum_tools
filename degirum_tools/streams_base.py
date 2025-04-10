@@ -419,7 +419,7 @@ class Gizmo(ABC):
         Args:
             index (int): The input stream index on this gizmo.
 
-        Returns: 
+        Returns:
             (Gizmo, Stream):
                 tuple: A tuple of (this gizmo, the Stream at the given input index).
         """
