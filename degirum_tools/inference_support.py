@@ -186,7 +186,7 @@ def connect_model_zoo(
 
     else:
         raise Exception(
-            "Invalid value for 'inference_option'. Must be one of CloudInference, AIServerInference, or LocalHWInference."
+            "Invalid value of inference_option parameter. Should be one of CloudInference, AIServerInference, or LocalHWInference"
         )
 
     return zoo
@@ -244,7 +244,7 @@ def _create_analyzing_postprocessor_class(
             img = self._result.image_overlay
             if not isinstance(img, np.ndarray):
                 raise Exception(
-                    "Only OpenCV image backend is supported. Please set model.image_backend = 'opencv'."
+                    "Only OpenCV image backend is supported. Please set model.image_backend = 'opencv'"
                 )
             # apply all analyzers to annotate overlay image
             for analyzer in AnalyzingPostprocessor._analyzers:
