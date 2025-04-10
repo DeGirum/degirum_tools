@@ -221,8 +221,8 @@ class VideoSaverGizmo(Gizmo):
 
         Reads frames from the input stream and writes them to the output file until the stream is exhausted or aborted.
         """
-        def get_img(stream_data: StreamData) -> np.ndarray:
-            frame = stream_data.data
+        def get_img(data: StreamData) -> np.ndarray:
+            frame = data.data
             if self._show_ai_overlay:
                 inference_meta = data.meta.find_last(tag_inference)
                 if inference_meta:
