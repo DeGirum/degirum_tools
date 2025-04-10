@@ -56,10 +56,10 @@ class StreamMeta:
     **Typical Usage**
 
     A typical processing pipeline might look like:
-    1. A video source gizmo creates a new `StreamMeta`, appends frame info under tag `"Video"`.
-    2. A resizing gizmo appends new dimension info under tag `"Resize"`.
-    3. An AI inference gizmo appends the inference result under tag `"Inference"`.
-    4. A display gizmo reads the final metadata to overlay bounding boxes, etc.
+        1. A video source gizmo creates a new `StreamMeta`, appends frame info under tag `"Video"`.
+        2. A resizing gizmo appends new dimension info under tag `"Resize"`.
+        3. An AI inference gizmo appends the inference result under tag `"Inference"`.
+        4. A display gizmo reads the final metadata to overlay bounding boxes, etc.
 
     This incremental metadata accumulation is extremely flexible and allows each gizmo
     to contribute to a unified record of the data's journey.
@@ -266,16 +266,16 @@ class Gizmo(ABC):
     multiple others (a single gizmo’s output feeding multiple destinations).
 
     A data element moving through the pipeline is a tuple `(data, meta)` where:
-      - `data` is the raw data (e.g., an image, a frame, or any object),
-      - `meta` is a `StreamMeta` object containing accumulated metadata.
+        - `data` is the raw data (e.g., an image, a frame, or any object),
+        - `meta` is a `StreamMeta` object containing accumulated metadata.
 
     Subclasses must implement the abstract `run()` method to define the gizmo’s processing loop. The `run()`
     method is launched in a separate thread by the `Composition` and should run until no more data is available
     or until an abort signal is set.
 
     The `run()` implementation should:
-      - Periodically check the `_abort` flag (set via `abort()`) to see if it should terminate.
-      - Handle poison pills (`Stream._poison`) if they appear in the input streams, which signal "no more data."
+        - Periodically check the `_abort` flag (set via `abort()`) to see if it should terminate.
+        - Handle poison pills (`Stream._poison`) if they appear in the input streams, which signal "no more data."
 
     Below is a minimal example similar to `ResizingGizmo`. This gizmo simply reads items from its single input,
     processes them, and sends results downstream until either `_abort` is set or the input stream is exhausted:
@@ -313,16 +313,14 @@ class Gizmo(ABC):
     ```
 
     Notes:
-      - If your gizmo has multiple inputs, you can call `self.get_input(i)` for each input or iterate over
-        `self.get_inputs()` if you need to merge or synchronize multiple streams.
-      - Always check `_abort` periodically inside your main loop if your gizmo could run for a long time or
-        block on I/O.
-      - When done, you do not need to manually send poison pills; the `Composition` handles closing any
-        downstream streams once each gizmo’s `run()` completes.
-      - If, instead of `self.get_input(0)`, you use `self.get_input(0).get()` or `.get_nowait()`, you must check if you receive a poison pill.
-        - In simple loops, `self.get_input(0)` will terminate the loop.
-        - In multi-input gizmos where simple nested for-loops aren't usable, get_nowait() is typically used to read input streams.
-        - This way the gizmo code may query all inputs on a non-blocking manner and properly terminate loops.
+        - If your gizmo has multiple inputs, you can call `self.get_input(i)` for each input or iterate over
+            `self.get_inputs()` if you need to merge or synchronize multiple streams.
+        - Always check `_abort` periodically inside your main loop if your gizmo could run for a long time or block on I/O.
+        - When done, you do not need to manually send poison pills; the `Composition` handles closing any downstream streams once each gizmo’s `run()` completes.
+        - If, instead of `self.get_input(0)`, you use `self.get_input(0).get()` or `.get_nowait()`, you must check if you receive a poison pill.
+            - In simple loops, `self.get_input(0)` will terminate the loop.
+            - In multi-input gizmos where simple nested for-loops aren't usable, get_nowait() is typically used to read input streams.
+            - This way the gizmo code may query all inputs on a non-blocking manner and properly terminate loops.
     """
 
     def __init__(self, input_stream_sizes: List[tuple] = []):
@@ -460,11 +458,10 @@ class Gizmo(ABC):
 
         This method should retrieve data from input streams (if any), process it, and send results to outputs. Subclasses implement this method to define the gizmo's behavior.
 
-        Important guidelines for implementing `run()`:
-        - Check `self._abort` periodically and exit the loop if it becomes True.
-        - If reading from an input stream via `get()` or `get_nowait()`, check for the poison pill (`Stream._poison`). If encountered, exit the loop.
-        - For example, a typical single-input loop could be:
-
+        Important guidelines for implementation:
+            - Check `self._abort` periodically and exit the loop if it becomes True.
+            - If reading from an input stream via `get()` or `get_nowait()`, check for the poison pill (`Stream._poison`). If encountered, exit the loop.
+            - For example, a typical single-input loop could be:
         ```
         for data in self.get_input(0):
             if self._abort:
@@ -490,14 +487,14 @@ class Composition:
     """Orchestrates and runs a set of connected gizmos.
 
     Usage:
-    1. Add all gizmos to the composition using `add()` or by calling the composition instance.
-    2. Connect the gizmos together using `connect_to()` or the `>>` operator.
-    3. Start the execution by calling `start()`.
-    4. To stop the execution, call `stop()` (or use the composition as a context manager).
+        1. Add all gizmos to the composition using `add()` or by calling the composition instance.
+        2. Connect the gizmos together using `connect_to()` or the `>>` operator.
+        3. Start the execution by calling `start()`.
+        4. To stop the execution, call `stop()` (or use the composition as a context manager).
     """
 
     def __init__(self, *gizmos: Union[Gizmo, Iterator[Gizmo]]):
-        """Initialize the Composition with optional initial gizmos.
+        """Initialize the composition with optional initial gizmos.
 
         Args:
             *gizmos (Gizmo or Iterator[Gizmo]): Optional gizmos (or iterables of gizmos) to add initially.
@@ -603,7 +600,7 @@ class Composition:
         For this to be meaningful, the composition must have been started with `detect_bottlenecks=True`.
 
         Returns:
-            List[dict]: A list of dictionaries where each key is a gizmo name and the value is the number of frames dropped for that gizmo.
+            A list of dictionaries where each key is a gizmo name and the value is the number of frames dropped for that gizmo.
         """
         ret = []
         for gizmo in self._gizmos:
@@ -618,7 +615,7 @@ class Composition:
         Can be used to analyze deadlocks.
 
         Returns:
-            List[dict]: A list of dictionaries where each key is a gizmo name and the value is a list containing the gizmo's result count followed by the size of each of its input queues.
+            A list of dictionaries where each key is a gizmo name and the value is a list containing the gizmo's result count followed by the size of each of its input queues.
         """
         ret = []
         for gizmo in self._gizmos:

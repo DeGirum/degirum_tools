@@ -429,15 +429,16 @@ class AiObjectDetectionCroppingGizmo(Gizmo):
 
     Each input frame with object detection results yields one or more cropped images as output.
 
-    **Output:**
-    - **Image**: The cropped portion of the original image corresponding to a detected object.
-    - **Meta-info**: A dictionary containing:
-      - `original_result`: Reference to the original detection result (InferenceResults) for the frame.
-      - `cropped_result`: The detection result entry for this specific crop.
-      - `cropped_index`: The index of this object in the original results list.
-      - `is_last_crop`: True if this crop is the last one for the frame.
+    Output:
+        - **Image**: The cropped portion of the original image corresponding to a detected object.
+        - **Meta-info**: A dictionary containing:
+            - `original_result`: Reference to the original detection result (InferenceResults) for the frame.
+            - `cropped_result`: The detection result entry for this specific crop.
+            - `cropped_index`: The index of this object in the original results list.
+            - `is_last_crop`: True if this crop is the last one for the frame.
 
-    Note: `cropped_index` and `is_last_crop` are only present if at least one object is detected in the frame.
+    Note:
+        `cropped_index` and `is_last_crop` are only present if at least one object is detected in the frame.
 
     The `validate_bbox()` method can be overridden in subclasses to filter out undesirable detections.
     """
@@ -820,12 +821,12 @@ class AiPreprocessGizmo(Gizmo):
 
     It generates preprocessed image data to be fed into the model.
 
-    **Output:**
-    - **Data**: Preprocessed image bytes ready for model input.
-    - **Meta-info**: Dictionary including:
-        - `image_input`: The original input image.
-        - `converter`: A function to convert coordinates from model output back to the original image.
-        - `image_result`: The preprocessed image (present only if the model is configured to provide it).
+    Output:
+        - **Data**: Preprocessed image bytes ready for model input.
+        - **Meta-info**: Dictionary including:
+            - `image_input`: The original input image.
+            - `converter`: A function to convert coordinates from model output back to the original image.
+            - `image_result`: The preprocessed image (present only if the model is configured to provide it).
 
     Attributes:
         key_image_input (str): Metadata key for the original input image.

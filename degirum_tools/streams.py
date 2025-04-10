@@ -18,12 +18,12 @@ This module provides a **streaming toolkit** for building multi-threaded process
 Core Concepts
 ------------
 
-1. **Stream**
+1. **Stream**:
     - Represents a queue of data items (`StreamData`), such as frames from a camera or images from a directory.
     - Gizmos push (`put`) data into Streams or read (`get`) data from them.
     - Streams can optionally drop data (the oldest item) if they reach a specified maximum queue size, preventing pipeline bottlenecks.
 
-2. **Gizmo**
+2. **Gizmo**:
     - A **gizmo** is a discrete processing node in the pipeline.
     - Each gizmo runs in its own thread, pulling data from its input stream(s), processing it, and pushing results to its output stream(s).
     - Example gizmos include:
@@ -35,18 +35,19 @@ Core Concepts
     - Gizmos keep a list of input streams that they are connected to.
     - Gizmos own their input streams.
 
-3. **Composition**
+3. **Composition**:
     - A **Composition** is a container that holds and manages multiple gizmos (and their Streams).
     - Once gizmos are connected, you can call `composition.start()` to begin processing. Each gizmo’s `run()` method executes in a dedicated thread.
     - Call `composition.stop()` to gracefully stop processing and wait for threads to finish.
 
-4. **StreamData** and **StreamMeta**
+4. **StreamData** and **StreamMeta**:
     - Each item in the pipeline is encapsulated by a `StreamData` object, which holds:
-       - `data`: The actual payload (e.g., an image array, a frame).
-       - `meta`: A `StreamMeta` object that can hold extra metadata from each gizmo (e.g., a detection result, timestamps, bounding boxes, etc.).
+    
+        - `data`: The actual payload (e.g., an image array, a frame).
+        - `meta`: A `StreamMeta` object that can hold extra metadata from each gizmo (e.g., a detection result, timestamps, bounding boxes, etc.).
     - Gizmos can append to `StreamMeta` so that metadata accumulates across the pipeline.
 
-5. **Metadata Flow (`StreamMeta`)**
+5. **Metadata Flow (`StreamMeta`)**:
     - How `StreamMeta` works:
         - `StreamMeta` itself is a container that can hold any number of "meta info" objects.
         - Each meta info object is "tagged" with one or more string tags, such as `"dgt_video"`, `"dgt_inference"`, etc.
@@ -54,11 +55,12 @@ Core Concepts
         - You can retrieve meta info objects by searching with `meta.find("tag")` (returns *all* matches) or `meta.find_last("tag")` (returns the *most recent* match).
         - **Important**: A gizmo generally clones (`.clone()`) the incoming `StreamMeta` before appending its own metadata to avoid upstream side effects.
         - This design lets each gizmo add new metadata, while preserving what was provided by upstream gizmos.
+        
     - High-Level Example:
         - A camera gizmo outputs frames with meta tagged `"dgt_video"` containing properties like FPS, width, height, etc.
         - An AI inference gizmo downstream takes `StreamData(data=frame, meta=...)`, runs inference, then:
-             1. Clones the metadata container.
-             2. Appends its inference results under the `"dgt_inference"` tag.
+            1. Clones the metadata container.
+            2. Appends its inference results under the `"dgt_inference"` tag.
         - If *two* AI gizmos run in series, both will append metadata with the same `"dgt_inference"` tag. A later consumer can call `meta.find("dgt_inference")` to get both sets of results or `meta.find_last("dgt_inference")` to get the most recent result.
 
 Basic Usage Example
@@ -96,10 +98,10 @@ Key Steps
 --------------
 1. **Create** your gizmos (e.g., `VideoSourceGizmo`, `VideoDisplayGizmo`, AI inference gizmos, etc.).
 2. **Connect** them together using the `>>` operator (or `connect_to()` method) to form a processing graph.
-   E.g.:
-   ```python
-   source >> processor >> sink
-   ```
+    E.g.:
+    ```python
+    source >> processor >> sink
+    ```
 3. **Initialize** a `Composition` with the top-level gizmo(s).
 4. **Start** the composition to launch each gizmo in its own thread.
 5. (Optional) **Wait** for the pipeline to finish or perform other tasks. You can query statuses, queue sizes, or get partial results in real time.
@@ -142,18 +144,20 @@ properties:
         patternProperties:
             "^[a-zA-Z_][a-zA-Z0-9_]*$":
                 oneOf:
-                  - type: [string, number, boolean, array]
-                    description: The variable value; can be $(expression) to evaluate
-                  - type: object
-                    description: The only object key is the class name to instantiate; value are the constructor parameters
-                    additionalProperties: false
-                    minProperties: 1
-                    maxProperties: 1
-                    patternProperties:
-                        "^[a-zA-Z_][a-zA-Z0-9_.]*$":
-                            type: object
-                            description: The constructor parameters of the object
-                            additionalProperties: true
+                
+                    - type: [string, number, boolean, array]
+                        description: The variable value; can be $(expression) to evaluate
+                        
+                    - type: object
+                        description: The only object key is the class name to instantiate; value are the constructor parameters
+                        additionalProperties: false
+                        minProperties: 1
+                        maxProperties: 1
+                        patternProperties:
+                            "^[a-zA-Z_][a-zA-Z0-9_.]*$":
+                                type: object
+                                description: The constructor parameters of the object
+                                additionalProperties: true
     {Key_Gizmos}:
         type: object
         description: The collection of gizmos, keyed by gizmo instance name
@@ -161,18 +165,20 @@ properties:
         patternProperties:
             "^[a-zA-Z_][a-zA-Z0-9_]*$":
                 oneOf:
-                  - type: string
-                    description: The gizmo class name to instantiate, if no parameters are needed
-                  - type: object
-                    description: The only object key is the class name to instantiate; value are the constructor parameters
-                    additionalProperties: false
-                    minProperties: 1
-                    maxProperties: 1
-                    patternProperties:
-                        "^[a-zA-Z_][a-zA-Z0-9_.]*$":
-                            type: object
-                            description: The constructor parameters of the gizmo
-                            additionalProperties: true
+                
+                    - type: string
+                        description: The gizmo class name to instantiate, if no parameters are needed
+                        
+                    - type: object
+                        description: The only object key is the class name to instantiate; value are the constructor parameters
+                        additionalProperties: false
+                        minProperties: 1
+                        maxProperties: 1
+                        patternProperties:
+                            "^[a-zA-Z_][a-zA-Z0-9_.]*$":
+                                type: object
+                                description: The constructor parameters of the gizmo
+                                additionalProperties: true
     {Key_Connections}:
         type: array
         description: The list of connections between gizmos
@@ -181,13 +187,17 @@ properties:
             description: The connection between gizmos
             items:
                 oneOf:
+                
                     - type: string
+                    
                     - type: array
-                      description: Gizmo with input index
-                      prefixItems:
-                        - type: string
-                        - type: number
-                      items: false
+                        description: Gizmo with input index
+                        prefixItems:
+                        
+                            - type: string
+                            
+                            - type: number
+                        items: false
 """
 composition_definition_schema = yaml.safe_load(composition_definition_schema_text)
 

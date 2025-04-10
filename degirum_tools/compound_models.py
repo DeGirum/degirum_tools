@@ -332,10 +332,10 @@ class CompoundModelBase(ModelLike):
         Perform a whole inference lifecycle for all objects in the given iterator object (for example, `list`).
 
         Works in a pipeline fashion:
-        1. Pass input frames (or `(frame, frame_info)` tuples) to `model1`.
-        2. Use `queue_result1(result1)` to feed `model2`.
-        3. Collect `model2` results, transform them with `transform_result2(result2)`,
-        4. Yield the final output.
+            1. Pass input frames (or `(frame, frame_info)` tuples) to `model1`.
+            2. Use `queue_result1(result1)` to feed `model2`.
+            3. Collect `model2` results, transform them with `transform_result2(result2)`,
+            4. Yield the final output.
 
         Args:
             data (iterator):
@@ -604,11 +604,10 @@ class CroppingCompoundModel(CompoundModelBase):
 class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
     """
     Compound model class which:
-
-    1. Runs an **object detection** (model1) to generate bounding boxes.
-    2. Crops each bounding box from the original image.
-    3. Runs a **classification** (model2) on each cropped image.
-    4. Patches the original detection results with the classification labels.
+        1. Runs an **object detection** (model1) to generate bounding boxes.
+        2. Crops each bounding box from the original image.
+        3. Runs a **classification** (model2) on each cropped image.
+        4. Patches the original detection results with the classification labels.
 
     Restriction: first model must be **object detection**, second model must be **classification**.
     """
@@ -738,15 +737,15 @@ class NmsOptions:
 class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
     """
     Compound model class which:
-
-    1. Uses an **object detection** model (model1) to generate bounding boxes (ROIs).
-    2. Crops each bounding box from the original image.
-    3. Uses another **object detection** model (model2) to further detect objects in each cropped region.
-    4. Combines the results of the second model from all cropped regions, mapping coords back to the original image.
+        1. Uses an **object detection** model (model1) to generate bounding boxes (ROIs).
+        2. Crops each bounding box from the original image.
+        3. Uses another **object detection** model (model2) to further detect objects in each cropped region.
+        4. Combines the results of the second model from all cropped regions, mapping coords back to the original image.
 
     Optionally, you can add model1 detections to the final result and/or apply NMS.
 
-    Restriction: first model should be object detection or pseudo-detection model like `RegionExtractionPseudoModel`,
+    Restriction:
+        First model should be object detection or pseudo-detection model like `RegionExtractionPseudoModel`,
     second model should be object detection.
     """
 
