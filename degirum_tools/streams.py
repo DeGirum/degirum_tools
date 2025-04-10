@@ -114,7 +114,6 @@ Advanced Topics
 - **Error Handling**: If any gizmo encounters an error, the `Composition` can stop the whole pipeline, allowing you to handle exceptions centrally.
 
 For practical code examples, see the `dgstreams_demo.ipynb` notebook in the PySDKExamples.
-
 """
 
 import yaml

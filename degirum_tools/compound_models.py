@@ -1,11 +1,7 @@
-#
 # compound_models.py: compound model toolkit for PySDK samples
-#
 # Copyright DeGirum Corporation 2023
 # All rights reserved
-#
 # Implements classes for multi-model aggregation.
-#
 
 """
 Compound Models Module Overview
