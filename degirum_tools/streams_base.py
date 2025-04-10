@@ -277,7 +277,7 @@ class Gizmo(ABC):
       - Periodically check the `_abort` flag (set via `abort()`) to see if it should terminate.
       - Handle poison pills (`Stream._poison`) if they appear in the input streams, which signal "no more data."
 
-    Below is a minimal example, similar to `ResizingGizmo`. This gizmo simply reads items from its single input,
+    Below is a minimal example similar to `ResizingGizmo`. This gizmo simply reads items from its single input,
     processes them, and sends results downstream until either `_abort` is set or the input stream is exhausted:
 
     ```python
@@ -288,10 +288,6 @@ class Gizmo(ABC):
                 if self._abort:
                     break
 
-                # If we detect a poison pill, it means "no more data," so exit loop
-                if item == Stream._poison:
-                    break
-
                 # item is a StreamData object: item.data is the image/frame, item.meta is the metadata
                 input_image = item.data
 
@@ -300,7 +296,8 @@ class Gizmo(ABC):
                 # 'do_resize' is just a placeholder; you'd implement your own resizing function.
 
                 # 2) Update the metadata
-                #    - Typically clone the existing metadata so you don't modify it upstream
+                #    - Clone the existing metadata first.
+                #    - In Python all objects are passed by reference, so if you do not clone but try A >> B and A >> C, C will receive the meta object modified by B.
                 out_meta = item.meta.clone()
                 out_meta.append(
                     {
@@ -308,7 +305,7 @@ class Gizmo(ABC):
                         "frame_height": 480,
                         "method": "your_resize_method"
                     },
-                    tags=[self.name]  # or your chosen tags
+                    tags=self.get_tags()
                 )
 
                 # 3) Send the processed item downstream
@@ -322,7 +319,10 @@ class Gizmo(ABC):
         block on I/O.
       - When done, you do not need to manually send poison pills; the `Composition` handles closing any
         downstream streams once each gizmo’s `run()` completes.
-
+      - If, instead of `self.get_input(0)`, you use `self.get_input(0).get()` or `.get_nowait()`, you must check if you receive a poison pill.
+        - In simple loops, `self.get_input(0)` will terminate the loop.
+        - In multi-input gizmos where simple nested for-loops aren't usable, get_nowait() is typically used to read input streams.
+        - This way the gizmo code may query all inputs on a non-blocking manner and properly terminate loops.
     """
 
     def __init__(self, input_stream_sizes: List[tuple] = []):
@@ -378,7 +378,7 @@ class Gizmo(ABC):
         """
         return self._inputs
 
-    def connect_to(self, other_gizmo, inp: Union[int, Stream] = 0):
+    def connect_to(self, other_gizmo, inp: Union[int, Stream] = 0) -> "Gizmo":
         """Connect an input stream of this gizmo to another gizmo's output.
 
         Args:
@@ -410,7 +410,7 @@ class Gizmo(ABC):
 
         return _get_connected(self, set())
 
-    def __getitem__(self, index):
+    def __getitem__(self, index) -> tuple["Gizmo", Stream]:
         """Enable `gizmo[index]` syntax for specifying connections.
 
         Returns a tuple `(self, input_stream)` which can be used on the right side of the `>>` operator
@@ -424,7 +424,7 @@ class Gizmo(ABC):
         """
         return (self, self.get_input(index))
 
-    def __rshift__(self, other_gizmo: Union[Any, tuple]):
+    def __rshift__(self, other_gizmo: Union[Any, tuple]) -> "Gizmo":
         """Connect another gizmo to this gizmo using the `>>` operator.
 
         This implements the right-shift operator, allowing syntax like `source >> target` or `source >> target[input_index]`.
@@ -676,7 +676,7 @@ class Composition:
         self.request_stop()
         self.wait()
 
-    def __enter__(self):
+    def __enter__(self) -> "Composition":
         """Start the composition when entering a context (without waiting).
 
         Returns:
