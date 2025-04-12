@@ -7,9 +7,9 @@
 Compound Models Module Overview
 ======================
 
-This module provides a toolkit for creating **compound models** using the DeGirum PySDK.
+This module provides a toolkit for creating compound models using the DeGirum PySDK.
 
-A **compound model** orchestrates multiple underlying models into a pipeline to enable complex inference scenarios. Common examples include:
+A compound model orchestrates multiple underlying models into a pipeline to enable complex inference scenarios. Common examples include:
 
 - Detecting objects and then classifying each detected object.
 - Running coarse detection first, then applying a refined detection model on specific regions.
@@ -181,8 +181,8 @@ class ModelLike(ABC):
         """
         Perform a whole inference lifecycle for all objects in the given iterator object (for example, `list`).
 
-        Each item in `data` can be a **single frame** (any type acceptable to the model) or
-        a **2-element tuple** `(frame, frame_info)`. In the latter case, `frame_info` is
+        Each item in `data` can be a single frame (any type acceptable to the model) or
+        a 2-element tuple `(frame, frame_info)`. In the latter case, `frame_info` is
         carried through and placed in `InferenceResults.info` for that frame.
 
         Args:
@@ -520,7 +520,7 @@ class CroppingCompoundModel(CompoundModelBase):
     Compound model class which crops the original image according to results of the first model
     and then passes these cropped images to the second model.
 
-    Restriction: the first model should be of **object detection** type.
+    Restriction: the first model should be of object detection type.
     """
 
     def __init__(
@@ -600,12 +600,12 @@ class CroppingCompoundModel(CompoundModelBase):
 class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
     """
     Compound model class which:
-        1. Runs an **object detection** (model1) to generate bounding boxes.
+        1. Runs an object detection (model1) to generate bounding boxes.
         2. Crops each bounding box from the original image.
-        3. Runs a **classification** (model2) on each cropped image.
+        3. Runs a classification (model2) on each cropped image.
         4. Patches the original detection results with the classification labels.
 
-    Restriction: first model must be **object detection**, second model must be **classification**.
+    Restriction: first model must be object detection, second model must be classification.
     """
 
     def __init__(
@@ -733,9 +733,9 @@ class NmsOptions:
 class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
     """
     Compound model class which:
-        1. Uses an **object detection** model (model1) to generate bounding boxes (ROIs).
+        1. Uses an object detection model (model1) to generate bounding boxes (ROIs).
         2. Crops each bounding box from the original image.
-        3. Uses another **object detection** model (model2) to further detect objects in each cropped region.
+        3. Uses another object detection model (model2) to further detect objects in each cropped region.
         4. Combines the results of the second model from all cropped regions, mapping coords back to the original image.
 
     Optionally, you can add model1 detections to the final result and/or apply NMS.
@@ -821,7 +821,7 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
 
         Returns:
             (degirum.postprocessor.InferenceResults or None):
-                The final detection results for the **previous** frame if a new frame started,
+                The final detection results for the previous frame if a new frame started,
                 or None otherwise.
         """
         result1 = result2.info.result1

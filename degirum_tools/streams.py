@@ -8,52 +8,52 @@
 Streaming Toolkit Overview
 ==========================
 
-This module provides a **streaming toolkit** for building multi-threaded processing pipelines, where data (images, video frames, or arbitrary objects) flows through a series of *processing blocks* called **gizmos**. The toolkit allows you to:
+This module provides a streaming toolkit for building multi-threaded processing pipelines, where data (images, video frames, or arbitrary objects) flows through a series of *processing blocks* called gizmos. The toolkit allows you to:
 
 - Acquire or generate data from one or more sources (e.g., camera feeds, video files).
 - Process the data in a pipeline (possibly in parallel), chaining multiple gizmos together.
 - Optionally display or save the processed data, or feed it into AI inference models.
-- Orchestrate everything in a **Composition**, which manages the lifecycle (threads) of all connected gizmos.
+- Orchestrate everything in a Composition, which manages the lifecycle (threads) of all connected gizmos.
 
 Core Concepts
 ------------
 
 1. **Stream**:
-    - Represents a queue of data items (`StreamData`), such as frames from a camera or images from a directory.
+    - Represents a queue of data items ([degirum_tools.streams.StreamData](streams#streamdata)), such as frames from a camera or images from a directory.
     - Gizmos push (`put`) data into Streams or read (`get`) data from them.
     - Streams can optionally drop data (the oldest item) if they reach a specified maximum queue size, preventing pipeline bottlenecks.
 
 2. **Gizmo**:
-    - A **gizmo** is a discrete processing node in the pipeline.
+    - A gizmo is a discrete processing node in the pipeline.
     - Each gizmo runs in its own thread, pulling data from its input stream(s), processing it, and pushing results to its output stream(s).
     - Example gizmos include:
         - Video-sourcing gizmos that read frames from a webcam or file.
         - AI inference gizmos that run a model on incoming frames.
         - Video display or saving gizmos that show or store processed frames.
         - Gizmos that perform transformations (resizing, cropping, analyzing) on data.
-    - Gizmos communicate via Streams. One gizmo’s output Stream can feed multiple downstream gizmos.
+    - Gizmos communicate via Streams. A gizmo output Stream can feed multiple downstream gizmos.
     - Gizmos keep a list of input streams that they are connected to.
     - Gizmos own their input streams.
 
 3. **Composition**:
-    - A **Composition** is a container that holds and manages multiple gizmos (and their Streams).
-    - Once gizmos are connected, you can call `composition.start()` to begin processing. Each gizmo’s `run()` method executes in a dedicated thread.
+    - A Composition is a container that holds and manages multiple gizmos (and their Streams).
+    - Once gizmos are connected, you can call `composition.start()` to begin processing. Each gizmo `run()` method executes in a dedicated thread.
     - Call `composition.stop()` to gracefully stop processing and wait for threads to finish.
 
 4. **StreamData** and **StreamMeta**:
-    - Each item in the pipeline is encapsulated by a `StreamData` object, which holds:
+    - Each item in the pipeline is encapsulated by a ([degirum_tools.streams.StreamMeta][streams.md#streammeta]) object, which holds:
 
         - `data`: The actual payload (e.g., an image array, a frame).
-        - `meta`: A `StreamMeta` object that can hold extra metadata from each gizmo (e.g., a detection result, timestamps, bounding boxes, etc.).
-    - Gizmos can append to `StreamMeta` so that metadata accumulates across the pipeline.
+        - `meta`: A ([degirum_tools.streams.StreamMeta][streams.md#streammeta]) object that can hold extra metadata from each gizmo (e.g., a detection result, timestamps, bounding boxes, etc.).
+    - Gizmos can append to ([degirum_tools.streams.StreamMeta][streams.md#streammeta]) so that metadata accumulates across the pipeline.
 
-5. **Metadata Flow (`StreamMeta`)**:
-    - How `StreamMeta` works:
-        - `StreamMeta` itself is a container that can hold any number of "meta info" objects.
+5. **Metadata Flow (StreamMeta)**:
+    - How ([degirum_tools.streams.StreamMeta][streams.md#streammeta]) works:
+        - ([degirum_tools.streams.StreamMeta][streams.md#streammeta]) itself is a container that can hold any number of "meta info" objects.
         - Each meta info object is "tagged" with one or more string tags, such as `"dgt_video"`, `"dgt_inference"`, etc.
         - You append new meta info by calling `meta.append(my_info, [list_of_tags])`.
         - You can retrieve meta info objects by searching with `meta.find("tag")` (returns *all* matches) or `meta.find_last("tag")` (returns the *most recent* match).
-        - **Important**: A gizmo generally clones (`.clone()`) the incoming `StreamMeta` before appending its own metadata to avoid upstream side effects.
+        - **Important**: A gizmo generally clones (`.clone()`) the incoming ([degirum_tools.streams.StreamMeta][streams.md#streammeta]) before appending its own metadata to avoid upstream side effects.
         - This design lets each gizmo add new metadata, while preserving what was provided by upstream gizmos.
 
     - High-Level Example:

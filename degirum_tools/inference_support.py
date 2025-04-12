@@ -315,7 +315,7 @@ def attach_analyzers(
             One or more analyzer objects. Passing None will detach any previously attached analyzers.
 
     Usage:
-        >>> attach_analyzers(my_model, MyAnalyzerSubclass())
+        attach_analyzers(my_model, MyAnalyzerSubclass())
 
     Notes:
         - If ``model`` is a compound model,
@@ -388,14 +388,16 @@ def predict_stream(
             analysis or annotation is performed beyond the model's standard postprocessing.
 
     Returns:
-        (dg.postprocessor.InferenceResults) or (AnalyzingPostprocessor):
+        Union[InferenceResults, AnalyzingPostprocessor]:
             The inference result for each processed frame. If analyzers are present,
             the result object is wrapped to allow custom annotation in its `.image_overlay`.
 
     Example:
-        >>> for res in predict_stream(my_model, "my_video.mp4", fps=15, analyzers=MyAnalyzer()):
-        ...     annotated_img = res.image_overlay  # includes custom overlay
-        ...     # do something with annotated_img
+    ```python
+    for res in predict_stream(my_model, "my_video.mp4", fps=15, analyzers=MyAnalyzer()):
+        annotated_img = res.image_overlay  # includes custom overlay
+        # do something with annotated_img
+    ```
     """
     analyzing_postprocessor = _create_analyzing_postprocessor_class(analyzers)
 
@@ -454,7 +456,9 @@ def annotate_video(
             is called on the result before writing the frame.
 
     Example:
-        >>> annotate_video(my_model, "input.mp4", "output.mp4", analyzers=[MyAnalyzer()])
+    ```python
+    annotate_video(my_model, "input.mp4", "output.mp4", analyzers=[MyAnalyzer()])
+    ```
     """
     win_name = f"Annotating {video_source_id}"
 
@@ -565,10 +569,12 @@ def model_time_profile(
             An object containing timing details, measured FPS, and other stats.
 
     Example:
-        >>> profile = model_time_profile(my_model, iterations=50)
-        >>> print("Elapsed seconds:", profile.elapsed)
-        >>> print("Observed FPS:", profile.observed_fps)
-        >>> print("Core Inference Stats:", profile.time_stats["CoreInferenceDuration_ms"])
+    ```python
+    profile = model_time_profile(my_model, iterations=50)
+    print("Elapsed seconds:", profile.elapsed)
+    print("Observed FPS:", profile.observed_fps)
+    print("Core Inference Stats:", profile.time_stats["CoreInferenceDuration_ms"])
+    ```
     """
 
     # Skip non-image type models

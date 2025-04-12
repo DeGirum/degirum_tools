@@ -693,7 +693,7 @@ class CropCombiningGizmo(Gizmo):
         This converts the coordinates (e.g., bounding boxes, landmarks) of inference results obtained on a cropped image back to the coordinate system of the original image.
 
         Args:
-            orig_result: The original detection result (InferenceResults) for the full frame.
+            orig_result (dg.postprocessor.InferenceResults): The original detection result (InferenceResults) for the full frame.
             bbox_idx (int): The index of the object in the original result list.
             cropped_results (list): A list of InferenceResults from the cropped image's inference.
 
@@ -724,7 +724,7 @@ class CropCombiningGizmo(Gizmo):
             result (dg.postprocessor.InferenceResults): The inference result to clone.
 
         Returns:
-            dg.postprocessor.InferenceResults: A cloned inference result with a deep-copied results list.
+            (dg.postprocessor.InferenceResults): A cloned inference result with a deep-copied results list.
         """
         def _overlay_extra_results(res):
             """Produce an image overlay including all extra results."""
