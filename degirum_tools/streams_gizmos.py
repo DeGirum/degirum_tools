@@ -31,7 +31,7 @@ tag_analyzer = "dgt_analyzer"      # tag for analyzer result
 class VideoSourceGizmo(Gizmo):
     """OpenCV-based video source gizmo.
 
-    Captures frames from a video source (camera, video file, etc.) and outputs them as StreamData into the pipeline.
+    Captures frames from a video source (camera, video file, etc.) and outputs them as [StreamData](streams.md#streamdata) into the pipeline.
     """
 
     # meta keys for video frame information
@@ -48,7 +48,7 @@ class VideoSourceGizmo(Gizmo):
         Args:
             video_source (int or str, optional): A cv2.VideoCapture-compatible video source
                 (device index as int, or file path/URL as str). Defaults to None.
-            stop_composition_on_end (bool): If True, stop the composition when the video source is over. Defaults to False.
+            stop_composition_on_end (bool): If True, stop the [Composition](streams_base.md#composition) when the video source is over. Defaults to False.
         """
         super().__init__()
         self._video_source = video_source

@@ -13,13 +13,13 @@ This module provides a streaming toolkit for building multi-threaded processing 
 - Acquire or generate data from one or more sources (e.g., camera feeds, video files).
 - Process the data in a pipeline (possibly in parallel), chaining multiple gizmos together.
 - Optionally display or save the processed data, or feed it into AI inference models.
-- Orchestrate everything in a Composition, which manages the lifecycle (threads) of all connected gizmos.
+- Orchestrate everything in a [Composition](streams_base.md#composition), which manages the lifecycle (threads) of all connected gizmos.
 
 Core Concepts
 ------------
 
 1. **Stream**:
-    - Represents a queue of data items StreamData, such as frames from a camera or images from a directory.
+    - Represents a queue of data items [StreamData](streams.md#streamdata), such as frames from a camera or images from a directory.
     - Gizmos push (`put`) data into Streams or read (`get`) data from them.
     - Streams can optionally drop data (the oldest item) if they reach a specified maximum queue size, preventing pipeline bottlenecks.
 
@@ -36,24 +36,24 @@ Core Concepts
     - Gizmos own their input streams.
 
 3. **Composition**:
-    - A Composition is a container that holds and manages multiple gizmos (and their Streams).
+    - A [Composition](streams_base.md#composition) is a container that holds and manages multiple gizmos (and their Streams).
     - Once gizmos are connected, you can call `composition.start()` to begin processing. Each gizmo `run()` method executes in a dedicated thread.
     - Call `composition.stop()` to gracefully stop processing and wait for threads to finish.
 
 4. **StreamData** and **StreamMeta**:
-    - Each item in the pipeline is encapsulated by a StreamMeta object, which holds:
+    - Each item in the pipeline is encapsulated by a [StreamMeta](streams.md#streammeta) object, which holds:
 
         - `data`: The actual payload (e.g., an image array, a frame).
-        - `meta`: A StreamMeta object that can hold extra metadata from each gizmo (e.g., a detection result, timestamps, bounding boxes, etc.).
-    - Gizmos can append to StreamMeta so that metadata accumulates across the pipeline.
+        - `meta`: A [StreamMeta](streams.md#streammeta) object that can hold extra metadata from each gizmo (e.g., a detection result, timestamps, bounding boxes, etc.).
+    - Gizmos can append to [StreamMeta](streams.md#streammeta) so that metadata accumulates across the pipeline.
 
 5. **Metadata Flow (StreamMeta)**:
-    - How StreamMeta works:
-        - StreamMeta itself is a container that can hold any number of "meta info" objects.
+    - How [StreamMeta](streams.md#streammeta) works:
+        - [StreamMeta](streams.md#streammeta) itself is a container that can hold any number of "meta info" objects.
         - Each meta info object is "tagged" with one or more string tags, such as `"dgt_video"`, `"dgt_inference"`, etc.
         - You append new meta info by calling `meta.append(my_info, [list_of_tags])`.
         - You can retrieve meta info objects by searching with `meta.find("tag")` (returns *all* matches) or `meta.find_last("tag")` (returns the *most recent* match).
-        - **Important**: A gizmo generally clones (`.clone()`) the incoming StreamMeta before appending its own metadata to avoid upstream side effects.
+        - **Important**: A gizmo generally clones (`.clone()`) the incoming [StreamMeta](streams.md#streammeta) before appending its own metadata to avoid upstream side effects.
         - This design lets each gizmo add new metadata, while preserving what was provided by upstream gizmos.
 
     - High-Level Example:
@@ -102,8 +102,8 @@ Key Steps
     ```python
     source >> processor >> sink
     ```
-3. **Initialize** a `Composition` with the top-level gizmo(s).
-4. **Start** the composition to launch each gizmo in its own thread.
+3. **Initialize** a [Composition](streams_base.md#composition) with the top-level gizmo(s).
+4. **Start** the [Composition](streams_base.md#composition) to launch each gizmo in its own thread.
 5. (Optional) **Wait** for the pipeline to finish or perform other tasks. You can query statuses, queue sizes, or get partial results in real time.
 6. **Stop** the pipeline when done.
 
@@ -111,7 +111,7 @@ Advanced Topics
 --------------
 - **Non-blocking vs Blocking**: Streams can drop items if configured (`allow_drop=True`) to handle real-time feeds.
 - **Multiple Inputs or Outputs**: Some gizmos can have multiple input streams and/or broadcast results to multiple outputs.
-- **Error Handling**: If any gizmo encounters an error, the `Composition` can stop the whole pipeline, allowing you to handle exceptions centrally.
+- **Error Handling**: If any gizmo encounters an error, the [Composition](streams_base.md#composition) can stop the whole pipeline, allowing you to handle exceptions centrally.
 
 For practical code examples, see the `dgstreams_demo.ipynb` notebook in the PySDKExamples.
 """
@@ -198,19 +198,19 @@ def load_composition(
     global_context: Optional[dict] = None,
     local_context: Optional[dict] = None,
 ) -> Composition:
-    """Load a composition of gizmos and connections from a description.
+    """Load a [Composition](streams_base.md#composition) of gizmos and connections from a description.
 
     The description can be provided as a JSON or YAML file path, a YAML string, or a Python dictionary
     conforming to the JSON schema defined in `composition_definition_schema`.
 
     Args:
-        description (str or dict): Text description of the composition in YAML format, or a path to a .json, .yaml, or .yml file
+        description (str or dict): Text description of the [Composition](streams_base.md#composition) in YAML format, or a path to a .json, .yaml, or .yml file
             containing such a description, or a Python dictionary with the same structure.
         global_context (dict, optional): Global context for evaluating expressions (like using globals()). Defaults to None.
         local_context (dict, optional): Local context for evaluating expressions (like using locals()). Defaults to None.
 
     Returns:
-        Composition: A Composition object representing the described gizmo pipeline.
+        Composition: A [Composition](streams_base.md#composition) object representing the described gizmo pipeline.
     """
     import jsonschema, copy
 

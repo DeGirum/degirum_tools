@@ -19,7 +19,7 @@ class StreamMeta:
 
     **Overview**
 
-    - A StreamMeta instance is a container that holds a chronologically ordered list
+    - A [StreamMeta](streams.md#streammeta) instance is a container that holds a chronologically ordered list
       of metainfo objects (called "meta infos") produced by gizmos in a streaming pipeline.
     - Each time a gizmo adds new metadata (e.g., inference results, resizing information),
       it is *appended* to the tail of this list.
@@ -31,7 +31,7 @@ class StreamMeta:
     - To store new metadata, a gizmo calls `self.meta.append(meta_obj, tags)`,
       where `meta_obj` is the metadata to attach, and `tags` is a string or list of strings
       labeling that metadata (e.g., "tag_inference", "tag_resize").
-    - Internally, StreamMeta keeps track of a list of appended objects and a mapping
+    - Internally, [StreamMeta](streams.md#streammeta) keeps track of a list of appended objects and a mapping
       of tags to the indices in that list.
 
     **Retrieving Metadata**
@@ -46,7 +46,7 @@ class StreamMeta:
 
     **Modifications and Cloning**
 
-    - **Important**: Never modify a received StreamMeta or its stored objects in-place,
+    - **Important**: Never modify a received [StreamMeta](streams.md#streammeta) or its stored objects in-place,
       because it may create side effects for upstream components.
       Call `clone()` if you need to make changes.
       `clone()` creates a shallow copy of the metainfo list and a copy of the tag-index map.
@@ -56,7 +56,7 @@ class StreamMeta:
     **Typical Usage**
 
     A typical processing pipeline might look like:
-        1. A video source gizmo creates a new StreamMeta, appends frame info under tag `"Video"`.
+        1. A video source gizmo creates a new [StreamMeta](streams.md#streammeta), appends frame info under tag `"Video"`.
         2. A resizing gizmo appends new dimension info under tag `"Resize"`.
         3. An AI inference gizmo appends the inference result under tag `"Inference"`.
         4. A display gizmo reads the final metadata to overlay bounding boxes, etc.
@@ -79,7 +79,7 @@ class StreamMeta:
     **CAUTION**:
     Never modify the existing metadata objects in place. If you need to
     adapt previously stored metadata for your own use, first copy the
-    data structure or call `clone()` on the StreamMeta.
+    data structure or call `clone()` on the [StreamMeta](streams.md#streammeta).
     """
 
     def __init__(self, meta: Optional[Any] = None, tags: Union[str, List[str]] = []):
@@ -184,7 +184,7 @@ class StreamData:
         self.meta = meta
 
     def append_meta(self, meta: Any, tags: List[str] = []):
-        """Append an additional metainfo object to this StreamData's metadata.
+        """Append an additional metainfo object to this [StreamData](streams.md#streamdata)'s metadata.
 
         Args:
             meta (Any): The metainfo object to append.
@@ -263,14 +263,14 @@ class Gizmo(ABC):
     no input stream).
 
     A gizmo can be connected to other gizmos to receive data from them. One gizmo can broadcast data to
-    multiple others (a single gizmo’s output feeding multiple destinations).
+    multiple others (a single gizmo output feeding multiple destinations).
 
     A data element moving through the pipeline is a tuple `(data, meta)` where:
         - `data` is the raw data (e.g., an image, a frame, or any object),
-        - `meta` is a [degirum_tools.streams.StreamMeta][] object containing accumulated metadata.
+        - `meta` is a [StreamMeta](streams.md#streammeta) object containing accumulated metadata.
 
     Subclasses must implement the abstract `run()` method to define a gizmo processing loop. The `run()`
-    method is launched in a separate thread by the `Composition` and should run until no more data is available
+    method is launched in a separate thread by the [Composition](streams_base.md#composition) and should run until no more data is available
     or until an abort signal is set.
 
     The `run()` implementation should:
@@ -316,7 +316,7 @@ class Gizmo(ABC):
         - If your gizmo has multiple inputs, you can call `self.get_input(i)` for each input or iterate over
             `self.get_inputs()` if you need to merge or synchronize multiple streams.
         - Always check `_abort` periodically inside your main loop if your gizmo could run for a long time or block on I/O.
-        - When done, you do not need to manually send poison pills; the `Composition` handles closing any downstream streams once each gizmo’s `run()` completes.
+        - When done, you do not need to manually send poison pills; the [Composition](streams_base.md#composition) handles closing any downstream streams once each gizmo `run()` completes.
         - If, instead of `self.get_input(0)`, you use `self.get_input(0).get()` or `.get_nowait()`, you must check if you receive a poison pill.
             - In simple loops, `self.get_input(0)` will terminate the loop.
             - In multi-input gizmos where simple nested for-loops aren't usable, get_nowait() is typically used to read input streams.
@@ -470,7 +470,7 @@ class Gizmo(ABC):
             self.send_result(result)
         ```
 
-        There is no need to send a poison pill to outputs; the `Composition` will handle closing output streams.
+        There is no need to send a poison pill to outputs; the [Composition](streams_base.md#composition) will handle closing output streams.
         """
         pass
 
