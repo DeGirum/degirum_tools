@@ -1,11 +1,148 @@
-#
 # compound_models.py: compound model toolkit for PySDK samples
-#
 # Copyright DeGirum Corporation 2023
 # All rights reserved
-#
 # Implements classes for multi-model aggregation.
-#
+
+"""
+Compound Models Module Overview
+======================
+
+This module provides a toolkit for creating compound models using the DeGirum PySDK.
+
+A compound model orchestrates multiple underlying models into a pipeline to enable complex inference scenarios. Common examples include:
+
+- Detecting objects and then classifying each detected object.
+- Running coarse detection first, then applying a refined detection model on specific regions.
+- Combining outputs from multiple independent models into a unified inference result.
+
+Compound models run in a single thread and are intended primarily for simple usage scenarios. Compound models still provide efficient batch prediction pipelining using batch_predict() in non-blocking mode.
+For more performant applications requiring better scalability and more flexible connections, we recommend using Gizmos, which in multiple threads.
+
+## Key Concepts
+
+- **Model Composition**:
+  Compound models sequentially (or concurrently) invoke multiple models. Typically, results from the first model (e.g., bounding boxes from detection) feed into subsequent models (classification or refined detection).
+
+- **Pipeline Workflow**:
+  A typical workflow involves:
+    1. Run `model1` to identify regions of interest (ROIs).
+    2. Crop these ROIs and run them through `model2`.
+    3. Integrate or transform outputs from `model2` back into the original context.
+
+- **Unified Model Interface**:
+  All compound models follow the same interface as regular models in DeGirum SDK, providing `.predict()` for single frames and `.predict_batch()` for iterators of frames.
+
+## Included Compound Models
+
+- **CombiningCompoundModel**:
+  Combines results from two models run concurrently on the same input.
+
+- **CroppingCompoundModel**:
+  Crops regions identified by `model1` and feeds them into `model2`.
+
+- **CroppingAndClassifyingCompoundModel**:
+  Specialized pipeline: object detection (`model1`) followed by classification (`model2`) of each detected object.
+
+- **CroppingAndDetectingCompoundModel**:
+  Pipeline for refined detection: initial coarse detection (`model1`) followed by detailed detection (`model2`) within each ROI.
+
+- **RegionExtractionPseudoModel**:
+  Extracts predefined regions of interest without actual inference, optionally filtering by motion detection.
+
+## Basic Usage Examples
+
+**Detection + Classification**:
+```python
+import degirum as dg
+from degirum_tools.compound_models import CroppingAndClassifyingCompoundModel
+
+# Declaring variables
+your_detection_model = "yolov8n_relu6_coco--640x640_quant_n2x_orca1_1"
+your_classification_model = "resnet50_imagenet--224x224_pruned_quant_n2x_orca1_1"
+your_host_address = dg.CLOUD  # Can be dg.CLOUD, host:port, or dg.LOCAL
+your_model_zoo = "degirum/degirum"
+your_token = "<token>"
+
+# Specify images for inference
+your_image = "path/image1.jpg"
+your_images = ["path/image2.jpg", "path/image3.jpg"]
+
+# Loading the individual models
+detector = dg.load_model(
+    model_name=your_detection_model,
+    inference_host_address=your_host_address,
+    zoo_url=your_model_zoo,
+    token=your_token
+)
+
+classifier = dg.load_model(
+    model_name=your_classification_model,
+    inference_host_address=your_host_address,
+    zoo_url=your_model_zoo,
+    token=your_token
+)
+
+# Creating a compound model pipeline
+compound_model = CroppingAndClassifyingCompoundModel(detector, classifier)
+
+# Single frame inference using predict()
+print("Using predict():")
+single_result = compound_model(your_image)
+print(single_result)
+
+# Batch inference using predict_batch()
+print("Using predict_batch():")
+for batch_result in compound_model.predict_batch(your_images):
+    print(batch_result)
+```
+
+**Detection + Detection**:
+```python
+import degirum as dg
+from degirum_tools.compound_models import CombiningCompoundModel
+
+# Declaring variables
+your_detection_model_1 = "yolov8n_relu6_car--640x640_quant_n2x_orca1_1"
+your_detection_model_2 = "yolov8n_relu6_coco--640x640_quant_n2x_orca1_1"
+your_host_address = dg.CLOUD  # Can be dg.CLOUD, host:port, or dg.LOCAL
+your_model_zoo = "degirum/degirum"
+your_token = "<token>"
+
+# Specify images for inference
+your_image = "path/image1.jpg"
+your_images = ["path/image2.jpg", "path/image3.jpg"]
+
+# Loading the individual detection models
+detector1 = dg.load_model(
+    model_name=your_detection_model_1,
+    inference_host_address=your_host_address,
+    zoo_url=your_model_zoo,
+    token=your_token
+)
+
+detector2 = dg.load_model(
+    model_name=your_detection_model_2,
+    inference_host_address=your_host_address,
+    zoo_url=your_model_zoo,
+    token=your_token
+)
+
+# Creating a compound model that merges results from both detectors
+compound_detector = CombiningCompoundModel(detector1, detector2)
+
+# Single frame inference using predict()
+print("Using predict():")
+single_result = compound_detector(your_image)
+print(single_result.results)
+
+# Batch inference using predict_batch()
+print("Using predict_batch():")
+for batch_result in compound_detector.predict_batch(your_images):
+    print(batch_result.results)
+```
+
+See class-level documentation below for details on individual classes and additional configuration options.
+"""
 
 import queue
 import cv2
@@ -35,9 +172,8 @@ class ModelLike(ABC):
          - A single frame (image/array/etc.), or
          - A 2-element tuple in the form `(frame, frame_info)`.
 
-        The `frame_info` object (of any type) then appears in the final `InferenceResults.info`
-        attribute, allowing you to carry custom metadata through the pipeline.
-
+    The `frame_info` object (of any type) then appears in the final `InferenceResults.info`
+    attribute, allowing you to carry custom metadata through the pipeline.
     """
 
     @abstractmethod
@@ -45,8 +181,8 @@ class ModelLike(ABC):
         """
         Perform a whole inference lifecycle for all objects in the given iterator object (for example, `list`).
 
-        Each item in `data` can be a **single frame** (any type acceptable to the model) or
-        a **2-element tuple** `(frame, frame_info)`. In the latter case, `frame_info` is
+        Each item in `data` can be a single frame (any type acceptable to the model) or
+        a 2-element tuple `(frame, frame_info)`. In the latter case, `frame_info` is
         carried through and placed in `InferenceResults.info` for that frame.
 
         Args:
@@ -56,8 +192,8 @@ class ModelLike(ABC):
                 regular PySDK models accept.
 
         Returns:
-            iterator:
-                A generator or iterator over the inference result objects.
+            (Iterator[degirum.postprocessor.InferenceResults or None]):
+                A generator or iterator over the inference result objects (or None in non-blocking mode).
                 This allows you to use the result in `for` loops.
         """
 
@@ -70,7 +206,8 @@ class ModelLike(ABC):
                 Inference input data, typically an image or array, or a tuple `(frame, frame_info)`.
 
         Returns:
-            Combined inference result object.
+            (degirum.postprocessor.InferenceResults or None):
+                The combined inference result object, or None if no result.
         """
         for result in self.predict_batch([data]):
             return result
@@ -85,7 +222,8 @@ class ModelLike(ABC):
                 Inference input data, typically an image or array, or a tuple `(frame, frame_info)`.
 
         Returns:
-            Combined inference result object.
+            (degirum.postprocessor.InferenceResults or None):
+                The combined inference result object, or None if no result.
         """
         return self.predict(data)
 
@@ -117,9 +255,8 @@ class CompoundModelBase(ModelLike):
 
     One model is considered *primary* (model1), and the other is *nested* (model2).
 
-    The primarily model (`model1`) processes the input frames. Its results
+    The primary model (`model1`) processes the input frames. Its results
     are then passed to the nested model (`model2`).
-
     """
 
     class NonBlockingQueue(queue.Queue):
@@ -132,7 +269,8 @@ class CompoundModelBase(ModelLike):
             Yield items from the queue until a `None` sentinel is reached.
 
             Yields:
-                any or None: The item from the queue, or `None` if the queue is empty.
+                (any or None):
+                    The item from the queue, or `None` if the queue is empty.
             """
             while True:
                 try:
@@ -180,7 +318,7 @@ class CompoundModelBase(ModelLike):
                 Prediction result of the second model.
 
         Returns:
-            InferenceResults or None:
+            (degirum.postprocessor.InferenceResults or None):
                 Transformed/combined result to be returned by the compound model.
                 If None, that means no result is produced at this iteration.
         """
@@ -190,10 +328,10 @@ class CompoundModelBase(ModelLike):
         Perform a whole inference lifecycle for all objects in the given iterator object (for example, `list`).
 
         Works in a pipeline fashion:
-        1. Pass input frames (or `(frame, frame_info)` tuples) to `model1`.
-        2. Use `queue_result1(result1)` to feed `model2`.
-        3. Collect `model2` results, transform them with `transform_result2(result2)`,
-        4. Yield the final output.
+            1. Pass input frames (or `(frame, frame_info)` tuples) to `model1`.
+            2. Use `queue_result1(result1)` to feed `model2`.
+            3. Collect `model2` results, transform them with `transform_result2(result2)`,
+            4. Yield the final output.
 
         Args:
             data (iterator):
@@ -201,9 +339,9 @@ class CompoundModelBase(ModelLike):
                 Each element returned should be compatible with model inference requirements.
 
         Returns:
-            iterator:
-                Generator object which iterates over the combined inference result objects.
-                This allows you to use the result in `for` loops.
+            (Iterator[degirum.postprocessor.InferenceResults or None]):
+                Generator object which iterates over the combined inference result objects
+                (or None in non-blocking mode). This allows you to use the result in `for` loops.
         """
         # Use non-blocking mode for nested model and regular mode for the first model
         self.model2.non_blocking_batch_predict = True
@@ -259,6 +397,10 @@ class CompoundModelBase(ModelLike):
         Flag controlling whether `predict_batch()` operates in non-blocking mode
         for model1. In non-blocking mode, `predict_batch()` can yield `None`
         when no results are immediately available.
+
+        Returns:
+            (bool):
+                True if non-blocking mode is enabled, False otherwise.
         """
         return self.model1.non_blocking_batch_predict
 
@@ -275,6 +417,10 @@ class CompoundModelBase(ModelLike):
         Note:
             Attempting to set this property will raise an Exception,
             because compound models do not support custom postprocessors.
+
+        Returns:
+            (None):
+                Always returns None for compound models.
         """
         return None
 
@@ -361,7 +507,7 @@ class CombiningCompoundModel(CompoundModelBase):
                 the `FrameInfo`.
 
         Returns:
-            InferenceResults:
+            (degirum.postprocessor.InferenceResults):
                 The merged inference results (model1 + model2).
         """
         result1 = result2.info.result1
@@ -374,7 +520,7 @@ class CroppingCompoundModel(CompoundModelBase):
     Compound model class which crops the original image according to results of the first model
     and then passes these cropped images to the second model.
 
-    Restriction: the first model should be of **object detection** type.
+    Restriction: the first model should be of object detection type.
     """
 
     def __init__(
@@ -438,7 +584,7 @@ class CroppingCompoundModel(CompoundModelBase):
                 Image size (width, height) of the original image.
 
         Returns:
-            list[float]:
+            (list[float]):
                 Adjusted bbox coordinates.
         """
         _, h, w, _ = self.model2.input_shape[0]
@@ -454,13 +600,12 @@ class CroppingCompoundModel(CompoundModelBase):
 class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
     """
     Compound model class which:
+        1. Runs an object detection (model1) to generate bounding boxes.
+        2. Crops each bounding box from the original image.
+        3. Runs a classification (model2) on each cropped image.
+        4. Patches the original detection results with the classification labels.
 
-    1. Runs an **object detection** (model1) to generate bounding boxes.
-    2. Crops each bounding box from the original image.
-    3. Runs a **classification** (model2) on each cropped image.
-    4. Patches the original detection results with the classification labels.
-
-    Restriction: first model must be **object detection**, second model must be **classification**.
+    Restriction: first model must be object detection, second model must be classification.
     """
 
     def __init__(
@@ -496,6 +641,10 @@ class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
         """
         Finalize the current results by returning a copy of the first model results
         patched with classification labels.
+
+        Returns:
+            (degirum.postprocessor.InferenceResults or None):
+                Final result for the previous frame, or None if there was no frame.
         """
         if self._current_result is not None and self._current_result1 is not None:
             ret = copy.copy(self._current_result1)
@@ -512,9 +661,9 @@ class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
                 Classification result of model2.
 
         Returns:
-            InferenceResults or None:
-                Returns the detection result patched with classification output if a new
-                frame has started, otherwise None.
+            (degirum.postprocessor.InferenceResults or None):
+                The detection result (from model1) patched with classification labels,
+                or None if we haven't moved to a new frame yet.
         """
         result1 = result2.info.result1
         idx = result2.info.sub_result
@@ -549,8 +698,9 @@ class CroppingAndClassifyingCompoundModel(CroppingCompoundModel):
             data (iterator):
                 Iterator of input frames for model1.
                 Each element returned by this iterator should be compatible with regular PySDK models.
+
         Returns:
-            iterator:
+            (Iterator[degirum.postprocessor.InferenceResults]):
                 Yields the detection results with patched classification labels after each frame completes.
         """
         self._current_result = None
@@ -583,15 +733,15 @@ class NmsOptions:
 class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
     """
     Compound model class which:
-
-    1. Uses an **object detection** model (model1) to generate bounding boxes (ROIs).
-    2. Crops each bounding box from the original image.
-    3. Uses another **object detection** model (model2) to further detect objects in each cropped region.
-    4. Combines the results of the second model from all cropped regions, mapping coords back to the original image.
+        1. Uses an object detection model (model1) to generate bounding boxes (ROIs).
+        2. Crops each bounding box from the original image.
+        3. Uses another object detection model (model2) to further detect objects in each cropped region.
+        4. Combines the results of the second model from all cropped regions, mapping coords back to the original image.
 
     Optionally, you can add model1 detections to the final result and/or apply NMS.
 
-    Restriction: first model should be object detection or pseudo-detection model like `RegionExtractionPseudoModel`,
+    Restriction:
+        First model should be object detection or pseudo-detection model like `RegionExtractionPseudoModel`,
     second model should be object detection.
     """
 
@@ -637,6 +787,10 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
         """
         Finalize the combined detection results from model2
         (optionally merged with model1 results). Apply NMS if requested.
+
+        Returns:
+            (degirum.postprocessor.InferenceResults or None):
+                The final combined detection results for the previous frame, or None if no data.
         """
         if self._current_result is not None and self._current_result1 is not None:
             if self._add_model1_results:
@@ -666,9 +820,9 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
                 Detection result of the second model.
 
         Returns:
-            InferenceResults or None:
-                Combined detection results for the **previous** frame, if a new frame has arrived.
-                Otherwise, None.
+            (degirum.postprocessor.InferenceResults or None):
+                The final detection results for the previous frame if a new frame started,
+                or None otherwise.
         """
         result1 = result2.info.result1
         idx = result2.info.sub_result
@@ -714,10 +868,9 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
                 Each element returned by this iterator should be compatible with regular PySDK models.
 
         Returns:
-            iterator:
+            (Iterator[degirum.postprocessor.InferenceResults]):
                 Generator object which iterates over final detection results with possibly merged bounding boxes,
                 adjusted to original image coordinates.
-                This allows you to directly use the result in `for` loops.
         """
         self._current_result = None
         self._current_result1 = None
@@ -787,7 +940,8 @@ class RegionExtractionPseudoModel(ModelLike):
         Controls non-blocking mode for `predict_batch()`.
 
         Returns:
-            bool: True if non-blocking mode is enabled; otherwise False.
+            (bool):
+                True if non-blocking mode is enabled; otherwise False.
         """
         return self._non_blocking_batch_predict
 
@@ -803,7 +957,7 @@ class RegionExtractionPseudoModel(ModelLike):
         When set, this replaces the default postprocessor with a user-defined postprocessor.
 
         Returns:
-            Optional[type]:
+            (Optional[type]):
                 The user-defined postprocessor class, or None if not set.
         """
         return self._custom_postprocessor
@@ -830,9 +984,9 @@ class RegionExtractionPseudoModel(ModelLike):
                 Each element returned by this iterator should be compatible with regular PySDK models.
 
         Returns:
-            iterator:
-                Yields pseudo-inference results containing ROIs as bounding boxes.
-                This allows you to directly use the result in `for` loops.
+            (Iterator[degirum.postprocessor.InferenceResults or None]):
+                Yields pseudo-inference results containing ROIs as bounding boxes,
+                or yields None in non-blocking mode when no data is available.
         """
         preprocessor = dg._preprocessor.create_image_preprocessor(
             self._model2.model_info,
