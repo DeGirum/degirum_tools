@@ -19,7 +19,7 @@ Core Concepts
 ------------
 
 1. **Stream**:
-    - Represents a queue of data items [StreamData](streams.md#streamdata), such as frames from a camera or images from a directory.
+    - Represents a queue of data items [StreamData](streams_base.md#streamdata), such as frames from a camera or images from a directory.
     - Gizmos push (`put`) data into Streams or read (`get`) data from them.
     - Streams can optionally drop data (the oldest item) if they reach a specified maximum queue size, preventing pipeline bottlenecks.
 
@@ -41,19 +41,19 @@ Core Concepts
     - Call `composition.stop()` to gracefully stop processing and wait for threads to finish.
 
 4. **StreamData** and **StreamMeta**:
-    - Each item in the pipeline is encapsulated by a [StreamMeta](streams.md#streammeta) object, which holds:
+    - Each item in the pipeline is encapsulated by a [StreamMeta](streams_base.md#streammeta) object, which holds:
 
         - `data`: The actual payload (e.g., an image array, a frame).
-        - `meta`: A [StreamMeta](streams.md#streammeta) object that can hold extra metadata from each gizmo (e.g., a detection result, timestamps, bounding boxes, etc.).
-    - Gizmos can append to [StreamMeta](streams.md#streammeta) so that metadata accumulates across the pipeline.
+        - `meta`: A [StreamMeta](streams_base.md#streammeta) object that can hold extra metadata from each gizmo (e.g., a detection result, timestamps, bounding boxes, etc.).
+    - Gizmos can append to [StreamMeta](streams_base.md#streammeta) so that metadata accumulates across the pipeline.
 
 5. **Metadata Flow (StreamMeta)**:
-    - How [StreamMeta](streams.md#streammeta) works:
-        - [StreamMeta](streams.md#streammeta) itself is a container that can hold any number of "meta info" objects.
+    - How [StreamMeta](streams_base.md#streammeta) works:
+        - [StreamMeta](streams_base.md#streammeta) itself is a container that can hold any number of "meta info" objects.
         - Each meta info object is "tagged" with one or more string tags, such as `"dgt_video"`, `"dgt_inference"`, etc.
         - You append new meta info by calling `meta.append(my_info, [list_of_tags])`.
         - You can retrieve meta info objects by searching with `meta.find("tag")` (returns *all* matches) or `meta.find_last("tag")` (returns the *most recent* match).
-        - **Important**: A gizmo generally clones (`.clone()`) the incoming [StreamMeta](streams.md#streammeta) before appending its own metadata to avoid upstream side effects.
+        - **Important**: A gizmo generally clones (`.clone()`) the incoming [StreamMeta](streams_base.md#streammeta) before appending its own metadata to avoid upstream side effects.
         - This design lets each gizmo add new metadata, while preserving what was provided by upstream gizmos.
 
     - High-Level Example:

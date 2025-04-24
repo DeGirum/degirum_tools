@@ -31,7 +31,7 @@ tag_analyzer = "dgt_analyzer"      # tag for analyzer result
 class VideoSourceGizmo(Gizmo):
     """OpenCV-based video source gizmo.
 
-    Captures frames from a video source (camera, video file, etc.) and outputs them as [StreamData](streams.md#streamdata) into the pipeline.
+    Captures frames from a video source (camera, video file, etc.) and outputs them as [StreamData](streams_base.md#streamdata) into the pipeline.
     """
 
     # meta keys for video frame information
