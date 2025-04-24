@@ -610,7 +610,7 @@ def model_time_profile(
 
             # Run batch prediction in a timed block
             t = Timer()
-            for _res in model.predict_batch(source()):
+            for res in model.predict_batch(source()):
                 pass
             elapsed = t()
 

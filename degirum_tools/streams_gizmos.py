@@ -629,7 +629,9 @@ class CropCombiningGizmo(Gizmo):
                     raise Exception(
                         f"{self.__class__.__name__}: video meta not found: you need to have {VideoSourceGizmo.__class__.__name__} in upstream of all crop inputs"
                     )
-                crop_frame_ids = [vm[VideoSourceGizmo.key_frame_id] for vm in video_metas if vm]
+                crop_frame_ids = [
+                    meta[VideoSourceGizmo.key_frame_id] for meta in video_metas if meta
+                ]
                 if len(set(crop_frame_ids)) != 1:
                     raise Exception(
                         f"{self.__class__.__name__}: crop frame IDs are not synchronized. Make sure all crop inputs have the same {AiObjectDetectionCroppingGizmo.__class__.__name__} in upstream"
