@@ -7,7 +7,7 @@ Result Analyzer Base Module Overview
 ====================================
 
 This module provides a base class (`ResultAnalyzerBase`) for performing custom post-processing and
-image annotation on DeGirum PySDK inference results. These analyzers can be used with  
+image annotation on DeGirum PySDK inference results. These analyzers can be used with
 compound models, streaming gizmos, and regular models to add advanced data processing and annotation steps
 to inference pipelines.
 
