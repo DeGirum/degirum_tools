@@ -41,7 +41,7 @@ Core Concepts
     - Call `composition.stop()` to gracefully stop processing and wait for threads to finish.
 
 4. **StreamData** and **StreamMeta**:
-    - Each item in the pipeline is encapsulated by a [StreamMeta](streams_base.md#streammeta) object, which holds:
+    - Each item in the pipeline is encapsulated by a [StreamData](streams_base.md#streamdata) object, which holds:
 
         - `data`: The actual payload (e.g., an image array, a frame).
         - `meta`: A [StreamMeta](streams_base.md#streammeta) object that can hold extra metadata from each gizmo (e.g., a detection result, timestamps, bounding boxes, etc.).
