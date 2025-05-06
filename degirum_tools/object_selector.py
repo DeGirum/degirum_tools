@@ -1,11 +1,39 @@
-#
 # object_selector.py: object selection analyzer
 #
 # Copyright DeGirum Corporation 2024
 # All rights reserved
-#
 # Implements analyzer class to select top K objects based on selection strategy.
 #
+
+"""
+Object Selector Analyzer Module Overview
+========================================
+
+This module provides an analyzer (`ObjectSelector`) for selecting the top-K detections from
+object detection results based on various strategies and optional tracking.
+
+Key Concepts
+------------
+
+- **Selection Strategies**: Supports selecting by highest confidence score or largest bounding-box area.
+- **Tracking Integration**: Optionally uses `track_id` fields to persist selections across frames with a timeout.
+- **Annotation Overlay**: Optionally draws bounding boxes for selected objects on images.
+
+Basic Usage
+-----------
+```python
+from degirum_tools.object_selector import ObjectSelector, ObjectSelectionStrategies
+
+# Create selector to choose top 3 by score
+selector = ObjectSelector(top_k=3, selection_strategy=ObjectSelectionStrategies.HIGHEST_SCORE)
+
+# Attach to model and run inference
+model.attach_analyzers(selector)
+for res in model.predict_batch(images):
+    img = res.image_overlay
+    # process annotated image
+```
+"""
 
 import numpy as np, copy, cv2
 from enum import Enum
@@ -18,7 +46,11 @@ from .ui_support import color_complement, rgb_to_bgr
 
 class ObjectSelectionStrategies(Enum):
     """
-    Object selection strategies
+    Enumeration of object selection strategies.
+
+    Attributes:
+        HIGHEST_SCORE (int): Select objects with the highest confidence scores.
+        LARGEST_AREA (int): Select objects with the largest bounding-box area.
     """
 
     HIGHEST_SCORE = 1  # select objects with highest score
@@ -27,23 +59,30 @@ class ObjectSelectionStrategies(Enum):
 
 class ObjectSelector(ResultAnalyzerBase):
     """
-    Class to select top K objects based on selection strategy.
+    Analyzer to select and optionally track the top-K objects per frame.
 
-    Analyzes the object detection `result` object passed to `analyze` method and selects top K detections based on
-    selection strategy (see ObjectSelectionStrategies enum). Removes all other detections.
+    This analyzer inspects a detection `result` and retains only the top-K entries based on the
+    specified `ObjectSelectionStrategies`. When `use_tracking` is enabled, it maintains selected
+    objects across frames using `track_id`, expiring them after `tracking_timeout` frames of absence.
 
-    If `use_tracking` is True, it uses tracking information to select objects. Object tracker must precede this
-    analyzer in the pipeline. It also uses `tracking_timeout` to remove an object from selection if it is not found in
-    new results for a while.
-
+    Args:
+        top_k (int): Number of objects to select.
+        selection_strategy (ObjectSelectionStrategies): Strategy for ranking objects.
+        use_tracking (bool): Enable tracking across frames.
+        tracking_timeout (int): Frames to wait before dropping an unseen object.
+        show_overlay (bool): Draw bounding boxes on the output image.
+        annotation_color (Optional[tuple]): RGB color for annotation; defaults to complement of model overlay color.
     """
 
     @dataclass
     class _SelectedObject:
         """
-        Selected object data structure
-        """
+        Selected object data structure.
 
+        Attributes:
+            detection (dict): The detection result dictionary.
+            counter (int): Frames since last seen before removal.
+        """
         detection: dict  # detection result
         counter: int = (
             0  # counter to keep track of how long the object has not been found in new results
@@ -60,16 +99,16 @@ class ObjectSelector(ResultAnalyzerBase):
         annotation_color: Optional[tuple] = None,
     ):
         """
-        Constructor
+        Constructor.
 
         Args:
-            top_k: Number of objects to select
-            selection_strategy: Selection strategy
-            use_tracking: If True, use tracking information to select objects
-                (object tracker must precede this analyzer in the pipeline)
-            tracking_timeout: Number of frames to wait before removing an object from selection
-            show_overlay: if True, annotate image; if False, send through original image
-            annotation_color: Color to use for annotations, None to use complement to result overlay color
+            top_k (int): Number of objects to select.
+            selection_strategy (ObjectSelectionStrategies): Strategy for ranking objects.
+            use_tracking (bool): If True, use tracking information to select objects
+                (object tracker must precede this analyzer in the pipeline).
+            tracking_timeout (int): Number of frames to wait before removing an object from selection.
+            show_overlay (bool): If True, annotate image; if False, pass image through unchanged.
+            annotation_color (Optional[tuple]): Color to use for annotations; None to use complement of result overlay color.
         """
         self._top_k = top_k
         self._selection_strategy = selection_strategy
@@ -81,10 +120,10 @@ class ObjectSelector(ResultAnalyzerBase):
 
     def analyze(self, result):
         """
-        Find top-K objects based on selection strategy. Remove all other objects.
+        Finds top-K objects based on the selection strategy and updates the result.
 
         Args:
-            result: PySDK model result object
+            result (InferenceResults): PySDK model result object to analyze.
         """
 
         all_detections = result._inference_results
@@ -142,14 +181,14 @@ class ObjectSelector(ResultAnalyzerBase):
 
     def annotate(self, result, image: np.ndarray) -> np.ndarray:
         """
-        Display object bboxes on a given image
+        Displays object bounding boxes on a given image.
 
         Args:
-            result: PySDK result object to display (should be the same as used in analyze() method)
-            image (np.ndarray): image to display on
+            result (InferenceResults): Model result object to display (same as used in analyze()).
+            image (np.ndarray): Image to annotate.
 
         Returns:
-            np.ndarray: annotated image
+            np.ndarray: Annotated image.
         """
 
         if not self._show_overlay:
