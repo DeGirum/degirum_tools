@@ -231,6 +231,7 @@ event_definition_schema = yaml.safe_load(event_definition_schema_text)
 # Function name should match the metric name defined in the schema
 #
 
+
 def ZoneCount(result, params):
     """
     Return object count inside a zone.
@@ -392,6 +393,7 @@ def ObjectCount(result, params):
         )
     return count
 
+
 class EventDetector(ResultAnalyzerBase):
     """
     Detect high-level events from inference results.
@@ -411,7 +413,6 @@ class EventDetector(ResultAnalyzerBase):
         - Thread-safe as long as each instance is confined to a single inference
           thread.
     """
-
 
     key_events_detected = "events_detected"
 
