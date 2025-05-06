@@ -69,7 +69,7 @@ class ClipSavingAnalyzer(ResultAnalyzerBase):
         pre_trigger_delay: int = 0,
         embed_ai_annotations: bool = True,
         save_ai_result_json: bool = True,
-        target_fps = 30.0,
+        target_fps=30.0,
     ):
         """
         Args:

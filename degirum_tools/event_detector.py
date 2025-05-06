@@ -3,9 +3,75 @@
 #
 # Copyright DeGirum Corporation 2024
 # All rights reserved
-#
 # Implements analyzer class to detect various events by analyzing inference results
 #
+
+"""
+Event Detector Analyzer
+=======================
+
+This module provides [`EventDetector`](#eventdetector), a **result-post-processing analyzer**
+that turns results of analyzers ([zone counters](zone_count.md#zonecounter), [line counters](line_count.md#linecounter), etc.)
+into high-level, **human-readable "events."**
+Typical uses include:
+
+* Raising a *"PersonInZone"* event when a person stays inside an ROI for *N* seconds.
+* Firing a *"VehicleCountExceeded"* event whenever more than *K* cars are in view.
+* Detecting complex temporal patterns—e.g. *"Person crosses entry line then exit
+  line within 3s"*—by combining multiple analyzers upstream.
+
+The analyzer is **data-driven**: behaviour is described by a YAML (or
+`dict`) that follows the schema defined in `event_definition_schema`.
+A single analyzer instance can therefore be re-configured without code changes.
+
+**Integration pattern**
+
+1. Attach auxiliary analyzers (e.g. [`ZoneCounter`](zone_count.md#zonecounter),
+   [`LineCounter`](line_count.md#linecounter)) upstream so that the required metrics are present in
+   each InferenceResults.
+2. Construct [`EventDetector`](#eventdetector) with a YAML description (see *Example* below).
+3. Attach it to a model or compound model via
+   [`attach_analyzers`](compound_models.md#compoundmodelbase).
+4. Downstream components can inspect `result.events_detected` or rely on
+   [`EventNotifier`](notifier.md#eventnotifier) to convert events into user notifications.
+
+Example
+-------
+
+```python
+from degirum_tools.event_detector import EventDetector
+
+event_yaml = \"\"\"
+Trigger: PersonInZone
+when:   ZoneCount
+with:
+    classes: [person]
+    index:   0          # zone id
+is greater than or equal to: 1
+during: [5, seconds]    # look at a 5-second window
+for at least: [80, percent]
+\"\"\"
+
+detector = EventDetector(event_yaml)
+model.attach_analyzers(detector)
+```
+
+Key Concepts
+------------
+
+* **Metric** - scalar number extracted from `InferenceResults`
+  (zone count, line count, object count, or a user-supplied custom metric).
+* **Comparator** - how the metric is compared to a threshold
+  (>, >=, <, <=, ==, !=).
+* **Temporal window** - *"during"* clause defines sliding window length
+  (in frames or seconds).
+* **Quantifier** - *"for at least / at most"* clause defines how long within
+  the window the condition must hold.
+
+All timing logic is handled internally via a ring-buffer; no external state is
+required.
+
+"""
 
 import numpy as np
 import yaml, time, jsonschema
@@ -165,19 +231,21 @@ event_definition_schema = yaml.safe_load(event_definition_schema_text)
 # Function name should match the metric name defined in the schema
 #
 
-
 def ZoneCount(result, params):
     """
-    Get the number of objects in the specified zone.
-    It uses the following result attributes:
-        result.zone_counts
+    Return object count inside a zone.
+
+    Requires `result.zone_counts` supplied by [`ZoneCounter`](zone_count.md#zonecounter).
 
     Args:
-        result: PySDK model result object
-        params: metric parameters as defined in "With" field of the event description
+        result (InferenceResults): The inference results object.
+        params (dict): May contain:
+            - `classes` (List[str]): Classes to include.
+            - `index` (int): Zone index to count (None → all zones).
+            - `aggregation` (str): Aggregation function name (e.g., 'sum', 'max').
 
     Returns:
-        number of objects in the zone(s) belonging to the specified classes
+        count (int or float): Aggregated count (sum, max, …) across the selected zone(s).
     """
 
     if not hasattr(result, "zone_counts"):
@@ -220,17 +288,24 @@ def ZoneCount(result, params):
 
 def LineCount(result, params):
     """
-    Count the number of objects in the specified zone.
-    It uses the following result attributes:
-        result.line_counts
+    Return intersection count on a virtual line.
+
+    Relies on `result.line_counts` provided by [`LineCounter`](line_count.md#linecounter).
 
     Args:
-        result: PySDK model result object
-        params: metric parameters
+        result (InferenceResults): The inference results object.
+        params (dict): Dict from the *with* clause; keys include:
+            - `index` (int): Line index to count (None → all lines).
+            - `classes` (List[str]): Classes to include (None → all classes).
+            - `directions` (List[str]): Directions to include (None → all directions).
 
     Returns:
-        float: number of objects in the zone
+        count (int): Number of line intersections matching the filter.
     """
+    if not hasattr(result, "line_counts"):
+        raise AttributeError(
+            "Line counts are not available in the result: insert LineCounter analyzer upstream."
+        )
 
     index = None
     classes = None
@@ -285,17 +360,16 @@ def LineCount(result, params):
 
 def ObjectCount(result, params):
     """
-    Get the number of detected objects satisfying the specified conditions.
-    It uses the following result attributes:
-        result.results[]["label"]
-        result.results[]["score"]
+    Return plain object count filtered by class and score.
 
     Args:
-        result: PySDK model result object
-        params: metric parameters as defined in "With" field of the event description
+        result (InferenceResults): The inference results object.
+        params (dict): May contain:
+            - `classes` (List[str]): Classes to include.
+            - `min_score` (float): Minimum confidence score.
 
     Returns:
-        number of detected objects satisfying the specified conditions
+        count (int): Number of detections satisfying the filter.
     """
 
     classes = None
@@ -318,12 +392,26 @@ def ObjectCount(result, params):
         )
     return count
 
-
 class EventDetector(ResultAnalyzerBase):
     """
-    Class to detect various events by analyzing inference results
+    Detect high-level events from inference results.
 
+    The detector evaluates a metric over a sliding window and checks whether it
+    satisfies a comparison with a threshold for a required proportion of that window.
+    When satisfied, the event name is added to `result.events_detected` (a set managed
+    by this class).
+
+    Attributes:
+        key_events_detected (str): Name of the attribute where fired events are stored ("events_detected").
+        _event_history (collections.deque): Ring buffer storing (timestamp, condition_met_bool) tuples.
+
+    Notes:
+        - The class is purely stateless from the outside; all state lives inside
+          the analyzer instance.
+        - Thread-safe as long as each instance is confined to a single inference
+          thread.
     """
+
 
     key_events_detected = "events_detected"
 
@@ -337,17 +425,14 @@ class EventDetector(ResultAnalyzerBase):
         annotation_pos: Union[AnchorPoint, tuple] = AnchorPoint.BOTTOM_LEFT,
     ):
         """
-        Constructor
+        Create a new detector from a YAML/dict definition.
 
         Args:
-            event_description: event description. It is a dictionary, which defines
-                how to detect the event. The dictionary should conform to the schema provided
-                in the `event_definition_schema` variable.
-                Alternatively, it can be a string in YAML format, which will be parsed into a dictionary.
-            show_overlay: if True, annotate image; if False, send through original image
-            annotation_color: Color to use for annotations, None to use complement to result overlay color
-            annotation_font_scale: font scale to use for annotations or None to use model default
-            annotation_pos: position to place annotation text (either predefined point or (x,y) tuple)
+            event_description (str | dict): YAML string or parsed dict matching *event_definition_schema*.
+            show_overlay (bool, optional): If True, annotate frames whenever the event fires. Defaults to True.
+            annotation_color (tuple, optional): RGB background for the text label. Defaults to the complement of model overlay colour.
+            annotation_font_scale (float, optional): OpenCV font scale. None uses the model's default.
+            annotation_pos (AnchorPoint | tuple): Where to place the text label; either an `AnchorPoint` enum value or an `(x, y)` pixel tuple.
         """
 
         self._show_overlay = show_overlay
@@ -412,14 +497,19 @@ class EventDetector(ResultAnalyzerBase):
 
     def analyze(self, result):
         """
-        Detect event analyzing given result according to rules provided in the event description.
+        Evaluate metric and update `result.events_detected`.
 
-        If event is detected, the event name will be appended to the `events_detected` set in the result object.
-        If result object does not have `events_detected` attribute, it will be created
-        and initialized with the single element set containing detected event name.
+        Steps
+        -----
+        1. Compute metric value via a global helper (e.g. [`ZoneCount`](zone_count.md)).
+        2. Check comparator against threshold → **condition_met**.
+        3. Append `(timestamp, condition_met)` to history deque.
+        4. Drop stale entries if time-based window.
+        5. Test quantifier (at least / at most) against quota.
+        6. Add event name to `result.events_detected` when satisfied.
 
         Args:
-            result: PySDK model result object
+            result (InferenceResults): Inference result to analyze (modified in-place).
         """
 
         # evaluate metric and compare with threshold
@@ -461,14 +551,21 @@ class EventDetector(ResultAnalyzerBase):
 
     def annotate(self, result, image: np.ndarray) -> np.ndarray:
         """
-        Display fired events on a given image
+        Overlay the event label onto the frame.
+
+        The overlay is rendered only when:
+        - `show_overlay` is True, and
+        - this frame has the current event in `result.events_detected`.
+
+        The label background colour defaults to the complement of the model's
+        overlay colour, and text colour is auto-chosen for contrast.
 
         Args:
-            result: PySDK result object to display (should be the same as used in analyze() method)
-            image (np.ndarray): image to display on
+            result (InferenceResults): Same result instance passed to `analyze()`.
+            image (np.ndarray): BGR image to annotate.
 
         Returns:
-            np.ndarray: annotated image
+            np.ndarray: Annotated image (same instance for efficiency).
         """
 
         if (
