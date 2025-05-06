@@ -8,6 +8,39 @@
 # with a specified duration before and after the event.
 #
 
+"""Clip-Saving Analyzer Module Overview
+=======================================
+
+`ClipSavingAnalyzer` is a [`ResultAnalyzerBase`](result_analyzer_base.md)
+sub-class that **records short video snippets** when user-defined *trigger
+names* appear in an
+`InferenceResults`.
+
+**Typical flow**
+
+1. Up-stream gizmos (e.g. [`EventDetector`](event_detector.md), [`EventNotifier`](event_notifier.md))
+   attach event/notification strings to each result.
+2. `ClipSavingAnalyzer` watches for a match in its *trigger set*.
+3. When a trigger fires, an internal
+   [`ClipSaver`](video_support.md)
+   back-fills *N* frames **before** the trigger and records *M* frames
+   **after**, saving:
+
+       YYYYMMDD_HHMMSS.mp4
+
+       YYYYMMDD_HHMMSS.json, which is an optional inference dump
+
+**Key features**
+
+* **Pre/Post buffering**: configurable frame count before/after trigger
+* **Optional overlays**: embed AI bounding-boxes / labels in the clip
+* **Side-car JSON**: save raw inference results alongside the video
+* **Thread-safe**: each clip is written by its own worker thread
+
+See the class-level documentation below for constructor parameters and
+usage patterns.
+"""
+
 from typing import Set
 from .result_analyzer_base import ResultAnalyzerBase
 from .notifier import EventNotifier
@@ -17,8 +50,14 @@ from .video_support import ClipSaver
 
 class ClipSavingAnalyzer(ResultAnalyzerBase):
     """
-    Class to to save video clips triggered by event or notification
-    with a specified duration before and after the event.
+    Result-analyzer that **records a short video clip** whenever one of
+    the configured *trigger names* appears in an
+    `InferenceResults`.
+
+    Internally it delegates to
+    [`ClipSaver`](video_support.md), which maintains a
+    circular buffer so every clip contains both *pre-trigger* and
+    *post-trigger* context.
     """
 
     def __init__(
@@ -30,23 +69,22 @@ class ClipSavingAnalyzer(ResultAnalyzerBase):
         pre_trigger_delay: int = 0,
         embed_ai_annotations: bool = True,
         save_ai_result_json: bool = True,
-        target_fps=30.0,
+        target_fps = 30.0,
     ):
         """
-        Constructor
-
         Args:
-            clip_duration: duration of the video clip to save (in frames)
-            triggers: a set of event names or notifications which trigger video clip saving
-            file_prefix: path and file prefix for video clip files
-            pre_trigger_delay: delay before the event to start clip saving (in frames)
-            embed_ai_annotations: True to embed AI inference annotations into video clip, False to use original image
-            save_ai_result_json: True to save AI result JSON file along with video clip
-            target_fps: target frames per second for saved videos
+            clip_duration (int): Total length of the output clip in frames (pre-buffer + post-buffer).
+            triggers (Set[str]): Names that fire the recorder when found in either [`EventDetector`](event_detector.md#key_events_detected) or [`EventNotifier`](event_notifier.md#key_notifications).
+            file_prefix (str): Path and filename prefix for generated files (timestamp & extension are appended automatically).
+            pre_trigger_delay (int, optional): Frames to include before the trigger. Defaults to 0.
+            embed_ai_annotations (bool, optional): True to use `InferenceResults.image_overlay` so bounding boxes/labels are burned into the clip. Defaults to True.
+            save_ai_result_json (bool, optional): Dump a JSON file with raw inference results alongside the video. Defaults to True.
+            target_fps (float, optional): Frame rate of the output file. Defaults to 30.0.
         """
 
         if not triggers or not isinstance(triggers, set):
             raise ValueError("`triggers` should be non-empty set of string")
+
         self._saver = ClipSaver(
             clip_duration,
             file_prefix,
@@ -59,10 +97,15 @@ class ClipSavingAnalyzer(ResultAnalyzerBase):
 
     def analyze(self, result):
         """
-        Analyze inference result and save video clip if event or notification trigger happens
+        Inspect a single `InferenceResults` and,
+        if any *trigger name* matches, forward it to the internal
+        [`ClipSaver`](video_support.md).
+
+        Called automatically for each frame when attached via
+        [`attach_analyzers`](inference_support.md).
 
         Args:
-            result: PySDK model result object
+            result (InferenceResults): Current model output to scan for events/notifications.
         """
 
         # check trigger
@@ -72,6 +115,7 @@ class ClipSavingAnalyzer(ResultAnalyzerBase):
             intersection = self._triggers & notifications
             if intersection:
                 triggered |= intersection
+
         events = getattr(result, EventDetector.key_events_detected, None)
         if events is not None:
             intersection = self._triggers & events
@@ -82,6 +126,9 @@ class ClipSavingAnalyzer(ResultAnalyzerBase):
 
     def join_all_saver_threads(self) -> int:
         """
-        Join all threads started by this instance
+        Block until all background clip-writer threads finish.
+
+        Returns:
+            int: Number of threads that were joined.
         """
         return self._saver.join_all_saver_threads()
