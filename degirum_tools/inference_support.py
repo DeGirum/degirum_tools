@@ -285,9 +285,7 @@ def _create_analyzing_postprocessor_class(
                 _postprocessor_type = model._custom_postprocessor
                 _was_custom = True
             else:
-                _postprocessor_type = dg.postprocessor._inference_result_type(
-                    model._model_parameters
-                )()
+                _postprocessor_type = dg.postprocessor.class_from_type_string(model.get_inference_results_type())
                 _was_custom = False
         else:
             _postprocessor_type = None
