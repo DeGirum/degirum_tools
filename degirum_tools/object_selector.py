@@ -55,7 +55,7 @@ class ObjectSelector(ResultAnalyzerBase):
         selection_strategy (ObjectSelectionStrategies): Ranking strategy.
         use_tracking (bool): Enable tracking-based selection.
         tracking_timeout (int): Frames to wait before dropping unseen object.
-        show_overlay (bool): Whether to draw bounding boxes.
+        show_overlay (bool): Whether to draw rectangles around selected objects..
         annotation_color (tuple, optional): RGB color for boxes.
     """
 
@@ -90,7 +90,7 @@ class ObjectSelector(ResultAnalyzerBase):
         Args:
             top_k (int): Number of objects to select.
             selection_strategy (ObjectSelectionStrategies): Strategy for ranking objects.
-            use_tracking (bool): If True, use tracking information to select objects
+            use_tracking (bool): If True, enables tracking-based selection: only objects with "track_id" are selected
                 (object tracker must precede this analyzer in the pipeline).
             tracking_timeout (int): Number of frames to wait before removing an object from selection.
             show_overlay (bool): If True, annotate image; if False, pass image through unchanged.
@@ -109,6 +109,8 @@ class ObjectSelector(ResultAnalyzerBase):
         Select the top-K objects based on the configured strategy, updating the result.
 
         Uses tracking IDs to update selected objects when tracking is enabled.
+
+        All other objects not selected are removed from results.
 
         Args:
             result (InferenceResults): Model result with detection information.

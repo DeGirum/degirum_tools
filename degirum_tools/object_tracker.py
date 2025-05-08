@@ -34,16 +34,13 @@
 Object Tracker Module Overview
 ==============================
 
-Implements multi-object tracking using a Kalman filter and assignment algorithms.
+Implements multi-object tracking using [BYTETrack algorithm](https://github.com/ifzhang/ByteTrack).
 
 Provides consistent track IDs for detected objects across frames,
 supporting trails visualization and integration with counting analyzers.
 
 Key classes:
-    - _KalmanFilter: motions prediction and update
     - STrack: Represents single track with state
-    - _ByteTrack: multi-object tracker implementation
-    - _Tracer: maintains trails for tracked objects
     - ObjectTracker: exposed analyzer integrating above functionality
 
 """
@@ -283,6 +280,19 @@ class STrack:
     def __init__(
         self, tlwh: np.ndarray, score: float, obj_idx: int, id_counter: _IDCounter
     ):
+        """
+        Constructor.
+        
+        Args:
+            tlwh (np.ndarray): Initial bounding box in *(x, y, w, h)* format
+                where *(x, y)* is the **top-left** corner.
+            score (float): Detector confidence for this object.
+            obj_idx (int): Zero-based index of the object’s class in the model’s
+                label set.
+            id_counter (_IDCounter): Shared counter used to generate globally
+                unique ``track_id`` values across all tracks.
+        """
+        
         self.id_counter = id_counter
         self.track_id = 0
         self.is_activated = False

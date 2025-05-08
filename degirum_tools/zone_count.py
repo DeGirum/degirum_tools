@@ -124,13 +124,6 @@ class _PolygonZone:
         iopa_threshold (float): IoPA threshold to trigger zone.
         timeout_frames (int): Frames to tolerate temporary absence of object.
 
-    Args:
-        polygon (np.ndarray): Polygon vertices.
-        frame_resolution_wh (Tuple[int, int]): Frame resolution (width, height).
-        triggering_position (list or AnchorPoint or None): Anchor positions to check.
-        bounding_box_scale (float, optional): Box scaling factor. Default 1.0.
-        iopa_threshold (float, optional): IoPA threshold. Default 0.0.
-        timeout_frames (int, optional): Timeout frames for tracking absence. Default 0.
 
     """
 
@@ -143,6 +136,17 @@ class _PolygonZone:
         iopa_threshold: float = 0.0,
         timeout_frames: int = 0,
     ):
+        """
+        Constructor.
+
+        Args:
+            polygon (np.ndarray): Polygon vertices.
+            frame_resolution_wh (Tuple[int, int]): Frame resolution (width, height).
+            triggering_position (list or AnchorPoint or None): Anchor positions to check.
+            bounding_box_scale (float, optional): Box scaling factor. Default 1.0.
+            iopa_threshold (float, optional): IoPA threshold. Default 0.0.
+            timeout_frames (int, optional): Timeout frames for tracking absence. Default 0.
+        """
         self.frame_resolution_wh = frame_resolution_wh
         self.triggering_position = (
             triggering_position
@@ -231,44 +235,25 @@ class ZoneCounter(ResultAnalyzerBase):
     This class can be used as a step in an inference result processing pipeline
     to provide high-level analytics on object presence per spatial zone.
 
-    Args:
-        count_polygons (List[np.ndarray]): List of polygon zones.
-        class_list (List[str], optional): Classes to count. None counts all.
-        per_class_display (bool, optional): Display counts per class if True.
-        triggering_position (list or AnchorPoint or None, optional): Anchor points to trigger. If None, IoPA used.
-        bounding_box_scale (float, optional): Scale bounding boxes before trigger.
-        iopa_threshold (float, optional): IoPA threshold if triggering_position is None.
-        use_tracking (bool, optional): Use tracking info if True.
-        timeout_frames (int, optional): Frames to tolerate absence of object in zone.
-        window_name (str, optional): Window name for interactive adjustment.
-        show_overlay (bool, optional): Draw annotations if True.
-        show_inzone_counters (str or None, optional): 'time', 'frames', 'all' or None.
-        annotation_color (tuple, optional): RGB color for annotations.
-        annotation_line_width (int, optional): Annotation line thickness.
+    Attributes:
+        zone_counts (List[dict]): List of per-zone count dictionaries updated
+            after each call to `analyze()`.
+        key_in_zone (str): Name of the key inserted into result objects that
+            stores zone-presence flags.
+        key_frames_in_zone (str): Name of the key inserted into result objects
+            that stores the number of frames spent in each zone.
+        key_time_in_zone (str): Name of the key inserted into result objects
+            that stores the total time (in seconds) spent in each zone.
 
-    Attributes
-    ----------
-    zone_counts : List[dict]
-        List of per-zone count dictionaries updated after analyze().
-    key_in_zone : str
-        Key added to result objects indicating zone presence flags.
-    key_frames_in_zone : str
-        Key added to result objects with counts of frames in zone.
-    key_time_in_zone : str
-        Key added to result objects with duration in zone in seconds.
+    Methods:
+        analyze(result): Determine per-zone presence for *result* and update
+            cumulative counts.
+        annotate(result, image): Draw zones and their counts on *image*.
+        window_attach(win_name): Attach an OpenCV window for interactive
+            editing, if supported.
 
-    Methods
-    -------
-    analyze(result)
-        Analyzes the given result object to determine in-zone presence and update counts.
-    annotate(result, image)
-        Draws zones and counts on the given image.
-    window_attach(win_name)
-        Attaches an OpenCV window for interactive editing (if applicable).
-
-    Example
-    -------
-    See module-level docstring for sample usage.
+    Examples:
+        See the module-level docstring for a complete usage example.
     """
 
     key_in_zone = "in_zone"
@@ -294,26 +279,24 @@ class ZoneCounter(ResultAnalyzerBase):
         annotation_color: Optional[tuple] = None,
         annotation_line_width: Optional[int] = None,
     ):
-        """Constructor
+        """
+        Constructor.
+
         Args:
-            count_polygons (nd.array): list of polygons to count objects in; each polygon is a list of points (x,y)
-            class_list (List, optional): list of classes to count; if None, all classes are counted
-            per_class_display (bool, optional): when True, display zone counts per class, otherwise display total zone counts
-            triggering_position (Union[List[AnchorPoint], AnchorPoint], optional): the position(s) within the bounding box
-                that trigger(s) the zone; if None, iopa_threshold is used and must be specified
-            bounding_box_scale (float, optional): scale factor used to downsize detection result bounding boxes before zone
-                triggering is performed, no matter whether triggering positions or IoPA is used; useful when only a portion
-                of a detected object (a "critical mass") inside a bounding box should trigger the zone
-            iopa_threshold (float, optional): intersection over polygon area (IoPA) threshold; if triggering_position is None,
-                IoPA of bounding boxes greater than this threshold triggers the zone, otherwise this method is not used
-            use_tracking (bool, optional): If True, use tracking information to select objects
-                (object tracker must precede this analyzer in the pipeline)
-            timeout_frames (int, optional): number of frames to tolerate temporary absence of the object when it disappears from zone
-            window_name (str, optional): optional OpenCV window name to configure for interactive zone adjustment
-            show_overlay: if True, annotate image; if False, send through original image
-            show_inzone_counters: "time" to show time-in-zone, "frames" to show frames-in-zone, "all" to show both, None to show nothing
-            annotation_color (tuple, optional): Color to use for annotations, None to use complement to result overlay color
-            annotation_line_width (int, optional): Line width to use for annotations, None to use result overlay line width
+            count_polygons (List[np.ndarray]): List of polygon zones.
+            class_list (List[str], optional): Classes to count. None counts all.
+            per_class_display (bool, optional): Display counts per class if True.
+            triggering_position (list or AnchorPoint or None, optional): Anchor points to trigger. If None, IoPA used.
+            bounding_box_scale (float, optional): Scale bounding boxes before trigger.
+            iopa_threshold (float, optional): IoPA threshold if triggering_position is None.
+            use_tracking (bool, optional): Use tracking info if True.
+            timeout_frames (int, optional): Frames to tolerate absence of object in zone.
+            window_name (str, optional): Window name for interactive adjustment.
+            show_overlay (bool, optional): Draw annotations if True.
+            show_inzone_counters (str or None, optional): 'time', 'frames', 'all' or None.
+            annotation_color (tuple, optional): RGB color for annotations.
+            annotation_line_width (int, optional): Annotation line thickness.
+
         """
         self._wh: Optional[Tuple] = None
         self._zones: Optional[List] = None
@@ -508,7 +491,7 @@ class ZoneCounter(ResultAnalyzerBase):
         Args:
             result (InferenceResults): Result with zone counts and per-object flags.
             image (np.ndarray): Image to annotate.
-    
+
         Returns:
             np.ndarray: Annotated image
         """

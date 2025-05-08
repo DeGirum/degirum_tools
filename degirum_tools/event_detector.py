@@ -369,13 +369,6 @@ class EventDetector(ResultAnalyzerBase):
         key_events_detected (str): Name of the attribute where fired events are stored ("events_detected").
         _event_history (collections.deque): History of timestamp and condition met boolean tuples.
 
-    Args:
-        event_description (Union[str, dict]): YAML string or dict matching the event_definition_schema.
-        show_overlay (bool, optional): Whether to annotate frames when event fires. Defaults to True.
-        annotation_color (tuple, optional): Background RGB color for text label. Defaults to complement of model overlay color.
-        annotation_font_scale (float, optional): OpenCV font scale. None uses default.
-        annotation_pos (Union[AnchorPoint, tuple], optional): Position to place text label. Defaults to BOTTOM_LEFT.
-
     Note:
         The class is stateless externally; all state is internal and thread-safe when used within a single inference thread.
     """
@@ -395,11 +388,11 @@ class EventDetector(ResultAnalyzerBase):
         Initializes the EventDetector from a YAML string or dictionary description.
 
         Args:
-            event_description (str or dict): YAML string or dict matching the event_definition_schema.
+            event_description (Union[str, dict]): YAML string or dict matching the event_definition_schema.
             show_overlay (bool, optional): Whether to annotate frames when event fires. Defaults to True.
             annotation_color (tuple, optional): Background RGB color for text label. Defaults to complement of model overlay color.
             annotation_font_scale (float, optional): OpenCV font scale. None uses default.
-            annotation_pos (AnchorPoint or tuple, optional): Position to place text label. Defaults to BOTTOM_LEFT.
+            annotation_pos (Union[AnchorPoint, tuple], optional): Position to place text label. Defaults to BOTTOM_LEFT.
         """
 
         self._show_overlay = show_overlay
