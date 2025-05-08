@@ -11,7 +11,7 @@ python-dotenv
 requests
 psutil
 opencv-python
-degirum>=0.9.2
+degirum>=0.16.2
 ipython
 pafy
 youtube-dl==2020.12.2
