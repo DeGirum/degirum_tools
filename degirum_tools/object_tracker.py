@@ -282,7 +282,7 @@ class STrack:
     ):
         """
         Constructor.
-        
+
         Args:
             tlwh (np.ndarray): Initial bounding box in *(x, y, w, h)* format
                 where *(x, y)* is the **top-left** corner.
@@ -292,7 +292,7 @@ class STrack:
             id_counter (_IDCounter): Shared counter used to generate globally
                 unique ``track_id`` values across all tracks.
         """
-        
+
         self.id_counter = id_counter
         self.track_id = 0
         self.is_activated = False
@@ -937,11 +937,11 @@ class ObjectTracker(ResultAnalyzerBase):
     def analyze(self, result):
         """
         Perform tracking on the current result detections.
-    
+
         Updates track_ids in the detections.
-    
+
         Maintains trails and trail classes if enabled.
-    
+
         Args:
             result (InferenceResults): Model inference result.
         """
