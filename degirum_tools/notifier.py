@@ -77,7 +77,7 @@ class NotificationServer:
             self, job_type: str, payload: str, dependent: Optional[int] = None
         ):
             """
-            Constructor
+            Constructor.
 
             Args:
                 job_type: job type
@@ -102,7 +102,7 @@ class NotificationServer:
         pending_timeout_s: float = 5.0,
     ):
         """
-        Constructor
+        Constructor.
 
         Args:
             notification_cfg: path to the apprise configuration file or notification server URL in apprise format
@@ -443,7 +443,7 @@ class EventNotifier(ResultAnalyzerBase):
         storage_config: Optional[ObjectStorageConfig] = None,
     ):
         """
-        Constructor
+        Constructor.
 
         Args:
             name: name of the notification event

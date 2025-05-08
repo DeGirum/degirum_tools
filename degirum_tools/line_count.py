@@ -50,7 +50,7 @@ Interactive Adjustments:
 
 Note:
 This module depends on an upstream object tracker to provide consistent per-object trails.
-It integrates closely with other analyzers such as `ObjectTracker` to get the tracked paths needed for crossing detection.
+It integrates closely with `ObjectTracker` to get the tracked paths needed for crossing detection.
 
 For detailed control of counts and interaction, refer to the `LineCounter` class method docstrings.
 
@@ -195,18 +195,6 @@ class LineCounter(ResultAnalyzerBase):
 
     Supports accumulation or per-frame counting, per-class counts, and overlay annotation.
 
-    Args:
-        lines (List[tuple]): List of line coordinates, each as (x1, y1, x2, y2).
-        anchor_point (AnchorPoint, optional): Anchor point on bbox for trails. Default is BOTTOM_CENTER.
-        whole_trail (bool, optional): Use entire trail or last segment only for intersection. Default True.
-        count_first_crossing (bool, optional): Count only first crossing per trail if True. Default True.
-        absolute_directions (bool, optional): Directions relative to image axes if True. Default False.
-        accumulate (bool, optional): Accumulate counts over frames if True. Default True.
-        per_class_display (bool, optional): Display counts per object class if True. Default False.
-        show_overlay (bool, optional): Draw annotations if True. Default True.
-        annotation_color (tuple, optional): RGB color for annotations. Default is complement of overlay color.
-        annotation_line_width (int, optional): Thickness of annotation lines.
-        window_name (str, optional): OpenCV window name to attach for interactive adjustment.
     """
 
     def __init__(
@@ -226,6 +214,19 @@ class LineCounter(ResultAnalyzerBase):
     ):
         """
         Constructor.
+
+        Args:
+            lines (List[tuple]): List of line coordinates, each as (x1, y1, x2, y2).
+            anchor_point (AnchorPoint, optional): Anchor point on bbox for trails. Default is BOTTOM_CENTER.
+            whole_trail (bool, optional): Use entire trail or last segment only for intersection. Default True.
+            count_first_crossing (bool, optional): Count only first crossing per trail if True. Default True.
+            absolute_directions (bool, optional): Directions relative to image axes if True. Default False.
+            accumulate (bool, optional): Accumulate counts over frames if True. Default True.
+            per_class_display (bool, optional): Display counts per object class if True. Default False.
+            show_overlay (bool, optional): Draw annotations if True. Default True.
+            annotation_color (tuple, optional): RGB color for annotations. Default is complement of overlay color.
+            annotation_line_width (int, optional): Thickness of annotation lines.
+            window_name (str, optional): OpenCV window name to attach for interactive adjustment.
         """
         self._lines = [np.array(line).astype(int) for line in lines]
         self._line_vectors = [self._line_to_vector(line) for line in lines]

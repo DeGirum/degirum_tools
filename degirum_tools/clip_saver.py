@@ -21,8 +21,8 @@ Typical flow:
        attach event/notification strings to each result.
     2. `ClipSavingAnalyzer` watches for a match in its trigger set.
     3. When a trigger fires, an internal [`ClipSaver`](video_support.md)
-       back-fills N frames before the trigger and records M frames after, saving:
-           YYYYMMDD_HHMMSS.mp4 and YYYYMMDD_HHMMSS.json.
+       back-fills N frames before the trigger and records M frames after, saving
+       a .mp4 and .json.
 
 Key features:
     - Pre/Post buffering: configurable frame count before/after trigger
@@ -47,15 +47,6 @@ class ClipSavingAnalyzer(ResultAnalyzerBase):
     in an `InferenceResults`. It delegates internally to [`ClipSaver`](video_support.md), which maintains
     a circular buffer, so every clip contains both pre-trigger and post-trigger context.
 
-    Args:
-        clip_duration (int): Total length of the output clip in frames (pre-buffer + post-buffer).
-        triggers (Set[str]): Names that fire the recorder when found in either [`EventDetector`](event_detector.md#key_events_detected) or [`EventNotifier`](event_notifier.md#key_notifications).
-        file_prefix (str): Path and filename prefix for generated files (timestamp & extension are appended automatically).
-        pre_trigger_delay (int, optional): Frames to include before the trigger. Defaults to 0.
-        embed_ai_annotations (bool, optional): If True, use `InferenceResults.image_overlay` so bounding boxes/labels
-                                               are burned into the clip. Defaults to True.
-        save_ai_result_json (bool, optional): If True, dump a JSON file with raw inference results alongside the video. Defaults to True.
-        target_fps (float, optional): Frame rate of the output file. Defaults to 30.0.
     """
 
     def __init__(
@@ -69,7 +60,19 @@ class ClipSavingAnalyzer(ResultAnalyzerBase):
         save_ai_result_json: bool = True,
         target_fps=30.0,
     ):
+        """
+        Constructor.
 
+        Args:
+            clip_duration (int): Total length of the output clip in frames (pre-buffer + post-buffer).
+            triggers (Set[str]): Names that fire the recorder when found in either [`EventDetector`](event_detector.md#key_events_detected) or [`EventNotifier`](event_notifier.md#key_notifications).
+            file_prefix (str): Path and filename prefix for generated files (timestamp & extension are appended automatically).
+            pre_trigger_delay (int, optional): Frames to include before the trigger. Defaults to 0.
+            embed_ai_annotations (bool, optional): If True, use `InferenceResults.image_overlay` so bounding boxes/labels
+                                                   are burned into the clip. Defaults to True.
+            save_ai_result_json (bool, optional): If True, dump a JSON file with raw inference results alongside the video. Defaults to True.
+            target_fps (float, optional): Frame rate of the output file. Defaults to 30.0.
+        """
         if not triggers or not isinstance(triggers, set):
             raise ValueError("`triggers` should be non-empty set of string")
 
