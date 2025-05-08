@@ -295,7 +295,6 @@ class TileExtractorPseudoModel(ModelLike):
                 else dg.postprocessor.DetectionResults
             )
             result = pp(
-                model_params=self._model2._model_parameters,
                 input_image=image,
                 model_image=image,
                 inference_results=tile_results,

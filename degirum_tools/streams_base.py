@@ -338,7 +338,7 @@ class Gizmo(ABC):
         self._connected_gizmos: set = set()
         self._abort = False
         self.composition: Optional[Composition] = None
-        self.error: Optional[Exception] = None
+        self.error: Optional[DegirumException] = None
         self.name = self.__class__.__name__
         self.result_cnt = 0  # gizmo result counter
         self.start_time_s = time.time()  # gizmo start time

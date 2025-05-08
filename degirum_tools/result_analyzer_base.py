@@ -55,7 +55,7 @@ Typical Usage Example
 import numpy as np
 import copy
 from abc import ABC, abstractmethod
-from typing import List
+from typing import List, Union
 
 
 class ResultAnalyzerBase(ABC):
@@ -140,15 +140,60 @@ class ResultAnalyzerBase(ABC):
         self.finalize()
 
 
+def subclass_result_with_analyzers(
+    result, analyzers: Union[ResultAnalyzerBase, List[ResultAnalyzerBase]]
+) -> type:
+    """
+    Create a subclass of the given inference `result` class or object that includes the specified analyzers.
+
+    This method dynamically defines a new class that inherits from the original result class and
+    overrides the `image_overlay` property to apply the analyzers' `annotate()` methods.
+
+    Args:
+        result (degirum.postprocessor.InferenceResults):
+            The inference result class or object to subclass.
+        analyzers (List[ResultAnalyzerBase]):
+            A list of analyzer objects to apply for annotation.
+
+    Returns:
+        (degirum.postprocessor.InferenceResults):
+            A subclassed result object with the new `image_overlay` property.
+    """
+
+    base_class: type = result if isinstance(result, type) else type(result)
+
+    # NOTE: this class name is also used in the attach_analyzers()
+    class _DGAnalyzerResult(base_class):
+
+        # class variable to store analyzer list
+        _analyzers = analyzers if isinstance(analyzers, list) else [analyzers]
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)  # call base class constructor
+            # apply analyzers
+            for analyzer in _DGAnalyzerResult._analyzers:
+                analyzer.analyze(self)
+
+        @property
+        def image_overlay(self):
+            image = super().image_overlay  # call base class property
+            for analyzer in _DGAnalyzerResult._analyzers:
+                image = analyzer.annotate(self, image)
+            return image
+
+    return _DGAnalyzerResult
+
+
 def image_overlay_substitute(result, analyzers: List[ResultAnalyzerBase]):
     """
     Substitute the `image_overlay` property of the given inference `result` object
     so that future calls to `result.image_overlay` automatically apply the analyzers'
     `annotate()` methods.
 
-    This method:
-        1. Preserves the original `image_overlay` property as a private reference.
-        2. Defines a new property that iterates over all analyzers and applies their `annotate()` methods in sequence.
+    This method creates a new class that inherits from the original result class and
+    overrides the `image_overlay` property. The new class does the following:
+    1. Calls the base class's `image_overlay` property to get the image annotated by original result class.
+    2. Applies each analyzer's `annotate()` method to the image, in order.
 
     Args:
         result (degirum.postprocessor.InferenceResults):
@@ -157,29 +202,8 @@ def image_overlay_substitute(result, analyzers: List[ResultAnalyzerBase]):
             A list of analyzer objects to apply for annotation.
     """
 
-    def _overlay_analyzer_annotations(self):
-        """
-        Replaces the default `image_overlay` logic with successive calls to each
-        analyzer's `annotate()` method, so that the final overlay includes all
-        custom annotations.
-        """
-        image = self._orig_image_overlay_analyzer_annotations
-        for analyzer in self._analyzers:
-            image = analyzer.annotate(self, image)
-        return image
-
-    # Dynamically create a subclass with a new property `image_overlay`.
-    # Store the original property as `_orig_image_overlay_analyzer_annotations`
-    # so we can reference it in `_overlay_analyzer_annotations`.
-    result.__class__ = type(
-        result.__class__.__name__ + "_overlay_analyzer_annotations",
-        (result.__class__,),
-        {
-            "image_overlay": property(_overlay_analyzer_annotations),
-            "_orig_image_overlay_analyzer_annotations": result.__class__.image_overlay,
-        },
-    )
-    setattr(result, "_analyzers", analyzers)
+    # replace the class of the result object
+    result.__class__ = subclass_result_with_analyzers(result, analyzers)
 
 
 def clone_result(result):

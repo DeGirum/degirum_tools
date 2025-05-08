@@ -53,7 +53,7 @@ def test_nms():
         return any(np.allclose(res["bbox"], r["bbox"]) for r in res_list)
 
     res = dg.postprocessor.InferenceResults(
-        model_params=None, inference_results=res_list, conversion=None
+        inference_results=res_list, conversion=None
     )
 
     # test default case: IoU, no merge

@@ -201,7 +201,7 @@ def test_object_selector():
 
         for i, input in enumerate(case["inp"]):
             result = dg.postprocessor.InferenceResults(
-                model_params=None, inference_results=input, conversion=None
+                inference_results=input, conversion=None
             )
 
             selector.analyze(result)

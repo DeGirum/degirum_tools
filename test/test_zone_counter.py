@@ -1043,7 +1043,6 @@ def test_zone_counter():
         for i, input in enumerate(case["inp"]):
             inference_results = input[0] if case["params"]["use_tracking"] else input
             result = dg.postprocessor.InferenceResults(
-                model_params=None,
                 input_image=np.zeros((200, 200)),
                 inference_results=inference_results,
                 conversion=None,
