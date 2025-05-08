@@ -6,8 +6,6 @@
 #
 # Implements classes for polygon zone object counting
 #
-
-
 # MIT License
 #
 # Copyright (c) 2022 Roboflow
@@ -30,6 +28,38 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+"""
+Zone Count Module Overview
+==========================
+
+This module provides support for counting objects within polygonal zones in video frames or images.
+It offers classes that integrate with AI inference results to determine whether detected or tracked objects lie within user-defined polygon zones.
+
+Core Features:
+    - **Polygonal zone definition:** Allows specifying arbitrary polygon shapes as counting zones.
+    - **Anchor-point and IoPA triggering:** Supports two approaches to determine if an object is inside a zone:
+        - Using object bounding box anchor points (e.g., bottom center, center).
+        - Using Intersection over Polygon Area (IoPA) threshold based on bounding boxes intersecting polygon.
+    - **Per-class counting support:** Optionally counts objects separately by class labels.
+    - **Object tracking integration:** Supports smoothing of counts over time using frame and time-based track presence.
+    - **Timeout support:** Configurable grace period for objects temporarily missing from zones before being considered outside.
+    - **Comprehensive overlay annotation:** Draws zones and optionally per-zone object counts or in-zone presence duration on images.
+    - **Interactive adjustment (optional):** OpenCV mouse callback support to interactively edit polygon zones in a GUI.
+
+Typical Use Case:
+    1. Define one or several polygon zones over the target video/image frame.
+    2. Instantiate `ZoneCounter`, specifying zones, classes to count, triggering method, and tracking options.
+    3. In the inference pipeline, feed detection or tracking results to `ZoneCounter.analyze()`.
+    4. Retrieve per-zone counts and per-object in-zone flags for further processing or event detection.
+    5. Optionally, call `ZoneCounter.annotate()` to draw zones and counts on images for visualization.
+
+Integration Notes:
+    - Requires detections to include bounding boxes and optionally track IDs for tracking-related functionality.
+    - Works effectively when used downstream of an object tracker analyzer to leverage track IDs.
+    - The module expects standard DeGirum PySDK result formats (e.g., `result.results` with dict entries for detected objects).
+    - Optional parameters enforce consistency and handling of partial/missing detections over time.
+
+"""
 
 import numpy as np, cv2, time
 from typing import Tuple, Optional, Dict, List, Union, Any
@@ -54,7 +84,18 @@ from .math_support import (
 @dataclass
 class _ObjectState:
     """
-    A class for tracking object state within a zone.
+    Internal class to track the state of an object within a zone.
+
+    Attributes
+    ----------
+    timeout_count : int
+        Number of frames the object is allowed to be missing before it is considered exited.
+    object_label : str
+        The class label of the object being tracked.
+    presence_count : int
+        Number of consecutive frames the object has been present in the zone.
+    entering_time : float
+        Timestamp when the object was first detected in the zone.
     """
 
     timeout_count: int  # number of frames to buffer when an object disappears from zone
@@ -65,22 +106,32 @@ class _ObjectState:
 
 class _PolygonZone:
     """
-    A class for defining a polygon-shaped zone within a frame for detecting objects.
+    Represents a polygonal zone within a video frame or image, used for testing whether
+    a detection's bounding box or anchor points lie inside the zone.
+
+    This class encapsulates:
+    - The polygon shape and frame resolution.
+    - Triggering logic based on anchor points or IoPA (Intersection over Polygon Area).
+    - State tracking of objects within the zone for filtering transient entries/exits.
+
+    Parameters such as bounding box scale and IoPA threshold allow fine control over triggering.
 
     Attributes:
-        polygon (np.ndarray): A polygon represented by a numpy array of shape
-            `(N, 2)`, containing the `x`, `y` coordinates of the points.
-        frame_resolution_wh (Tuple[int, int]): The frame resolution (width, height)
-        triggering_position (Union[List[AnchorPoint], AnchorPoint], optional): the position(s) within the bounding box
-            that trigger(s) the zone; if None, iopa_threshold is used and must be specified
-        bounding_box_scale (float, optional): scale factor used to downsize detection result bounding boxes before zone
-            triggering is performed, no matter whether triggering positions or IoPA is used; useful when only a portion
-            of a detected object (a "critical mass") inside a bounding box should trigger the zone
-        iopa_threshold (float, optional): intersection over polygon area (IoPA) threshold; if triggering_position is None,
-            IoPA of bounding boxes greater than this threshold triggers the zone, otherwise this method is not used
-        timeout_frames (int, optional): number of frames to buffer when an object disappears from zone
-        current_count (int): The current count of detected objects within the zone
-        mask (np.ndarray): The 2D bool mask for the polygon zone
+        polygon (np.ndarray): Polygon vertices as (N,2) array.
+        frame_resolution_wh (Tuple[int, int]): Frame width and height.
+        triggering_position (list[AnchorPoint] or None): Anchor points to trigger inside zone.
+        bounding_box_scale (float): Scale to shrink bounding boxes before zone trigger.
+        iopa_threshold (float): IoPA threshold to trigger zone.
+        timeout_frames (int): Frames to tolerate temporary absence of object.
+
+    Args:
+        polygon (np.ndarray): Polygon vertices.
+        frame_resolution_wh (Tuple[int, int]): Frame resolution (width, height).
+        triggering_position (list or AnchorPoint or None): Anchor positions to check.
+        bounding_box_scale (float, optional): Box scaling factor. Default 1.0.
+        iopa_threshold (float, optional): IoPA threshold. Default 0.0.
+        timeout_frames (int, optional): Timeout frames for tracking absence. Default 0.
+
     """
 
     def __init__(
@@ -102,7 +153,6 @@ class _PolygonZone:
         self.iopa_threshold = iopa_threshold
         self._timeout_count_initial = timeout_frames
         self._object_states: Dict[int, _ObjectState] = {}
-
         self.width, self.height = frame_resolution_wh
         self.mask = np.zeros((self.height + 1, self.width + 1))
         cv2.fillPoly(self.mask, [cv2.Mat(polygon.astype(int))], color=[1])
@@ -111,26 +161,32 @@ class _PolygonZone:
 
     def trigger(self, bboxes: np.ndarray) -> np.ndarray:
         """
-        Determines if the detections are within the polygon zone.
+        Determine which bounding boxes are considered inside the polygon zone.
 
-        Parameters:
-            bboxes (np.ndarray): the numpy array of shape `(N, 4)` of bounding boxes to be checked against the polygon zone
+        This method applies the configured triggering logic:
+        - If `triggering_position` is set, tests if any specified anchor point
+          of each bounding box lies inside the polygon.
+        - Otherwise, uses IoPA (Intersection over Polygon Area) with the polygon
+          and thresholds it against `iopa_threshold`.
 
-        Returns:
-            np.ndarray: A boolean numpy array indicating
-                if each detection is within the polygon zone
+        Parameters
+        ----------
+        bboxes : np.ndarray
+            Array of shape `(N, 4)` with bounding boxes in `(x0, y0, x1, y1)` format.
+
+        Returns
+        -------
+        np.ndarray
+            Boolean array of length `N`, indicating if each bounding box is inside the zone.
         """
-
         # clip to frame
         bboxes[:, [0, 2]] = bboxes[:, [0, 2]].clip(0, self.width)
         bboxes[:, [1, 3]] = bboxes[:, [1, 3]].clip(0, self.height)
-
         # scale down bounding box by scale factor
         if self.bounding_box_scale < 1.0:
             bboxes_xywh = xyxy2xywh(bboxes).astype(float)
             bboxes_xywh[:, [2, 3]] *= self.bounding_box_scale
             bboxes = xywh2xyxy(bboxes_xywh)
-
         if self.triggering_position is None:
             # trigger zones based on IoPA
             iopa = np.zeros((bboxes.shape[0]), dtype=float)
@@ -142,7 +198,7 @@ class _PolygonZone:
             iopa /= self.polygon_area
             is_in_zone = iopa > self.iopa_threshold
         else:
-            # trigger zones based on trigger points
+            # trigger zones based on trigger points (anchor points)
             clipped_anchors = np.array(
                 [
                     np.ceil(get_anchor_coordinates(xyxy=bboxes, anchor=anchor)).astype(
@@ -154,32 +210,65 @@ class _PolygonZone:
             is_in_zone = np.logical_or.reduce(
                 self.mask[clipped_anchors[:, :, 1], clipped_anchors[:, :, 0]]
             )
-
         return is_in_zone
 
 
 class ZoneCounter(ResultAnalyzerBase):
     """
-    Class to count objects in polygon zones.
+    Analyzer class that counts objects detected within polygonal zones.
 
-    Analyzes the object detection `result` object passed to `analyze` method and for each detected
-    object checks, does its anchor point belongs to any of the polygon zones specified by the `count_polygons`
-    constructor parameter. Only objects belonging to the class list specified by the `class_list`
-    constructor parameter are counted.
+    This class is designed to integrate with PySDK inference results,
+    augmenting them with per-zone in/out flags and counts, with support
+    for per-class counting and optional object tracking integration.
 
-    Updates detected objects in `result.results[]` list by adding the "in_zone" key containing
-    the list of boolean flags, one flag per zone, indicating if the object is detected in the corresponding zone.
-    If `use_tracking` option is enabled, only objects with track IDs are updated.
-    Additionally, when `use_tracking` option is enabled, "frames_in_zone" and "time_in_zone" keys are added to
-    objects with track IDs. The "frames_in_zone" value is the list containing the number of frames the object is
-    present in each zone. The "time_in_zone" value is the list containing the total time in seconds the object is
-    present in each zone.
+    Functionality:
+    - Determines if objects are inside polygonal zones according to configuration.
+    - Supports per-class counting or total counts.
+    - Can use object tracking to provide frame-based and time-based presence metrics.
+    - Tracks objects with timeout to tolerate short absences.
+    - Overlay polygon zones and object counts on output images.
 
-    Adds `zone_counts` list of dictionaries to the `result` object - one element per polygon zone.
-    Each dictionary contains the count of objects detected in the corresponding zone. The key is the
-    class name and the value is the count of objects of this class detected in the zone.
-    If the `per_class_display` constructor parameter is False, the dictionary contains only one key "total".
+    This class can be used as a step in an inference result processing pipeline
+    to provide high-level analytics on object presence per spatial zone.
 
+    Args:
+        count_polygons (List[np.ndarray]): List of polygon zones.
+        class_list (List[str], optional): Classes to count. None counts all.
+        per_class_display (bool, optional): Display counts per class if True.
+        triggering_position (list or AnchorPoint or None, optional): Anchor points to trigger. If None, IoPA used.
+        bounding_box_scale (float, optional): Scale bounding boxes before trigger.
+        iopa_threshold (float, optional): IoPA threshold if triggering_position is None.
+        use_tracking (bool, optional): Use tracking info if True.
+        timeout_frames (int, optional): Frames to tolerate absence of object in zone.
+        window_name (str, optional): Window name for interactive adjustment.
+        show_overlay (bool, optional): Draw annotations if True.
+        show_inzone_counters (str or None, optional): 'time', 'frames', 'all' or None.
+        annotation_color (tuple, optional): RGB color for annotations.
+        annotation_line_width (int, optional): Annotation line thickness.
+
+    Attributes
+    ----------
+    zone_counts : List[dict]
+        List of per-zone count dictionaries updated after analyze().
+    key_in_zone : str
+        Key added to result objects indicating zone presence flags.
+    key_frames_in_zone : str
+        Key added to result objects with counts of frames in zone.
+    key_time_in_zone : str
+        Key added to result objects with duration in zone in seconds.
+
+    Methods
+    -------
+    analyze(result)
+        Analyzes the given result object to determine in-zone presence and update counts.
+    annotate(result, image)
+        Draws zones and counts on the given image.
+    window_attach(win_name)
+        Attaches an OpenCV window for interactive editing (if applicable).
+
+    Example
+    -------
+    See module-level docstring for sample usage.
     """
 
     key_in_zone = "in_zone"
@@ -206,7 +295,6 @@ class ZoneCounter(ResultAnalyzerBase):
         annotation_line_width: Optional[int] = None,
     ):
         """Constructor
-
         Args:
             count_polygons (nd.array): list of polygons to count objects in; each polygon is a list of points (x,y)
             class_list (List, optional): list of classes to count; if None, all classes are counted
@@ -227,42 +315,34 @@ class ZoneCounter(ResultAnalyzerBase):
             annotation_color (tuple, optional): Color to use for annotations, None to use complement to result overlay color
             annotation_line_width (int, optional): Line width to use for annotations, None to use result overlay line width
         """
-
         self._wh: Optional[Tuple] = None
         self._zones: Optional[List] = None
         self._win_name = window_name
         self._mouse_callback_installed = False
         self._class_list = [] if class_list is None else class_list
-
         self._per_class_display = per_class_display
         if class_list is None and per_class_display:
             raise ValueError(
                 "class_list must be specified when per_class_display is True"
             )
-
         self._triggering_position = triggering_position
-
         self._bounding_box_scale = bounding_box_scale
         if self._bounding_box_scale <= 0.0 or self._bounding_box_scale > 1.0:
             raise ValueError("bounding_box_scale must be from 0 to 1")
-
         self._iopa_threshold = iopa_threshold
         if self._iopa_threshold <= 0 and self._triggering_position is None:
             raise ValueError(
                 "iopa_threshold must be specified when triggering_position is None"
             )
-
         self._use_tracking = use_tracking
         self._timeout_frames = timeout_frames
         if self._timeout_frames > 0 and not self._use_tracking:
             raise ValueError(
                 "timeout_frames can be used only when use_tracking is True"
             )
-
         self._polygons = [
             np.array(polygon, dtype=np.int32) for polygon in count_polygons
         ]
-
         self._show_overlay = show_overlay
         self._show_inzone_counters = show_inzone_counters
         if self._show_inzone_counters not in [None, "time", "frames", "all"]:
@@ -277,31 +357,26 @@ class ZoneCounter(ResultAnalyzerBase):
             raise ValueError(
                 "show_inzone_counters can be used only when use_tracking is True"
             )
-
         self._annotation_color = annotation_color
         self._annotation_line_width = annotation_line_width
 
     def analyze(self, result):
         """
-        Detect object bounding boxes in polygon zones.
+        Analyze the given PySDK inference result to count objects in polygon zones.
 
-        Updates detected objects in `result.results[]` list by adding the "in_zone" key containing
-        the list of boolean flags, one flag per zone, indicating if the object is detected in the corresponding zone.
-        If `use_tracking` option is enabled, only objects with track IDs are updated.
-        Additionally, when `use_tracking` option is enabled, "frames_in_zone" and "time_in_zone" keys are added to
-        objects with track IDs. The "frames_in_zone" value is the list containing the number of frames the object is
-        present in each zone. The "time_in_zone" value is the list containing the total time in seconds the object is
-        present in each zone.
+        Modifies `result` by adding:
+        - `result.zone_counts`: list of dictionaries with counts per polygon zone.
+        - Adds `"in_zone"` list of booleans per detected object.
+        - If tracking is enabled, adds `"frames_in_zone"` and `"time_in_zone"` counters per object.
 
-        Adds `zone_counts` list of dictionaries to the `result` object - one element per polygon zone.
-        Each dictionary contains the count of objects detected in the corresponding zone. The key is the
-        class name and the value is the count of objects of this class detected in the zone.
-        If the `per_class_display` constructor parameter is False, the dictionary contains only one key "total".
+        Handles:
+        - Filtering detections by class_list and tracking presence.
+        - Updating internal object states to tolerate temporary absences.
+        - Counting total and per-class object presence in each zone.
 
         Args:
-            result: PySDK model result object
+            result (InferenceResults): Inference result to analyze.
         """
-
         result.zone_counts = [
             dict.fromkeys(
                 self._class_list + ["total"] if self._per_class_display else ["total"],
@@ -309,9 +384,7 @@ class ZoneCounter(ResultAnalyzerBase):
             )
             for _ in self._polygons
         ]
-
         self._lazy_init(result)
-
         if self._zones is None:
             return
 
@@ -330,7 +403,6 @@ class ZoneCounter(ResultAnalyzerBase):
             and (not self._use_tracking or "track_id" in obj)
         ]
         # here `filtered_results` contains only objects with labels from the class list, having track IDs if tracking is used
-
         if self._use_tracking and hasattr(result, "trails"):
             active_tids = [obj["track_id"] for obj in filtered_results]
             lost_results = [
@@ -344,7 +416,6 @@ class ZoneCounter(ResultAnalyzerBase):
             ]
             filtered_results.extend(lost_results)
             # here `filtered_results` is extended with "lost" objects: objects that were not detected but still tracked
-
         # initialize per-object results
         for obj in filtered_results:
             nzones = len(self._zones)
@@ -352,7 +423,6 @@ class ZoneCounter(ResultAnalyzerBase):
             if self._use_tracking:
                 obj[self.key_frames_in_zone] = [0] * nzones
                 obj[self.key_time_in_zone] = [0.0] * nzones
-
         bboxes = np.array([obj["bbox"] for obj in filtered_results])
         time_now = time.time()
 
@@ -371,16 +441,13 @@ class ZoneCounter(ResultAnalyzerBase):
         for zi, zone in enumerate(self._zones):
             # compute object-in-zone flags
             triggers = zone.trigger(bboxes) if bboxes.size > 0 else np.array([], bool)
-
             zone_counts = result.zone_counts[zi]
             all_tids_in_zone = []
-
             # iterate over all filtered objects
             for obj, flag in zip(filtered_results, triggers):
                 if flag:
                     # object is in zone
                     set_in_zone_and_increment_counts(obj, zi, zone_counts)
-
                     if self._use_tracking:
                         tid = obj["track_id"]
                         obj_state = zone._object_states.get(tid)
@@ -396,7 +463,6 @@ class ZoneCounter(ResultAnalyzerBase):
                                 presence_count=1,
                                 entering_time=time_now,
                             )
-
                         set_time_in_zone(obj, zi, obj_state)
                         all_tids_in_zone.append(tid)
                 else:
@@ -414,56 +480,52 @@ class ZoneCounter(ResultAnalyzerBase):
                                 all_tids_in_zone.append(tid)
                             else:
                                 del zone._object_states[tid]
-
             if self._use_tracking:
                 # process inactive objects: still tracked, but not detected on the current frame
                 inactive_set = set(zone._object_states.keys())
                 if len(all_tids_in_zone) > 0:
                     inactive_set -= set(all_tids_in_zone)
-
                 for tid in inactive_set:
                     obj_state = zone._object_states[tid]
-
                     if self._timeout_frames > 0:
                         obj_state.presence_count += 1
                         obj_state.timeout_count -= 1
                         zone_counts["total"] += 1
                         if self._per_class_display and obj_state.object_label:
                             zone_counts[obj_state.object_label] += 1
-
                     # here we delete both timed-out and lost objects (in case of zero timeout)
                     if obj_state.timeout_count == 0:
                         del zone._object_states[tid]
 
     def annotate(self, result, image: np.ndarray) -> np.ndarray:
         """
-        Display polygon zones and zone counts on a given image
+        Annotate the given image with polygon zones and counts.
+
+        Draws polygon outlines and optionally displays per-zone total or per-class counts.
+        If tracking is used together with presence counters, optionally draws frames-in-zone
+        or time-in-zone indicators near detected objects.
 
         Args:
-            result: PySDK result object to display (should be the same as used in analyze() method)
-            image (np.ndarray): image to display on
-
+            result (InferenceResults): Result with zone counts and per-object flags.
+            image (np.ndarray): Image to annotate.
+    
         Returns:
-            np.ndarray: annotated image
+            np.ndarray: Annotated image
         """
-
         if not self._show_overlay:
             return image
-
         line_color = (
             color_complement(result.overlay_color)
             if self._annotation_color is None
             else self._annotation_color
         )
         text_color = deduce_text_color(line_color)
-
         line_width = (
             result.overlay_line_width
             if self._annotation_line_width is None
             else self._annotation_line_width
         )
-
-        # draw object annotations
+        # draw object annotations (presence counters)
         if self._show_inzone_counters:
             for r in result.results:
                 if "in_zone" in r:
@@ -497,8 +559,7 @@ class ZoneCounter(ResultAnalyzerBase):
                             bg_color=line_color,
                             font_scale=result.overlay_font_scale,
                         )
-
-        # draw zone annotations
+        # draw polygon zone outlines and display per-zone counts
         for zi in range(len(self._polygons)):
             cv2.polylines(
                 image,
@@ -507,7 +568,6 @@ class ZoneCounter(ResultAnalyzerBase):
                 rgb_to_bgr(line_color),
                 line_width,
             )
-
             if self._per_class_display and self._class_list is not None:
                 text = f"Zone {zi}:"
                 for class_name in self._class_list:
@@ -516,7 +576,6 @@ class ZoneCounter(ResultAnalyzerBase):
                     )
             else:
                 text = f"Zone {zi}: {result.zone_counts[zi].get('total', 0)}"
-
             put_text(
                 image,
                 text,
@@ -528,22 +587,27 @@ class ZoneCounter(ResultAnalyzerBase):
         return image
 
     def window_attach(self, win_name: str):
-        """Attach OpenCV window for interactive zone adjustment by installing mouse callback
+        """
+        Attach an OpenCV window for optional interactive zone adjustment.
+
+        This installs a mouse callback on the window whose name is provided,
+        allowing the user to drag polygons or their vertices to adjust zones.
 
         Args:
-            win_name (str): OpenCV window name to attach to
+            win_name (str): OpenCV window name to attach the callback to.
         """
-
         self._win_name = win_name
         self._mouse_callback_installed = False
 
     def _lazy_init(self, result):
-        """Complete deferred initialization steps
-            - initialize polygon zones from model result object
-            - install mouse callback
+        """
+        Performs deferred initialization tasks.
+
+        - Initializes polygon zones from the model result, computing necessary masks and data.
+        - Installs mouse callback if interactive adjustment is enabled.
 
         Args:
-            result: PySDK model result object
+            result: PySDK inference result object containing an image for dimension reference.
         """
         if self._zones is None:
             self._wh = (result.image.shape[1], result.image.shape[0])
@@ -563,8 +627,21 @@ class ZoneCounter(ResultAnalyzerBase):
 
     @staticmethod
     def _mouse_callback(event: int, x: int, y: int, flags: int, self: Any):
-        """Mouse callback for OpenCV window for interactive zone operations"""
+        """
+        Mouse event callback for interactive polygon zone editing.
 
+        Supports:
+        - Left-click and drag to move entire polygon.
+        - Right-click and drag to move individual vertices.
+        - Updates internal polygon state on changes.
+
+        Args:
+            event (int): OpenCV mouse event code.
+            x (int): X coordinate of the mouse event.
+            y (int): Y coordinate of the mouse event.
+            flags (int): Additional event flags.
+            self: Instance of ZoneCounter.
+        """
         click_point = np.array((x, y))
 
         def zone_update():
@@ -587,7 +664,6 @@ class ZoneCounter(ResultAnalyzerBase):
                     self._gui_state["offset"] = click_point
                     self._gui_state["update"] = idx
                     break
-
         if event == cv2.EVENT_RBUTTONDOWN:
             for idx, polygon in enumerate(self._polygons):
                 for pt in polygon:
@@ -596,19 +672,20 @@ class ZoneCounter(ResultAnalyzerBase):
                         self._gui_state["offset"] = click_point
                         self._gui_state["update"] = idx
                         break
-
         elif event == cv2.EVENT_MOUSEMOVE:
             if self._gui_state["dragging"] is not None:
                 delta = click_point - self._gui_state["offset"]
                 self._gui_state["dragging"] += delta
                 self._gui_state["offset"] = click_point
-
         elif event == cv2.EVENT_LBUTTONUP or event == cv2.EVENT_RBUTTONUP:
             self._gui_state["dragging"] = None
             zone_update()
             self._gui_state["update"] = -1
 
     def _install_mouse_callback(self):
+        """
+        Internal method to install the OpenCV mouse callback on the attached window.
+        """
         if self._win_name is not None:
             try:
                 cv2.setMouseCallback(self._win_name, ZoneCounter._mouse_callback, self)  # type: ignore[attr-defined]

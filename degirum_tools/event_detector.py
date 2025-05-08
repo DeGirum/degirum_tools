@@ -11,66 +11,30 @@ Event Detector Analyzer
 =======================
 
 This module provides [`EventDetector`](#eventdetector), a **result-post-processing analyzer**
-that turns results of analyzers ([zone counters](zone_count.md#zonecounter), [line counters](line_count.md#linecounter), etc.)
-into high-level, **human-readable "events."**
-Typical uses include:
+that converts outputs from analyzers (e.g., zone counters, line counters) into high-level,
+human-readable "events."
 
-* Raising a *"PersonInZone"* event when a person stays inside an ROI for *N* seconds.
-* Firing a *"VehicleCountExceeded"* event whenever more than *K* cars are in view.
-* Detecting complex temporal patterns—e.g. *"Person crosses entry line then exit
-  line within 3s"*—by combining multiple analyzers upstream.
+Typical use cases include:
+    - Raising "PersonInZone" event when a person stays inside a ROI for N seconds.
+    - Firing "VehicleCountExceeded" event when the count exceeds a threshold.
+    - Detecting complex temporal patterns by combining multiple analyzers.
 
-The analyzer is **data-driven**: behaviour is described by a YAML (or
-`dict`) that follows the schema defined in `event_definition_schema`.
-A single analyzer instance can therefore be re-configured without code changes.
+The analyzer is data-driven: behavior is described by a YAML or dict matching the schema defined
+in `event_definition_schema`.
 
-**Integration pattern**
+Integration pattern:
+    1. Attach auxiliary analyzers (e.g., `ZoneCounter`, `LineCounter`) so the required metrics are present.
+    2. Create an `EventDetector` with a YAML description.
+    3. Attach it to a model or compound model.
+    4. Downstream components inspect `result.events_detected` or use `EventNotifier`.
 
-1. Attach auxiliary analyzers (e.g. [`ZoneCounter`](zone_count.md#zonecounter),
-   [`LineCounter`](line_count.md#linecounter)) upstream so that the required metrics are present in
-   each InferenceResults.
-2. Construct [`EventDetector`](#eventdetector) with a YAML description (see *Example* below).
-3. Attach it to a model or compound model via
-   [`attach_analyzers`](compound_models.md#compoundmodelbase).
-4. Downstream components can inspect `result.events_detected` or rely on
-   [`EventNotifier`](notifier.md#eventnotifier) to convert events into user notifications.
+Key Concepts:
+    - Metric: scalar number extracted from `InferenceResults` (zone count, line count, etc.)
+    - Comparator: operator for comparing the metric with a threshold
+    - Temporal window: duration over which the metric is evaluated
+    - Quantifier: duration or proportion the condition must hold to trigger the event
 
-Example
--------
-
-```python
-from degirum_tools.event_detector import EventDetector
-
-event_yaml = \"\"\"
-Trigger: PersonInZone
-when:   ZoneCount
-with:
-    classes: [person]
-    index:   0          # zone id
-is greater than or equal to: 1
-during: [5, seconds]    # look at a 5-second window
-for at least: [80, percent]
-\"\"\"
-
-detector = EventDetector(event_yaml)
-model.attach_analyzers(detector)
-```
-
-Key Concepts
-------------
-
-* **Metric** - scalar number extracted from `InferenceResults`
-  (zone count, line count, object count, or a user-supplied custom metric).
-* **Comparator** - how the metric is compared to a threshold
-  (>, >=, <, <=, ==, !=).
-* **Temporal window** - *"during"* clause defines sliding window length
-  (in frames or seconds).
-* **Quantifier** - *"for at least / at most"* clause defines how long within
-  the window the condition must hold.
-
-All timing logic is handled internally via a ring-buffer; no external state is
-required.
-
+All timing logic is handled internally using a ring-buffer; no external state is required.
 """
 
 import numpy as np
@@ -240,13 +204,13 @@ def ZoneCount(result, params):
 
     Args:
         result (InferenceResults): The inference results object.
-        params (dict): May contain:
-            - `classes` (List[str]): Classes to include.
-            - `index` (int): Zone index to count (None → all zones).
-            - `aggregation` (str): Aggregation function name (e.g., 'sum', 'max').
+        params (dict): Optional parameters including:
+            - classes (List[str]): Classes to include.
+            - index (int): Zone index to count (None for all zones).
+            - aggregation (str): Aggregation function name (e.g., 'sum', 'max').
 
     Returns:
-        count (int or float): Aggregated count (sum, max, …) across the selected zone(s).
+        int or float: Aggregated count across selected zones.
     """
 
     if not hasattr(result, "zone_counts"):
@@ -396,22 +360,24 @@ def ObjectCount(result, params):
 
 class EventDetector(ResultAnalyzerBase):
     """
-    Detect high-level events from inference results.
-
-    The detector evaluates a metric over a sliding window and checks whether it
-    satisfies a comparison with a threshold for a required proportion of that window.
-    When satisfied, the event name is added to `result.events_detected` (a set managed
-    by this class).
+    Detects high-level events from inference results by evaluating a metric over a sliding window.
+    The detector checks if the metric satisfies a comparison operator against a threshold
+    for a required duration or proportion of the window. When satisfied, the event name is added
+    to `result.events_detected`.
 
     Attributes:
         key_events_detected (str): Name of the attribute where fired events are stored ("events_detected").
-        _event_history (collections.deque): Ring buffer storing (timestamp, condition_met_bool) tuples.
+        _event_history (collections.deque): History of timestamp and condition met boolean tuples.
 
-    Notes:
-        - The class is purely stateless from the outside; all state lives inside
-          the analyzer instance.
-        - Thread-safe as long as each instance is confined to a single inference
-          thread.
+    Args:
+        event_description (Union[str, dict]): YAML string or dict matching the event_definition_schema.
+        show_overlay (bool, optional): Whether to annotate frames when event fires. Defaults to True.
+        annotation_color (tuple, optional): Background RGB color for text label. Defaults to complement of model overlay color.
+        annotation_font_scale (float, optional): OpenCV font scale. None uses default.
+        annotation_pos (Union[AnchorPoint, tuple], optional): Position to place text label. Defaults to BOTTOM_LEFT.
+
+    Note:
+        The class is stateless externally; all state is internal and thread-safe when used within a single inference thread.
     """
 
     key_events_detected = "events_detected"
@@ -426,14 +392,14 @@ class EventDetector(ResultAnalyzerBase):
         annotation_pos: Union[AnchorPoint, tuple] = AnchorPoint.BOTTOM_LEFT,
     ):
         """
-        Create a new detector from a YAML/dict definition.
+        Initializes the EventDetector from a YAML string or dictionary description.
 
         Args:
-            event_description (str | dict): YAML string or parsed dict matching *event_definition_schema*.
-            show_overlay (bool, optional): If True, annotate frames whenever the event fires. Defaults to True.
-            annotation_color (tuple, optional): RGB background for the text label. Defaults to the complement of model overlay colour.
-            annotation_font_scale (float, optional): OpenCV font scale. None uses the model's default.
-            annotation_pos (AnchorPoint | tuple): Where to place the text label; either an `AnchorPoint` enum value or an `(x, y)` pixel tuple.
+            event_description (str or dict): YAML string or dict matching the event_definition_schema.
+            show_overlay (bool, optional): Whether to annotate frames when event fires. Defaults to True.
+            annotation_color (tuple, optional): Background RGB color for text label. Defaults to complement of model overlay color.
+            annotation_font_scale (float, optional): OpenCV font scale. None uses default.
+            annotation_pos (AnchorPoint or tuple, optional): Position to place text label. Defaults to BOTTOM_LEFT.
         """
 
         self._show_overlay = show_overlay
@@ -498,19 +464,19 @@ class EventDetector(ResultAnalyzerBase):
 
     def analyze(self, result):
         """
-        Evaluate metric and update `result.events_detected`.
+        Evaluate the configured metric on the given inference result and
+        update `result.events_detected` if event conditions are met.
 
-        Steps
-        -----
-        1. Compute metric value via a global helper (e.g. [`ZoneCount`](zone_count.md)).
-        2. Check comparator against threshold → **condition_met**.
-        3. Append `(timestamp, condition_met)` to history deque.
-        4. Drop stale entries if time-based window.
-        5. Test quantifier (at least / at most) against quota.
-        6. Add event name to `result.events_detected` when satisfied.
+        Steps:
+            1. Compute metric value.
+            2. Compare with threshold using specified comparator.
+            3. Record the timestamp and condition result in history.
+            4. Remove old entries if window is time-based.
+            5. Check if the condition duration or proportion meets the configured quantifier.
+            6. Add event name if criteria are met.
 
         Args:
-            result (InferenceResults): Inference result to analyze (modified in-place).
+            result (InferenceResults): Model inference results to analyze.
         """
 
         # evaluate metric and compare with threshold
@@ -552,21 +518,21 @@ class EventDetector(ResultAnalyzerBase):
 
     def annotate(self, result, image: np.ndarray) -> np.ndarray:
         """
-        Overlay the event label onto the frame.
+        Overlay the event label onto the frame if the event is active.
 
         The overlay is rendered only when:
-        - `show_overlay` is True, and
-        - this frame has the current event in `result.events_detected`.
+            - `show_overlay` is True, and
+            - this frame has the current event in `result.events_detected`.
 
-        The label background colour defaults to the complement of the model's
-        overlay colour, and text colour is auto-chosen for contrast.
+        The label's background defaults to complement of the model's overlay color,
+        and text color is auto-chosen for contrast.
 
         Args:
             result (InferenceResults): Same result instance passed to `analyze()`.
             image (np.ndarray): BGR image to annotate.
 
         Returns:
-            np.ndarray: Annotated image (same instance for efficiency).
+            np.ndarray: Annotated image (same instance).
         """
 
         if (
