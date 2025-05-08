@@ -12,27 +12,11 @@ Object Selector Analyzer Module Overview
 This module provides an analyzer (`ObjectSelector`) for selecting the top-K detections from
 object detection results based on various strategies and optional tracking.
 
-Key Concepts
-------------
+Key Concepts:
+    - **Selection Strategies**: Supports selecting by highest confidence score or largest bounding-box area.
+    - **Tracking Integration**: Optionally uses `track_id` fields to persist selections across frames with a timeout.
+    - **Annotation Overlay**: Optionally draws bounding boxes for selected objects on images.
 
-- **Selection Strategies**: Supports selecting by highest confidence score or largest bounding-box area.
-- **Tracking Integration**: Optionally uses `track_id` fields to persist selections across frames with a timeout.
-- **Annotation Overlay**: Optionally draws bounding boxes for selected objects on images.
-
-Basic Usage
------------
-```python
-from degirum_tools.object_selector import ObjectSelector, ObjectSelectionStrategies
-
-# Create selector to choose top 3 by score
-selector = ObjectSelector(top_k=3, selection_strategy=ObjectSelectionStrategies.HIGHEST_SCORE)
-
-# Attach to model and run inference
-model.attach_analyzers(selector)
-for res in model.predict_batch(images):
-    img = res.image_overlay
-    # process annotated image
-```
 """
 
 import numpy as np, copy, cv2
@@ -59,19 +43,20 @@ class ObjectSelectionStrategies(Enum):
 
 class ObjectSelector(ResultAnalyzerBase):
     """
-    Analyzer to select and optionally track the top-K objects per frame.
+    Selects and optionally tracks top-K objects per frame.
 
-    This analyzer inspects a detection `result` and retains only the top-K entries based on the
-    specified `ObjectSelectionStrategies`. When `use_tracking` is enabled, it maintains selected
-    objects across frames using `track_id`, expiring them after `tracking_timeout` frames of absence.
+    Inspects detection results and retains top-K based on strategy.
+
+    When tracking is enabled, maintains selections using track IDs,
+    expiring after tracking timeout.
 
     Args:
         top_k (int): Number of objects to select.
-        selection_strategy (ObjectSelectionStrategies): Strategy for ranking objects.
-        use_tracking (bool): Enable tracking across frames.
-        tracking_timeout (int): Frames to wait before dropping an unseen object.
-        show_overlay (bool): Draw bounding boxes on the output image.
-        annotation_color (Optional[tuple]): RGB color for annotation; defaults to complement of model overlay color.
+        selection_strategy (ObjectSelectionStrategies): Ranking strategy.
+        use_tracking (bool): Enable tracking-based selection.
+        tracking_timeout (int): Frames to wait before dropping unseen object.
+        show_overlay (bool): Whether to draw bounding boxes.
+        annotation_color (tuple, optional): RGB color for boxes.
     """
 
     @dataclass
@@ -83,6 +68,7 @@ class ObjectSelector(ResultAnalyzerBase):
             detection (dict): The detection result dictionary.
             counter (int): Frames since last seen before removal.
         """
+
         detection: dict  # detection result
         counter: int = (
             0  # counter to keep track of how long the object has not been found in new results
@@ -120,10 +106,12 @@ class ObjectSelector(ResultAnalyzerBase):
 
     def analyze(self, result):
         """
-        Finds top-K objects based on the selection strategy and updates the result.
+        Select the top-K objects based on the configured strategy, updating the result.
+
+        Uses tracking IDs to update selected objects when tracking is enabled.
 
         Args:
-            result (InferenceResults): PySDK model result object to analyze.
+            result (InferenceResults): Model result with detection information.
         """
 
         all_detections = result._inference_results
@@ -181,10 +169,10 @@ class ObjectSelector(ResultAnalyzerBase):
 
     def annotate(self, result, image: np.ndarray) -> np.ndarray:
         """
-        Displays object bounding boxes on a given image.
+        Draw bounding boxes for the selected objects on the image.
 
         Args:
-            result (InferenceResults): Model result object to display (same as used in analyze()).
+            result (InferenceResults): The result containing selected objects.
             image (np.ndarray): Image to annotate.
 
         Returns:

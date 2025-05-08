@@ -7,8 +7,15 @@
 # Implements analyzer class to generate notifications based on triggered events.
 # It works with conjunction with EventDetector analyzer.
 #
+"""
+Notification analyzer modules.
 
+Implements `NotificationServer` for asynchronous sending of notifications
+and uploading files to object storage.
 
+Also implements `EventNotifier` which sends notifications and optionally
+saves video clips when events are triggered.
+"""
 import numpy as np, sys, multiprocessing, threading, time, os, queue, tempfile, shutil, datetime
 from typing import Tuple, List, Union, Optional, Dict
 from contextvars import ContextVar
@@ -28,8 +35,18 @@ notification_config_console = "json://console"
 
 class NotificationServer:
     """
-    Notification server class to asynchronously send notifications via apprise
-    and upload files to the object storage.
+    Server to asynchronously send notifications and upload files.
+
+    It runs as a background process handling jobs including file uploads,
+    notification sending, and referencing uploaded files.
+
+    Jobs:
+        - job_file_upload: Upload a local file.
+        - job_file_reference: Reference an already uploaded file.
+        - job_notification: Send a notification with optional message.
+
+    Usage:
+        Instantiate with configuration, then send jobs with send_job().
     """
 
     class DefaultDict(dict):
@@ -38,7 +55,7 @@ class NotificationServer:
 
     class Job:
         """
-        Notification server job base class
+        Notification server job base class.
         """
 
         _id: int = 0  # job ID counter
@@ -366,17 +383,38 @@ class NotificationServer:
 
 class EventNotifier(ResultAnalyzerBase):
     """
-    Class to generate notifications based on triggered events.
-    It works with conjunction with EventDetector analyzer, analyzing `events_detected` set
-    in the `result` object.
+    Analyzer to generate notifications based on triggered events.
 
-    Adds `notifications` dictionary to the `result` object, where keys are names of generated
-    notifications and values are notification messages.
+    Works together with `EventDetector`, analyzing `events_detected` set
+    on `result` object.
 
-    It sends notifications to the notification service specified in `notification_config`.
+    Generates notifications when a user-defined condition based on event triggers is met.
 
-    If `clip_save` is set to True, it saves video clips when notification is triggered.
-    Saved clips are uploaded to the object storage if `storage_config` is provided.
+    Features:
+        - Message formatting using Python format strings.
+        - Holdoff suppresses repeated notifications within specified frame or time window.
+        - Optional video clip saving on notification trigger with uploads to object storage.
+        - Overlay annotation of active notifications on images.
+
+    Args:
+        name (str): Notification name.
+        condition (str): Python expression evaluating event names.
+        message (str, optional): Notification message format string.
+        holdoff (int, float or tuple, optional): Holdoff time in frames or seconds.
+        notification_config (str, optional): Notification config file or service URL.
+        notification_tags (str, optional): Tags to use for cloud notifications.
+        show_overlay (bool, optional): Annotate images if True.
+        annotation_color (tuple, optional): Color for annotations.
+        annotation_font_scale (float, optional): Font scale.
+        annotation_pos (AnchorPoint|tuple|list, optional): Position of annotation.
+        annotation_cool_down (float, optional): Annotation display duration in seconds.
+        clip_save (bool, optional): Save video clips on notification trigger.
+        clip_sub_dir (str, optional): Subdirectory for clip files.
+        clip_duration (int, optional): Clip length in frames.
+        clip_pre_trigger_delay (int, optional): Frames to include before trigger.
+        clip_embed_ai_annotations (bool, optional): Embed AI overlays in clip.
+        clip_target_fps (float, optional): Clip frame rate.
+        storage_config (ObjectStorageConfig, optional): Object storage config for clip uploads.
     """
 
     key_notifications = "notifications"  # extra result key
@@ -509,21 +547,15 @@ class EventNotifier(ResultAnalyzerBase):
 
     def analyze(self, result):
         """
-        Generate notification by analyzing given result according to the condition expression.
+        Evaluate the notification condition on the given inference result.
 
-        If condition is met the first time, the notification is generated.
+        If the condition is met and not suppressed by holdoff,
+        generate notification message stored in `result.notifications`.
 
-        If condition is met repeatedly on every consecutive frame, the notification is generated only once, when
-        condition is met the first time.
-
-        If condition is not met for a period less than holdoff time and then met again, the notification
-        is not generated to reduce the number of notifications.
-
-        When notification is generated, the notification message is stored in the `result.notifications` dictionary
-        under the key equal to the notification name.
+        Optionally save video clips when notification triggers, and schedule uploads.
 
         Args:
-            result: PySDK model result object
+            result (InferenceResults): Inference result object.
         """
 
         if not hasattr(result, EventDetector.key_events_detected):
@@ -603,14 +635,16 @@ class EventNotifier(ResultAnalyzerBase):
 
     def annotate(self, result, image: np.ndarray) -> np.ndarray:
         """
-        Display active notifications on a given image
+        Annotate the image to display active notifications.
+
+        Displays the notification message if the notification is active and within cool-down time.
 
         Args:
-            result: PySDK result object to display (should be the same as used in analyze() method)
-            image (np.ndarray): image to display on
+            result (InferenceResults): Result object with notifications.
+            image (np.ndarray): Image to annotate.
 
         Returns:
-            np.ndarray: annotated image
+            np.ndarray: Annotated image.
         """
 
         if not self._show_overlay:
@@ -661,7 +695,10 @@ class EventNotifier(ResultAnalyzerBase):
 
     def finalize(self):
         """
-        Perform finalization/cleanup actions
+        Finalize and clean up resources.
+
+        Blocks until clip saver threads are finished, terminates notification server,
+        and deletes temporary clip directory if used.
         """
         if self._clip_save:
             self._clip_saver.join_all_saver_threads()
