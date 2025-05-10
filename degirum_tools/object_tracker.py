@@ -30,6 +30,20 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+"""
+Object Tracker Module Overview
+==============================
+
+Implements multi-object tracking using [BYTETrack algorithm](https://github.com/ifzhang/ByteTrack).
+
+Provides consistent track IDs for detected objects across frames,
+supporting trails visualization and integration with counting analyzers.
+
+Key classes:
+    - STrack: Represents single track with state
+    - ObjectTracker: exposed analyzer integrating above functionality
+
+"""
 
 import cv2, numpy as np, scipy.linalg
 from enum import Enum
@@ -266,6 +280,19 @@ class STrack:
     def __init__(
         self, tlwh: np.ndarray, score: float, obj_idx: int, id_counter: _IDCounter
     ):
+        """
+        Constructor.
+
+        Args:
+            tlwh (np.ndarray): Initial bounding box in *(x, y, w, h)* format
+                where *(x, y)* is the **top-left** corner.
+            score (float): Detector confidence for this object.
+            obj_idx (int): Zero-based index of the object’s class in the model’s
+                label set.
+            id_counter (_IDCounter): Shared counter used to generate globally
+                unique ``track_id`` values across all tracks.
+        """
+
         self.id_counter = id_counter
         self.track_id = 0
         self.is_activated = False
@@ -863,6 +890,16 @@ class ObjectTracker(ResultAnalyzerBase):
     `result` object. This dictionary is keyed by track IDs and contains lists of (x1, y1, x2, y2)
     coordinates of object bounding boxes for every active trail.
 
+    Args:
+        class_list (list, optional): Classes to track; None tracks all.
+        track_thresh (float): Detection confidence threshold for activation.
+        track_buffer (int): Frames to buffer lost tracks.
+        match_thresh (float): IOU threshold for matching.
+        anchor_point (AnchorPoint): Anchor point for trail calculation.
+        trail_depth (int): Number of frames to keep trail history.
+        show_overlay (bool): Draw track annotations.
+        annotation_color (tuple, optional): Color for annotations.
+
     """
 
     def __init__(
@@ -899,15 +936,14 @@ class ObjectTracker(ResultAnalyzerBase):
 
     def analyze(self, result):
         """
-        Track object bounding boxes.
-        Updates each element of `result.results[]` by adding the `track_id` key - unique track ID of the detected object
-        If trail_depth is not zero, also adds `trails` dictionary to result object. This dictionary is keyed by track IDs
-        and contains lists of (x1, y1, x2, y2) coordinates of object bounding boxes for every active trail.
-        Also adds `trail_classes` dictionary to result object. This dictionary is keyed by track IDs and contains
-        object class labels for every active trail.
+        Perform tracking on the current result detections.
+
+        Updates track_ids in the detections.
+
+        Maintains trails and trail classes if enabled.
 
         Args:
-            result: PySDK model result object
+            result (InferenceResults): Model inference result.
         """
         self._tracker.update(result)
         if self._tracer is None:
