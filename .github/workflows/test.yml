@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: [3.8, 3.12]
+        python: [3.9, 3.12]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -34,7 +34,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: [3.8, 3.12]
+        python: [3.9, 3.12]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
