@@ -927,9 +927,7 @@ class AiAnalyzerGizmo(Gizmo):
             filter_ok = True
             new_meta = data.meta.clone()
             inference_meta = new_meta.find_last(tag_inference)
-            if inference_meta is not None and isinstance(
-                inference_meta, dg.postprocessor.InferenceResults
-            ):
+            if inference_meta is not None:
                 inference_clone = clone_result(inference_meta)
                 # Apply all analyzers in sequence
                 for analyzer in self._analyzers:

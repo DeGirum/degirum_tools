@@ -240,7 +240,6 @@ def test_notifier(s3_credentials, msteams_test_workflow_url):
             for i, input in enumerate(case["inp"]):
 
                 result = dg.postprocessor.InferenceResults(
-                    model_params=None,
                     input_image=(
                         np.zeros((100, 100, 3)) if notifier._clip_save else None
                     ),

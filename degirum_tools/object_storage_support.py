@@ -10,6 +10,7 @@
 
 import time, os, shutil
 import datetime
+from typing import Optional
 from dataclasses import dataclass
 from .environment import import_optional_package
 
@@ -20,10 +21,10 @@ class ObjectStorageConfig:
     Object storage configuration dataclass
     """
 
-    endpoint: str  # The object storage endpoint URL
+    endpoint: str  # The object storage endpoint URL or local path for local storage
     access_key: str  # The access key for the cloud account
     secret_key: str  # The secret key for the cloud account
-    bucket: str  # The name of the bucket to manage
+    bucket: str  # The name of the bucket to manage or directory name for local storage
     url_expiration_s: int = 3600  # The expiration time for the presigned URL in seconds
 
     def construct_direct_url(self, object_name: str):
@@ -45,6 +46,18 @@ class _LocalMinio:
     """
     LocalMinio class for simulating Minio object storage operations on the local filesystem
     """
+
+    @dataclass
+    class Object:
+        bucket_name: str
+        object_name: str
+        last_modified: datetime.datetime
+        etag: str
+        size: int
+        content_type: Optional[str] = None
+        is_dir: bool = False
+        metadata: Optional[dict] = None
+        version_id: Optional[str] = None
 
     def __init__(self, base_dir):
         """Constructor
@@ -76,7 +89,17 @@ class _LocalMinio:
             for file in files:
                 # Yield file paths relative to the bucket if they match the prefix
                 if file.startswith(prefix):
-                    yield os.path.relpath(os.path.join(root, file), bucket_path)
+                    yield _LocalMinio.Object(
+                        bucket_name=bucket_name,
+                        object_name=os.path.relpath(
+                            os.path.join(root, file), bucket_path
+                        ),
+                        last_modified=datetime.datetime.fromtimestamp(
+                            os.path.getmtime(os.path.join(root, file))
+                        ),
+                        etag="",
+                        size=os.path.getsize(os.path.join(root, file)),
+                    )
 
     def remove_object(self, bucket_name, object_name):
         """Remove a specific object (file) from the bucket"""

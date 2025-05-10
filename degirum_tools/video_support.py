@@ -105,7 +105,7 @@ def open_video_stream(
 
 
 def get_video_stream_properties(
-    video_source: Union[int, str, Path, None, cv2.VideoCapture]
+    video_source: Union[int, str, Path, None, cv2.VideoCapture],
 ) -> tuple:
     """
     Get video stream properties
@@ -497,7 +497,10 @@ class ClipSaver:
                                     {
                                         k: v
                                         for k, v in result.__dict__.items()
-                                        if not k.startswith("_")
+                                        if (
+                                            not k.startswith("_")
+                                            or k == "_inference_results"
+                                        )
                                         and isinstance(v, builtin_types)
                                     }
                                 )

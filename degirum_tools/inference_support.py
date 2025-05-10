@@ -130,7 +130,7 @@ from .video_support import (
     open_video_writer,
 )
 from .ui_support import Progress, Display, Timer
-from .result_analyzer_base import ResultAnalyzerBase
+from .result_analyzer_base import ResultAnalyzerBase, subclass_result_with_analyzers
 from . import environment as env
 
 
@@ -193,109 +193,6 @@ def connect_model_zoo(
     return zoo
 
 
-def _create_analyzing_postprocessor_class(
-    analyzers: Union[ResultAnalyzerBase, List[ResultAnalyzerBase], None],
-    model: Optional[dg.model.Model] = None,
-):
-    """
-    Internal helper to create a custom postprocessor class that applies a list of
-    analyzers to the original model inference results.
-
-    This class wraps the original result object, intercepts calls to ``image_overlay``,
-    and delegates the additional annotation steps to each analyzer.
-
-    Args:
-        analyzers (Union[ResultAnalyzerBase, List[ResultAnalyzerBase], None]):
-            A single analyzer or a list of analyzers, or None if no analyzer is to be attached.
-        model (dg.model.Model, optional):
-            The DeGirum model whose built-in postprocessor type will be used as a base.
-            If None, a dummy placeholder is used.
-
-    Returns:
-        (AnalyzingPostprocessor):
-            A dynamically created class that wraps the result object and
-            applies the analyzers in sequence.
-    """
-
-    class AnalyzingPostprocessor:
-        def __init__(self, *args, **kwargs):
-            if AnalyzingPostprocessor._postprocessor_type is not None:
-                # Create the underlying postprocessor from the determined type
-                self.__dict__["_result"] = AnalyzingPostprocessor._postprocessor_type(
-                    *args, **kwargs
-                )
-            else:
-                # If there's no known base type, assume the result is passed directly
-                self.__dict__["_result"] = kwargs.get("result")
-
-            # Apply all analyzers to the newly created or passed-in result
-            for analyzer in AnalyzingPostprocessor._analyzers:
-                analyzer.analyze(self)
-
-        @property
-        def image_overlay(self):
-            """
-            Retrieve the base overlay from the wrapped result object,
-            then sequentially apply each analyzer's annotation step.
-
-            Returns:
-                numpy.ndarray:
-                    The final annotated overlay image after all analyzers are applied.
-            """
-            img = self._result.image_overlay
-            if not isinstance(img, np.ndarray):
-                raise Exception(
-                    "Only OpenCV image backend is supported. Please set model.image_backend = 'opencv'"
-                )
-            # apply all analyzers to annotate overlay image
-            for analyzer in AnalyzingPostprocessor._analyzers:
-                img = analyzer.annotate(self._result, img)
-            return img
-
-        # delegate all other attributes to the wrapped postprocessor
-        def __getattr__(self, attr):
-            if "_result" in self.__dict__:
-                return getattr(self._result, attr)
-            else:
-                raise AttributeError("Attribute _result not found")
-
-        def __setattr__(self, attr, value):
-            if attr in self.__dict__ or attr == "_result":
-                super().__setattr__(attr, value)
-            else:
-                setattr(self._result, attr, value)
-
-        def __dir__(self):
-            # Combine the attributes of this wrapper with those of the wrapped result
-            return self._result.__dir__() + [
-                d for d in self._result.__dict__ if not d.startswith("_")
-            ]
-
-        # Store analyzers
-        _analyzers = (
-            analyzers
-            if isinstance(analyzers, list)
-            else ([analyzers] if analyzers is not None else [])
-        )
-        # Deduce postprocessor type from model
-        if model is not None:
-            # If a custom postprocessor is already attached, use that as the base type;
-            # otherwise, deduce from the model's known type for detection/classification, etc.
-            if model._custom_postprocessor is not None:
-                _postprocessor_type = model._custom_postprocessor
-                _was_custom = True
-            else:
-                _postprocessor_type = dg.postprocessor._inference_result_type(
-                    model._model_parameters
-                )()
-                _was_custom = False
-        else:
-            _postprocessor_type = None
-            _was_custom = False
-
-    return AnalyzingPostprocessor
-
-
 def attach_analyzers(
     model: Union[dg.model.Model, CompoundModelBase],
     analyzers: Union[ResultAnalyzerBase, List[ResultAnalyzerBase], None],
@@ -318,41 +215,33 @@ def attach_analyzers(
         attach_analyzers(my_model, MyAnalyzerSubclass())
 
     Notes:
-        - If ``model`` is a compound model,
-          the call is forwarded to `model.attach_analyzers()`.
-        - If ``model`` is a standard PySDK model, this function wraps the model's
-          built-in postprocessor with a new class that calls each analyzer
+        - If ``model`` is a compound model, the call is forwarded to `model.attach_analyzers()`.
+        - If ``model`` is a standard PySDK model, this function subclasses the model's
+          current result class with a new class that additionally calls each analyzer
           in turn for `analyze()` and `annotate()` steps.
+          This subclass is assigned to `model._custom_postprocessor` property.
     """
     if isinstance(model, CompoundModelBase):
         # For a compound model, forward directly
         model.attach_analyzers(analyzers)
     else:
-        # Create a dynamic wrapper postprocessor class
-        analyzing_postprocessor = _create_analyzing_postprocessor_class(
-            analyzers, model
-        )
-
         if analyzers:
-            # Attach the custom postprocessor to the model
-            model._custom_postprocessor = analyzing_postprocessor
+            # set model custom postprocessor as analyzing postprocessor, remembering the original custom postprocessor
+            result_class = subclass_result_with_analyzers(
+                model.get_inference_results_class(), analyzers
+            )
+            setattr(
+                result_class, "_custom_postprocessor_saved", model._custom_postprocessor
+            )
+            model._custom_postprocessor = result_class
         else:
-            # Remove the analyzing postprocessor if it was previously attached
-            if (
-                model._custom_postprocessor is not None
-                and isinstance(model._custom_postprocessor, type)
-                and model._custom_postprocessor.__name__
-                == analyzing_postprocessor.__name__
+            if model._custom_postprocessor is not None and hasattr(
+                model._custom_postprocessor, "_custom_postprocessor_saved"
             ):
-                for analyzer in model._custom_postprocessor._analyzers:
-                    analyzer.finalize()
-                model._custom_postprocessor._analyzers = None
-                if model._custom_postprocessor._was_custom:
-                    model._custom_postprocessor = (
-                        model._custom_postprocessor._postprocessor_type
-                    )
-                else:
-                    model._custom_postprocessor = None
+                # restore the original custom postprocessor
+                model._custom_postprocessor = (
+                    model._custom_postprocessor._custom_postprocessor_saved
+                )
 
 
 def predict_stream(
@@ -399,14 +288,16 @@ def predict_stream(
         # do something with annotated_img
     ```
     """
-    analyzing_postprocessor = _create_analyzing_postprocessor_class(analyzers)
+
+    if analyzers is not None:
+        attach_analyzers(model, analyzers)
 
     with open_video_stream(video_source_id) as stream:
         for res in model.predict_batch(video_source(stream, fps=fps)):
-            if analyzers is not None:
-                yield analyzing_postprocessor(result=res)
-            else:
-                yield res
+            yield res
+
+    if analyzers is not None:
+        attach_analyzers(model, None)  # detach analyzers after use
 
 
 def annotate_video(

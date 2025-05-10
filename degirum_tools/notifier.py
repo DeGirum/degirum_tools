@@ -219,22 +219,21 @@ class NotificationServer:
                 job.is_done = True
                 return
 
-            file_name = job.payload
-            parent_dir = os.path.basename(os.path.dirname(file_name))
-            filename_with_parent_dir = parent_dir + "/" + os.path.basename(file_name)
+            filepath = job.payload
+            filename = os.path.basename(filepath)
             url: Optional[str] = None
 
-            if do_upload and not os.path.exists(file_name):
+            if do_upload and not os.path.exists(filepath):
                 job.is_done = False  # no local file to upload yet: job is not done
                 return None
 
             try:
                 if do_upload:
                     storage.upload_file_to_object_storage(
-                        file_name, filename_with_parent_dir
+                        filepath, filename
                     )
-                    os.remove(file_name)  # remove local file after upload
-                url = storage.generate_presigned_url(filename_with_parent_dir)
+                    os.remove(filepath)  # remove local file after upload
+                url = storage.generate_presigned_url(filename)
 
             except Exception as e:
                 job.error = e
@@ -486,7 +485,7 @@ class EventNotifier(ResultAnalyzerBase):
         # instantiate clip saver if required
         if clip_save and storage_config:
             self._clip_path = tempfile.mkdtemp()
-            full_clip_prefix = self._clip_path + "/" + clip_sub_dir + "/"
+            full_clip_prefix = self._clip_path + (("/" + clip_sub_dir + "/") if clip_sub_dir else "/")
 
             self._clip_saver = ClipSaver(
                 clip_duration,

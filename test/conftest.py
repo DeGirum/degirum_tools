@@ -1,6 +1,6 @@
 #
 # conftest.py - DeGirum Tools: pytest configuration file
-# Copyright DeGirum Corp. 2024
+# Copyright DeGirum Corp. 2025
 #
 # Contains common pytest configuration and common test fixtures
 #
@@ -11,6 +11,26 @@ sys.path.insert(0, os.getcwd())
 
 import degirum as dg
 import degirum_tools
+import logging
+
+
+def pytest_addoption(parser):
+    """Add custom command line options for pytest"""
+
+    parser.addoption(
+        "--loglevel",
+        action="store",
+        default=None,
+        help="Set log level (e.g. DEBUG, INFO, WARNING)",
+    )
+
+
+def pytest_configure(config):
+    """Configure pytest with custom options"""
+
+    loglevel = config.getoption("--loglevel")
+    if loglevel:
+        dg.enable_default_logger(getattr(logging, loglevel.upper(), logging.ERROR))
 
 
 @pytest.fixture(scope="session")
