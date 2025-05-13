@@ -9,51 +9,84 @@
 """
 Line Count Module Overview
 ==========================
-This module provides functionality for detecting and counting objects as they cross predefined lines in video frames.
-It is often used in surveillance, traffic monitoring, or crowd analysis applications to detect the direction and frequency of objects crossing virtual boundaries.
+This module provides tools for detecting and counting objects as they cross user-defined lines within video frames. It is particularly suited for applications such as surveillance, traffic monitoring, and crowd management, where it is crucial to determine the direction and frequency of object crossings over virtual boundaries.
 
-Key Concepts:
-    - Line Definition: Lines defined by two endpoints.
-    - Object Trails: Tracks object movement paths.
-    - Directionality: Supports counting crossings relative to image or line orientation.
-    - Per-Class Counting: Counts can be maintained per object class.
-    - Overlay Annotations: Visualizes lines and counts on images.
+Key Features:
+    - **Flexible Line Definitions**: Lines are specified by two endpoints within the video frame.
+    - **Object Trail Tracking**: Uses tracked object paths to accurately detect crossings.
+    - **Directional Counting**: Counts crossings relative either to fixed image axes (up, down, left, right) or relative to the orientation of defined lines.
+    - **Class-Based Counting**: Optionally maintains crossing counts separately for different object classes.
+    - **Overlay Annotations**: Visualizes crossing lines and current count statistics directly on the video frames.
 
-Usage:
-    1. Define lines to monitor.
-    2. Initialize `LineCounter` with lines and options.
-    3. For each frame result, call `analyze()`.
-    4. Optionally draw overlays with `annotate()`.
-    5. Access counts via `line_counts` attribute in the results.
+Example Scenarios:
+    1. **Sports Ball Tracking**:
+       ```python
+       # Count how many times a ball crosses a goal line
+       counter = LineCounter(
+           lines=[(0, 300, 640, 300)],  # Goal line at y=300
+           absolute_directions=True
+       )
+       # Ball moving from (320, 200) to (320, 400) will increment bottom count
+       # Ball moving from (320, 400) to (320, 200) will increment top count
+       ```
 
-Class Summaries:
-    - `SingleLineCounts`: Holds individual directional counts (left, right, top, bottom) for a line.
-    - `LineCounts`: Extends `SingleLineCounts` by maintaining total counts and counts per class label.
-    - `SingleVectorCounts`: Holds directional counts (`left`, `right`) relative to a vector (line) direction.
-    - `VectorCounts`: Extends `SingleVectorCounts` with per-class counts.
-    - `LineCounter`: Main analyzer class that processes object trails, detects line crossings, maintains counts, and optionally annotates frames.
+    2. **Traffic Flow Analysis**:
+       ```python
+       # Count vehicles crossing a road section
+       counter = LineCounter(
+           lines=[(100, 200, 500, 200)],  # Road section
+           per_class_display=True,  # Separate counts for cars, trucks, etc.
+           absolute_directions=False  # Count relative to road direction
+       )
+       # Car moving from (200, 150) to (200, 250) will increment right count
+       # Truck moving from (400, 250) to (400, 150) will increment left count
+       ```
 
-Important Parameters for LineCounter:
-    - `lines`: List of lines to monitor. Each line is a tuple of four integers (x1, y1, x2, y2).
-    - `anchor_point`: Defines the bounding box anchor point for trail detection (e.g., bottom center).
-    - `whole_trail`: If True, considers the entire trail (start to end) for crossing detection; otherwise, only the last segment.
-    - `count_first_crossing`: When True, counts only the first crossing event per trail per line.
-    - `absolute_directions`: If True, counts directions relative to image axes (left, right, top, bottom). If False, counts are relative to line orientation.
-    - `accumulate`: If True, crossing counts accumulate over frames; otherwise, counts reset each frame.
-    - `per_class_display`: If True, maintains counts separately per object class for display.
-    - `show_overlay`: If True, draws crossing lines and counts onto images.
-    - `annotation_color` and `annotation_line_width`: Settings for displayed line color and thickness.
-    - `window_name`: OpenCV window name for interactive line adjustment.
+    3. **Crowd Movement Analysis**:
+       ```python
+       # Monitor people crossing a virtual boundary
+       counter = LineCounter(
+           lines=[(0, 240, 640, 240)],  # Horizontal boundary
+           anchor_point=AnchorPoint.BOTTOM_CENTER,  # Track feet position
+           count_first_crossing=True  # Count each person only once
+       )
+       # Person walking from (320, 200) to (320, 280) will increment bottom count
+       # Person walking from (320, 280) to (320, 200) will increment top count
+       ```
 
-Interactive Adjustments:
-    - `window_attach()` installs mouse callbacks for moving lines interactively.
+Typical Usage:
+    1. Define the set of lines to monitor within video frames.
+    2. Create a `LineCounter` instance with the specified lines and desired counting options.
+    3. For each processed frame, call the `analyze()` method with tracking results.
+    4. Optionally visualize counting results by invoking the `annotate()` method.
+    5. Retrieve and process crossing counts from the `line_counts` attribute in the analysis results.
 
-Note:
-This module depends on an upstream object tracker to provide consistent per-object trails.
-It integrates closely with `ObjectTracker` to get the tracked paths needed for crossing detection.
+Module Components:
+    - `SingleLineCounts`: Records directional counts (left, right, top, bottom) for absolute frame directions.
+    - `LineCounts`: Extends `SingleLineCounts` to include per-class counts.
+    - `SingleVectorCounts`: Tracks directional counts (left, right) relative to line orientation.
+    - `VectorCounts`: Extends `SingleVectorCounts` by providing per-class counting.
+    - `LineCounter`: Main analyzer class that processes tracked trails, detects crossings, updates counts, and optionally overlays annotations on frames.
 
-For detailed control of counts and interaction, refer to the `LineCounter` class method docstrings.
+Key Configuration Options for `LineCounter`:
+    - `lines`: List of line coordinates (each as (x1, y1, x2, y2)) to monitor for crossings.
+    - `anchor_point`: Bounding box anchor point (e.g., bottom center) used for evaluating crossings.
+    - `whole_trail`: Whether to consider the object's entire tracked path or just its latest segment for crossing detection.
+    - `count_first_crossing`: If True, each object contributes only once per line per tracking session.
+    - `absolute_directions`: Determines if counting uses absolute (frame-based) or relative (line-based) directional metrics.
+    - `accumulate`: If True, maintains cumulative counts across frames; otherwise resets each frame.
+    - `per_class_display`: Enables separate counting for each detected object class.
+    - `show_overlay`: Activates visual annotations of lines and counts on video frames.
+    - `annotation_color`, `annotation_line_width`: Customizes visual appearance of annotations.
+    - `window_name`: Associates an OpenCV window for interactive, real-time line adjustments.
 
+Interactive Line Adjustment:
+    - Use `LineCounter.window_attach(window_name)` to enable interactive dragging and adjustment of lines through mouse interactions.
+
+Dependencies:
+    This module requires tracked object trajectories from an external object tracking module, typically provided by the `ObjectTracker` class.
+
+For detailed usage instructions, examples, and parameter explanations, refer directly to individual class and method docstrings within this module.
 """
 import numpy as np, cv2
 from typing import List, Dict, Optional, Union, Any, Type
@@ -70,14 +103,19 @@ from .math_support import intersect, get_anchor_coordinates, AnchorPoint
 
 
 class SingleLineCounts:
-    """
-    Holds line crossing counts per direction.
+    """Holds counts of line crossings in four directions.
+
+    This class records the number of objects that crossed a line in each cardinal direction
+    relative to the frame: leftward, rightward, upward, and downward. It is typically used
+    within a `LineCounter` result to represent the counts for one monitored line when counting
+    with absolute directions.
 
     Attributes:
-        left (int): Count for left direction.
-        right (int): Count for right direction.
-        top (int): Count for top direction.
-        bottom (int): Count for bottom direction.
+        left (int): Number of objects crossing the line moving leftward (e.g., from right to left).
+        right (int): Number of objects crossing the line moving rightward (left to right).
+        top (int): Number of objects crossing the line moving upward (from bottom toward top).
+        bottom (int): Number of objects crossing the line moving downward (from top toward bottom).
+
     """
 
     def __init__(self):
@@ -115,11 +153,21 @@ class SingleLineCounts:
 
 
 class LineCounts(SingleLineCounts):
-    """
-    Extends SingleLineCounts to include counts per class label.
+    """Extends SingleLineCounts to include per-class crossing counts.
+
+    This class tracks line crossing counts with a breakdown by object class. In addition to the
+    total counts for all objects (inherited attributes left, right, top, bottom), it maintains
+    a dictionary of counts for each object class label. It is typically used by `LineCounter`
+    when `per_class_display=True` to provide class-specific crossing statistics for each line.
 
     Attributes:
-        for_class (Dict[str, SingleLineCounts]): Counts per object class.
+        left (int): Total number of objects crossing leftward (all classes combined).
+        right (int): Total number of objects crossing rightward (all classes combined).
+        top (int): Total number of objects crossing upward (all classes combined).
+        bottom (int): Total number of objects crossing downward (all classes combined).
+        for_class (Dict[str, SingleLineCounts]): Mapping from class label to a `SingleLineCounts`
+            object for that class. Each entry holds the counts of crossings for that specific object class.
+
     """
 
     def __init__(self):
@@ -137,11 +185,18 @@ class LineCounts(SingleLineCounts):
 
 
 class SingleVectorCounts:
-    """
-    Class to hold vector crossing counts.
-    In relation to a vector, "right" specifies crossing of a trail from the left side
-    to the right side of the vector, and "left" specifies crossing of a trail from the
-    right side to the left side of the vector.
+    """Holds counts of line crossings relative to a line's orientation.
+
+    This class is used for counting crossing events in the two opposite directions defined by a line
+    (as opposed to absolute frame directions). It measures how many objects crossed from one side of
+    the line to the other. Specifically, `right` represents crossings from the left side to the right
+    side of the line (following the line's direction vector), and `left` represents crossings from the
+    right side to the left side of the line. This is typically used by `LineCounter` when
+    `absolute_directions=False` (relative direction mode).
+
+    Attributes:
+        right (int): Count of objects crossing from the line's left side to its right side.
+        left (int): Count of objects crossing from the line's right side to its left side.
     """
 
     def __init__(self):
@@ -168,7 +223,20 @@ class SingleVectorCounts:
 
 
 class VectorCounts(SingleVectorCounts):
-    """Class to hold total vector crossing counts and counts for multiple classes"""
+    """Extends SingleVectorCounts to include per-class crossing counts.
+
+    This class maintains overall crossing counts for a line (relative to its orientation) and also
+    tracks counts per object class. It inherits the total `left` and `right` counts (for all objects)
+    from `SingleVectorCounts`, and adds a dictionary of per-class counts. It is typically used by
+    `LineCounter` when counting in relative mode with `per_class_display=True`.
+
+    Attributes:
+        left (int): Total number of objects crossing from the right side to the left side of the line (all classes).
+        right (int): Total number of objects crossing from the left side to the right side of the line (all classes).
+        for_class (Dict[str, SingleVectorCounts]): Mapping from class label to a `SingleVectorCounts`
+            object for that class. Each entry contains the left/right counts for objects of that specific class.
+
+    """
 
     def __init__(self):
         super().__init__()
@@ -185,15 +253,34 @@ class VectorCounts(SingleVectorCounts):
 
 
 class LineCounter(ResultAnalyzerBase):
-    """
-    Analyzer to count object trails crossing lines in video frames.
+    """Counts objects crossing specified lines in a video stream.
 
-    Checks tracked object trails (`result.trails`) against specified lines,
-    detects intersections, determines crossing direction, and updates counts.
+    This analyzer processes tracked object trajectories to detect and tally crossing events for each
+    predefined line. It monitors a list of user-defined lines and increments the appropriate count
+    whenever an object's trail crosses a line, determining the direction of each crossing event.
 
-    Direction counting can be relative to image axes (absolute) or line vectors (relative).
+    Key features:
+        - Supports absolute (frame-axis) mode counting in four directions, or relative (line-oriented)
+          mode counting in two directions.
+        - Options to use an object's entire trail versus just the latest segment for crossing detection
+          (`whole_trail`), and to count only the first crossing per object (`count_first_crossing`).
+        - Can accumulate counts over multiple frames or reset counts each frame (`accumulate` flag).
+        - Maintains counts for each line (as `LineCounts` in absolute mode or `VectorCounts` in relative mode)
+          and can breakdown counts by object class (if `per_class_display=True`).
+        - Provides an `annotate(image, result)` method to overlay the lines and current counts on video frames.
+        - Supports interactive line adjustment via an OpenCV window (see the `window_attach()` method).
 
-    Supports accumulation or per-frame counting, per-class counts, and overlay annotation.
+    After calling `analyze(result)` on a detection/tracking result, the `result` object is augmented with
+    a new attribute `line_counts`. This attribute is a list of count objects (one per line) representing
+    the crossing totals. Each element is either a `LineCounts` (for absolute directions) or `VectorCounts`
+    (for relative directions) instance. If `per_class_display` is enabled, each count object also contains
+    a `for_class` dictionary for per-class counts. Additionally, each detection entry in `result.results`
+    receives a boolean list `cross_line` indicating which lines that object's trail has crossed (True/False
+    for each monitored line).
+
+    Note:
+        This analyzer requires that object trajectories (trails) are available in the `result` (e.g.,
+        provided by an `ObjectTracker`), since counting is based on each object's movement across frames.
 
     """
 
@@ -213,7 +300,11 @@ class LineCounter(ResultAnalyzerBase):
         window_name: Optional[str] = None,
     ):
         """
-        Constructor.
+        Initialize a LineCounter with specified lines and counting options.
+
+        Creates a new line counter instance that will track object crossings over the specified lines.
+        The counter can operate in either absolute (frame-axis) or relative (line-oriented) counting modes,
+        and supports various options for trail analysis and visualization.
 
         Args:
             lines (List[tuple]): List of line coordinates, each as (x1, y1, x2, y2).
@@ -269,6 +360,13 @@ class LineCounter(ResultAnalyzerBase):
 
         Args:
             result (InferenceResults): Model result object containing trails and detection info.
+
+        Returns:
+            None: This method modifies the input result object in-place.
+
+        Raises:
+            AttributeError: If result object is missing required attributes.
+            TypeError: If result object is not of the expected type.
         """
         self._lazy_init()
         if not hasattr(result, "trails") or len(result.trails) == 0:
@@ -608,19 +706,19 @@ class LineCounter(ResultAnalyzerBase):
     @staticmethod
     def _mouse_callback(event: int, x: int, y: int, flags: int, self: Any):
         """
-        Mouse event callback for interactive polygon zone editing.
+        Mouse event callback for interactive line editing.
 
         Supports:
-        - Left-click and drag to move entire polygon.
-        - Right-click and drag to move individual vertices.
-        - Updates internal polygon state on changes.
+        - Left-click and drag to move entire line.
+        - Right-click and drag to move individual line endpoints.
+        - Updates internal line state on changes.
 
         Args:
             event (int): OpenCV mouse event code.
             x (int): X coordinate of the mouse event.
             y (int): Y coordinate of the mouse event.
             flags (int): Additional event flags.
-            self: Instance of ZoneCounter.
+            self: Instance of LineCounter.
         """
         click_point = np.array((x, y))
 

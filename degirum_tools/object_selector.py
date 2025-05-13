@@ -32,9 +32,9 @@ class ObjectSelectionStrategies(Enum):
     """
     Enumeration of object selection strategies.
 
-    Attributes:
-        HIGHEST_SCORE (int): Select objects with the highest confidence scores.
-        LARGEST_AREA (int): Select objects with the largest bounding-box area.
+    Members:
+        HIGHEST_SCORE (int): Selects objects with the highest confidence scores.
+        LARGEST_AREA (int): Selects objects with the largest bounding-box area.
     """
 
     HIGHEST_SCORE = 1  # select objects with highest score
@@ -43,20 +43,15 @@ class ObjectSelectionStrategies(Enum):
 
 class ObjectSelector(ResultAnalyzerBase):
     """
-    Selects and optionally tracks top-K objects per frame.
+    Selects the top-K detected objects per frame based on a specified strategy.
 
-    Inspects detection results and retains top-K based on strategy.
+    This analyzer examines the detection results for each frame and retains only the
+    top-K detections according to the chosen `ObjectSelectionStrategies` (e.g.,
+    highest confidence score or largest bounding-box area).
 
-    When tracking is enabled, maintains selections using track IDs,
-    expiring after tracking timeout.
-
-    Args:
-        top_k (int): Number of objects to select.
-        selection_strategy (ObjectSelectionStrategies): Ranking strategy.
-        use_tracking (bool): Enable tracking-based selection.
-        tracking_timeout (int): Frames to wait before dropping unseen object.
-        show_overlay (bool): Whether to draw rectangles around selected objects..
-        annotation_color (tuple, optional): RGB color for boxes.
+    When tracking is enabled, it uses object `track_id` information to continue
+    selecting the same objects across successive frames, removing an object from the
+    selection if it has not appeared for a certain number of frames (the tracking timeout).
     """
 
     @dataclass
@@ -88,13 +83,15 @@ class ObjectSelector(ResultAnalyzerBase):
         Constructor.
 
         Args:
-            top_k (int): Number of objects to select.
-            selection_strategy (ObjectSelectionStrategies): Strategy for ranking objects.
-            use_tracking (bool): If True, enables tracking-based selection: only objects with "track_id" are selected
-                (object tracker must precede this analyzer in the pipeline).
-            tracking_timeout (int): Number of frames to wait before removing an object from selection.
-            show_overlay (bool): If True, annotate image; if False, pass image through unchanged.
-            annotation_color (Optional[tuple]): Color to use for annotations; None to use complement of result overlay color.
+            top_k (int, optional): Number of objects to select. Default 1.
+            selection_strategy (ObjectSelectionStrategies, optional): Strategy for ranking objects. Default ObjectSelectionStrategies.HIGHEST_SCORE.
+            use_tracking (bool, optional): Whether to enable tracking-based selection. If True, only objects with a `track_id` field are selected (requires an ObjectTracker to precede this analyzer in the pipeline). Default True.
+            tracking_timeout (int, optional): Number of frames to wait before removing an object from selection if it is not detected. Default 30.
+            show_overlay (bool, optional): Whether to draw bounding boxes around selected objects on the output image. If False, the image is passed through unchanged. Default True.
+            annotation_color (tuple, optional): RGB color for annotation boxes. Default None (uses the complement of the result overlay color).
+
+        Raises:
+            ValueError: If an unsupported selection strategy is provided.
         """
         self._top_k = top_k
         self._selection_strategy = selection_strategy
@@ -109,11 +106,13 @@ class ObjectSelector(ResultAnalyzerBase):
         Select the top-K objects based on the configured strategy, updating the result.
 
         Uses tracking IDs to update selected objects when tracking is enabled.
-
         All other objects not selected are removed from results.
 
         Args:
             result (InferenceResults): Model result with detection information.
+
+        Returns:
+            None: The result object is modified in-place.
         """
 
         all_detections = result._inference_results
@@ -175,10 +174,10 @@ class ObjectSelector(ResultAnalyzerBase):
 
         Args:
             result (InferenceResults): The result containing selected objects.
-            image (np.ndarray): Image to annotate.
+            image (np.ndarray): Image to annotate, shape (H, W, 3) in RGB format.
 
         Returns:
-            np.ndarray: Annotated image.
+            np.ndarray: Annotated image, shape (H, W, 3) in RGB format.
         """
 
         if not self._show_overlay:

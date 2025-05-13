@@ -273,8 +273,25 @@ class _IDCounter:
 
 
 class STrack:
-    """
-    Class which represents one object track.
+    """Represents a single tracked object in the multi-object tracking system.
+
+    Each STrack holds the object's bounding box state, unique track identifier, detection confidence score,
+    and tracking status (e.g., new, tracked, lost, removed). A Kalman filter is used internally to predict
+    and update the object's state across frames.
+
+    Tracks are created when new objects are detected, updated when detections are matched to existing tracks,
+    and can be reactivated if a lost track matches a new detection. This class provides methods to manage
+    the lifecycle of a track (activation, update, reactivation) and utility functions for bounding box format conversion.
+
+    Attributes:
+        track_id (int): Unique ID for this track.
+        is_activated (bool): Whether the track has been activated (confirmed) at least once.
+        state (_TrackState): Current state of the track (New, Tracked, Lost, or Removed).
+        start_frame (int): Frame index when this track was first activated.
+        frame_id (int): Frame index of the last update for this track (last seen frame).
+        tracklet_len (int): Number of frames this track has been in the tracked state.
+        score (float): Detection confidence score for the most recent observation of this track.
+        obj_idx (int): Index of this object's detection in the frame's results list (used for internal bookkeeping).
     """
 
     def __init__(
@@ -284,13 +301,10 @@ class STrack:
         Constructor.
 
         Args:
-            tlwh (np.ndarray): Initial bounding box in *(x, y, w, h)* format
-                where *(x, y)* is the **top-left** corner.
-            score (float): Detector confidence for this object.
-            obj_idx (int): Zero-based index of the object’s class in the model’s
-                label set.
-            id_counter (_IDCounter): Shared counter used to generate globally
-                unique ``track_id`` values across all tracks.
+            tlwh (np.ndarray): Initial bounding box in (x, y, w, h) format, where (x, y) is the top-left corner.
+            score (float): Detection confidence score for this object.
+            obj_idx (int): Index of this object's detection in the current frame's results list.
+            id_counter (_IDCounter): Shared counter used to generate globally unique track_id values.
         """
 
         self.id_counter = id_counter
@@ -348,11 +362,14 @@ class STrack:
                 stracks[i].covariance = cov
 
     def activate(self, kalman_filter: _KalmanFilter, frame_id: int):
-        """Start a new tracklet
+        """Activates this track with an initial detection.
+
+        Initializes the track's state using the provided Kalman filter, assigns a new track ID,
+        and sets the track status to "Tracked".
 
         Args:
-            kalman_filter (_KalmanFilter): Kalman filter object to use
-            frame_id (int): current frame id
+            kalman_filter (_KalmanFilter): Kalman filter to associate with this track.
+            frame_id (int): Frame index at which the track is initialized.
         """
         self.kalman_filter = kalman_filter
         self.track_id = self.next_id()
@@ -368,13 +385,15 @@ class STrack:
         self.start_frame = frame_id
 
     def re_activate(self, new_track, frame_id: int, new_id: bool = False):
-        """
-        Reactivate lost track
+        """Reactivates a track that was previously lost, using a new detection.
+
+        Updates the track's state with the new detection's information and sets the state to "Tracked".
+        If new_id is True, a new track ID is assigned; otherwise, it retains the original ID.
 
         Args:
-            new_track (STrack): new tracklet to reactivate from
-            frame_id (int): current frame id
-            new_id (bool): True assign new ID
+            new_track (STrack): New track (detection) to merge into this lost track.
+            frame_id (int): Current frame index at which the track is reactivated.
+            new_id (bool, optional): Whether to assign a new ID to the track. Defaults to False.
         """
 
         assert self.kalman_filter is not None
@@ -393,12 +412,14 @@ class STrack:
         self.obj_idx = new_track.obj_idx
 
     def update(self, new_track, frame_id: int):
-        """
-        Update a matched track
+        """Updates this track with a new matched detection.
+
+        Incorporates the detection's bounding box and score into this track's state, updates the
+        Kalman filter prediction, and increments the track length. The track state is set to "Tracked".
 
         Args:
-            new_track (STrack): new tracklet to update from
-            frame_id (int): current frame id
+            new_track (STrack): The new detection track that matched this track.
+            frame_id (int): Current frame index for the update.
         """
 
         self.frame_id = frame_id
@@ -420,8 +441,10 @@ class STrack:
 
     @property
     def tlwh(self) -> np.ndarray:
-        """Get current position in bounding box format `(top left x, top left y,
-        width, height)`.
+        """Returns the track's current bounding box in (x, y, w, h) format.
+
+        Returns:
+            np.ndarray: Bounding box where (x, y) is the top-left corner.
         """
         if self.mean is None:
             return self._tlwh.copy()
@@ -432,8 +455,10 @@ class STrack:
 
     @property
     def tlbr(self) -> np.ndarray:
-        """Convert bounding box to format `(min x, min y, max x, max y)`, i.e.,
-        `(top left, bottom right)`.
+        """Returns the track's bounding box in corner format (x_min, y_min, x_max, y_max).
+
+        Returns:
+            np.ndarray: Bounding box in (x_min, y_min, x_max, y_max) format.
         """
         ret = self.tlwh
         ret[2:] += ret[:2]
@@ -441,8 +466,13 @@ class STrack:
 
     @staticmethod
     def tlwh_to_xyah(tlwh: np.ndarray) -> np.ndarray:
-        """Convert bounding box to format `(center x, center y, aspect ratio,
-        height)`, where the aspect ratio is `width / height`.
+        """Converts bounding box from (top-left x, y, width, height) to (center x, y, aspect ratio, height).
+
+        Args:
+            tlwh (np.ndarray): Bounding box in (x, y, w, h) format.
+
+        Returns:
+            np.ndarray: Bounding box in (center x, y, aspect ratio, height) format.
         """
         ret = np.asarray(tlwh).copy()
         ret[:2] += ret[2:] / 2
@@ -451,6 +481,14 @@ class STrack:
 
     @staticmethod
     def tlbr_to_tlwh(tlbr: np.ndarray) -> np.ndarray:
+        """Converts bounding box from (top-left, bottom-right) to (top-left, width, height).
+
+        Args:
+            tlbr (np.ndarray): Bounding box in (x1, y1, x2, y2) format.
+
+        Returns:
+            np.ndarray: Bounding box in (x, y, w, h) format.
+        """
         ret = np.asarray(tlbr).copy()
         ret[2:] -= ret[:2]
         return ret
@@ -875,31 +913,30 @@ class _Tracer:
 
 
 class ObjectTracker(ResultAnalyzerBase):
-    """
-    Class to track objects in video stream.
+    """Analyzer that tracks objects across frames in a video stream.
 
-    Analyzes the object detection `result` object passed to `analyze` method and, for each detected
-    object in the `result.results[]` list, keeps its frame-to-frame track, assigning that track a
-    unique track ID. Only objects belonging to the class list specified by the `class_list` constructor
-    parameter are tracked.
+    This analyzer assigns persistent IDs to detected objects, allowing them to be tracked from frame to frame. 
+    It uses the BYTETrack multi-object tracking algorithm to match current detections with existing tracks and 
+    manage track life cycles (creation of new tracks, updating of existing ones, and removal of lost tracks). 
+    Optionally, tracking can be restricted to specific object classes via the *class_list* parameter.
 
-    Updates each element of `result.results[]` list by adding the "track_id" key containing that unique
-    track ID.
+    After each call to `analyze()`, the input result's detections are augmented with a `"track_id"` field for 
+    object identity. If a trail length is specified (non-zero *trail_depth*), the result will also contain 
+    `trails` and `trail_classes` dictionaries: `trails` maps each track ID to a list of recent bounding box 
+    coordinates (the object's trail), and `trail_classes` maps each track ID to the object's class label. 
+    These facilitate drawing object paths and labeling them.
 
-    If the `trail_depth` constructor parameter is not zero, also adds `trails` dictionary to the
-    `result` object. This dictionary is keyed by track IDs and contains lists of (x1, y1, x2, y2)
-    coordinates of object bounding boxes for every active trail.
+    Functionality:
+        - Unique ID assignment: Provides a unique ID for each object and maintains that ID across frames.
+        - Class filtering: Ignores detections whose class is not in the specified *class_list*.
+        - Track retention buffer: Continues to track objects for *track_buffer* frames after they disappear.
+        - Trajectory history: Keeps a history of each object's movement up to *trail_depth* frames long.
+        - Overlay support: Can overlay track IDs and trails on frames for visualization.
 
-    Args:
-        class_list (list, optional): Classes to track; None tracks all.
-        track_thresh (float): Detection confidence threshold for activation.
-        track_buffer (int): Frames to buffer lost tracks.
-        match_thresh (float): IOU threshold for matching.
-        anchor_point (AnchorPoint): Anchor point for trail calculation.
-        trail_depth (int): Number of frames to keep trail history.
-        show_overlay (bool): Draw track annotations.
-        annotation_color (tuple, optional): Color for annotations.
-
+    Typical usage involves calling `analyze()` on each frame's detection results to update tracks, then 
+    `annotate()` to visualize or output the tracked results. For instance, in a video processing loop, use 
+    `tracker.analyze(detections)` followed by `tracker.annotate(detections, frame)` to maintain and display 
+    object tracks.
     """
 
     def __init__(
@@ -914,17 +951,17 @@ class ObjectTracker(ResultAnalyzerBase):
         show_overlay: bool = True,
         annotation_color: Optional[tuple] = None,
     ):
-        """Constructor
+        """Constructor.
 
         Args:
-            class_list (list, optional): list of classes to count; if None, all classes are counted
-            track_thresh (float, optional): Detection confidence threshold for track activation.
-            track_buffer (int, optional): Number of frames to buffer when a track is lost.
-            match_thresh (float, optional): IOU threshold for matching tracks with detections.
-            anchor_point (AnchorPoint, optional): bbox anchor point to be used for showing object trails
-            trail_depth (int, optional): number of frames in object trail to keep; 0 to disable tracing
-            show_overlay: if True, annotate image; if False, send through original image
-            annotation_color: Color to use for annotations, None to use complement to result overlay color
+            class_list (List[str], optional): List of object classes to track. If None, all detected classes are tracked.
+            track_thresh (float, optional): Detection confidence threshold for initiating a new track.
+            track_buffer (int, optional): Number of frames to keep a lost track before removing it.
+            match_thresh (float, optional): Intersection-over-union (IoU) threshold for matching detections to existing tracks.
+            anchor_point (AnchorPoint, optional): Anchor point on the bounding box used for trail visualization.
+            trail_depth (int, optional): Number of recent positions to keep for each track's trail. Set 0 to disable trail tracking.
+            show_overlay (bool, optional): If True, annotate the image; if False, return the original image.
+            annotation_color (Tuple[int, int, int], optional): RGB tuple to use for annotations. If None, a contrasting color is chosen automatically.
         """
         self._tracker = _ByteTrack(class_list, track_thresh, track_buffer, match_thresh)
         self._anchor_point = anchor_point
@@ -935,15 +972,19 @@ class ObjectTracker(ResultAnalyzerBase):
         )
 
     def analyze(self, result):
-        """
-        Perform tracking on the current result detections.
+        """Analyzes a detection result and maintains object tracks across frames.
 
-        Updates track_ids in the detections.
+        Matches the current frame's detections to existing tracks, assigns track IDs to each detection,
+        and updates or creates tracks as necessary. If trail_depth was set, this method also updates
+        each track's trail of past positions.
 
-        Maintains trails and trail classes if enabled.
+        The input result is updated in-place. Each detection in result.results receives a "track_id"
+        identifying its track. If trails are enabled, result.trails and result.trail_classes are updated
+        to reflect the current active tracks.
 
         Args:
-            result (InferenceResults): Model inference result.
+            result (InferenceResults): Model inference result for the current frame, containing
+                detected object bounding boxes and classes.
         """
         self._tracker.update(result)
         if self._tracer is None:
@@ -954,16 +995,18 @@ class ObjectTracker(ResultAnalyzerBase):
             result.trail_classes = deepcopy(self._tracer.trail_classes)
 
     def annotate(self, result, image: np.ndarray) -> np.ndarray:
-        """
-        Display track IDs inside bounding boxes on a given image if tracing is disabled, trails computed using
-        the specified bbox anchor point otherwise
+        """Draws tracking annotations on an image.
+
+        If trails are not being used, writes each object's track ID at its bounding box location.
+        If trails are enabled, draws each object's trajectory and labels the end with the object's
+        class name and track ID.
 
         Args:
-            result: PySDK result object to display (should be the same as used in analyze() method)
-            image (np.ndarray): image to display on
+            result (InferenceResults): The inference result that was previously analyzed.
+            image (np.ndarray): The image (in BGR format) on which to draw the annotations.
 
         Returns:
-            np.ndarray: annotated image
+            np.ndarray: The image with tracking annotations drawn.
         """
 
         if not self._show_overlay:

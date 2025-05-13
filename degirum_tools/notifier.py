@@ -8,13 +8,26 @@
 # It works with conjunction with EventDetector analyzer.
 #
 """
-Notification analyzer modules.
+Notification analyzer module.
 
-Implements `NotificationServer` for asynchronous sending of notifications
-and uploading files to object storage.
+Implements the `NotificationServer` for asynchronous notification delivery and file uploads,
+and the `EventNotifier` for triggering notifications (and optional clip saving) on events.
 
-Also implements `EventNotifier` which sends notifications and optionally
-saves video clips when events are triggered.
+Examples:
+    Basic notification setup:
+        server = NotificationServer("json://console", "Test Alert")
+        server.send_job(NotificationServer.Job.job_notification, "Test message")
+
+    Event notification with clip saving:
+        notifier = EventNotifier(
+            name="motion",
+            condition="motion_detected",
+            clip_save=True,
+            storage_config=storage_cfg
+        )
+
+Raises:
+    ImportError: If optional dependencies (e.g., apprise) are not installed.
 """
 import numpy as np, sys, multiprocessing, threading, time, os, queue, tempfile, shutil, datetime
 from typing import Tuple, List, Union, Optional, Dict
@@ -34,19 +47,23 @@ notification_config_console = "json://console"
 
 
 class NotificationServer:
-    """
-    Server to asynchronously send notifications and upload files.
+    """Server to asynchronously send notifications and upload files.
 
-    It runs as a background process handling jobs including file uploads,
-    notification sending, and referencing uploaded files.
+    Runs as a background process handling jobs such as uploading files,
+    sending notifications, and referencing previously uploaded files.
+
+    Attributes:
+        _job_queue (multiprocessing.Queue): Queue for sending jobs to the background process.
+        _response_queue (multiprocessing.Queue): Queue for receiving responses from the background process.
+        _process (multiprocessing.Process): Background process handling notifications.
 
     Jobs:
-        - job_file_upload: Upload a local file.
-        - job_file_reference: Reference an already uploaded file.
-        - job_notification: Send a notification with optional message.
+        * **job_file_upload** – Uploads a local file to object storage.
+        * **job_file_reference** – References a file that has already been uploaded (generates a link).
+        * **job_notification** – Sends a notification message via the configured service.
 
     Usage:
-        Instantiate with configuration, then send jobs with send_job().
+        Instantiate with the desired configuration, then send jobs using `send_job()`.
     """
 
     class DefaultDict(dict):
@@ -54,8 +71,16 @@ class NotificationServer:
             return f"{{{key}}}"  # Return the literal placeholder if key is missing
 
     class Job:
-        """
-        Notification server job base class.
+        """Encapsulates a notification job for the NotificationServer.
+
+        Attributes:
+            id (int): Unique job identifier.
+            job_type (str): Type of job (one of `job_file_upload`, `job_file_reference`, or `job_notification`).
+            payload (str): Job payload data (e.g., file path or message text, depending on the job type).
+            dependent (int or None): ID of another job that depends on this one (if any).
+            timestamp (float): Timestamp when the job was created.
+            is_done (bool): Indicates whether the job has completed.
+            error (Exception or None): Captured exception if an error occurred during processing.
         """
 
         _id: int = 0  # job ID counter
@@ -68,7 +93,7 @@ class NotificationServer:
 
         @staticmethod
         def new_id() -> int:
-            """Generate new job ID"""
+            """Generate a new job ID."""
             with NotificationServer.Job._lock:
                 NotificationServer.Job._id += 1
                 return NotificationServer.Job._id
@@ -76,13 +101,12 @@ class NotificationServer:
         def __init__(
             self, job_type: str, payload: str, dependent: Optional[int] = None
         ):
-            """
-            Constructor.
+            """Constructor.
 
             Args:
-                job_type: job type
-                payload: job payload (it is job-dependent)
-                dependent: job ID of the job which depends on this one
+                job_type (str): The job type.
+                payload (str): The job payload (content depends on the job type).
+                dependent (int, optional): Job ID of another job that should run after this one. Defaults to None.
             """
 
             self.id = NotificationServer.Job.new_id()  # job ID
@@ -101,15 +125,18 @@ class NotificationServer:
         storage_cfg: Optional[ObjectStorageConfig],
         pending_timeout_s: float = 5.0,
     ):
-        """
-        Constructor.
+        """Constructor.
 
         Args:
-            notification_cfg: path to the apprise configuration file or notification server URL in apprise format
-            notification_title: title of the notification
-            notification_tags: tags to use for cloud notifications
-            storage_cfg: object storage configuration for file uploads
-            pending_timeout_s: timeout for pending notifications and file uploads
+            notification_cfg (str, optional): Path to an Apprise configuration file or notification URL (Apprise format). If None, no external notification service is used.
+            notification_title (str, optional): Title for the notifications. If None, notifications are sent without a title.
+            notification_tags (str, optional): Tags to attach to notifications for filtering. If None, no tags are applied.
+            storage_cfg (ObjectStorageConfig, optional): Object storage configuration for uploading files (used for clip uploads). If None, file upload jobs are disabled.
+            pending_timeout_s (float, optional): Maximum time in seconds to wait for a job to complete before marking it as timed out. Default is 5.0 seconds.
+
+        Raises:
+            RuntimeError: If the notification server fails to initialize.
+            ImportError: If required optional packages (e.g., apprise) are not installed.
         """
 
         # create message queues and start child process
@@ -136,9 +163,7 @@ class NotificationServer:
             raise RuntimeError("Failed to initialize notification server")
 
     def _process_response_queue(self):
-        """
-        Process response queue to handle exceptions
-        """
+        """Process the internal response queue and log any exceptions."""
         logger = logger_get()
         while True:
             try:
@@ -149,18 +174,16 @@ class NotificationServer:
                 break
 
     def send_job(self, job_type, payload: str, dependent: Optional[int] = None):
-        """
-        Send job to notification server
+        """Queue a new job for the notification server.
 
         Args:
-            job_type: job type
-            payload: job payload
-            dependent: job ID of another job which depends on this one
+            job_type (str): The type of job to queue (use `NotificationServer.Job.job_*` constants).
+            payload (str): The job payload (e.g., file path for uploads or message text for notifications).
+            dependent (int, optional): ID of a job that should run after this job (to enforce order). Defaults to None.
 
         Returns:
-            job ID of posted job
+            int: The ID of the posted job.
         """
-
         job = NotificationServer.Job(job_type, payload, dependent)
         self._job_queue.put(job)
         self._process_response_queue()
@@ -176,8 +199,21 @@ class NotificationServer:
         storage_cfg: Optional[ObjectStorageConfig],
         pending_timeout_s: float,
     ):
-        """
-        Process commands from the queue. Runs in separate process.
+        """Process commands from the queue in a separate process.
+
+        This method runs in a background process and handles all notification and file upload jobs.
+        It maintains job state, handles dependencies between jobs, and manages timeouts.
+        The process creates background threads for file uploads, sends notifications via configured
+        services, and manages temporary files and cleanup.
+
+        Args:
+            job_queue (multiprocessing.Queue): Queue for receiving jobs from the main process.
+            response_queue (multiprocessing.Queue): Queue for sending responses back to the main process.
+            notification_cfg (str | None): Notification service configuration.
+            notification_title (str | None): Title for notifications.
+            notification_tags (str | None): Tags for notifications.
+            storage_cfg (ObjectStorageConfig | None): Storage configuration for file uploads.
+            pending_timeout_s (float): Timeout duration for pending jobs.
         """
 
         response_queue.put(True)  # to indicate that the child process is ready
@@ -236,21 +272,22 @@ class NotificationServer:
                 job.is_done = True
                 return
 
-            filepath = job.payload
-            filename = os.path.basename(filepath)
+            file_name = job.payload
+            parent_dir = os.path.basename(os.path.dirname(file_name))
+            filename_with_parent_dir = parent_dir + "/" + os.path.basename(file_name)
             url: Optional[str] = None
 
-            if do_upload and not os.path.exists(filepath):
+            if do_upload and not os.path.exists(file_name):
                 job.is_done = False  # no local file to upload yet: job is not done
                 return None
 
             try:
                 if do_upload:
                     storage.upload_file_to_object_storage(
-                        filepath, filename
+                        file_name, filename_with_parent_dir
                     )
-                    os.remove(filepath)  # remove local file after upload
-                url = storage.generate_presigned_url(filename)
+                    os.remove(file_name)  # remove local file after upload
+                url = storage.generate_presigned_url(filename_with_parent_dir)
 
             except Exception as e:
                 job.error = e
@@ -368,7 +405,12 @@ class NotificationServer:
             pending_jobs = {k: v for k, v in pending_jobs.items() if not v.is_done}
 
     def terminate(self):
-        """Send the poison pill to stop the child process"""
+        """Sends a poison pill to stop the child process.
+
+        Raises:
+            RuntimeError: If the process termination fails.
+            Exception: Any exception that occurs during response queue processing.
+        """
         if self._process is not None:
             self._job_queue.put(None)
             self._process.join()
@@ -381,39 +423,17 @@ class NotificationServer:
 
 
 class EventNotifier(ResultAnalyzerBase):
-    """
-    Analyzer to generate notifications based on triggered events.
+    """Analyzer for event-based notifications.
 
-    Works together with `EventDetector`, analyzing `events_detected` set
-    on `result` object.
-
-    Generates notifications when a user-defined condition based on event triggers is met.
+    Works in conjunction with an `EventDetector` analyzer by examining the `events_detected` set in the inference results.
+    Generates notifications when user-defined event conditions are met.
 
     Features:
-        - Message formatting using Python format strings.
-        - Holdoff suppresses repeated notifications within specified frame or time window.
-        - Optional video clip saving on notification trigger with uploads to object storage.
-        - Overlay annotation of active notifications on images.
-
-    Args:
-        name (str): Notification name.
-        condition (str): Python expression evaluating event names.
-        message (str, optional): Notification message format string.
-        holdoff (int, float or tuple, optional): Holdoff time in frames or seconds.
-        notification_config (str, optional): Notification config file or service URL.
-        notification_tags (str, optional): Tags to use for cloud notifications.
-        show_overlay (bool, optional): Annotate images if True.
-        annotation_color (tuple, optional): Color for annotations.
-        annotation_font_scale (float, optional): Font scale.
-        annotation_pos (AnchorPoint|tuple|list, optional): Position of annotation.
-        annotation_cool_down (float, optional): Annotation display duration in seconds.
-        clip_save (bool, optional): Save video clips on notification trigger.
-        clip_sub_dir (str, optional): Subdirectory for clip files.
-        clip_duration (int, optional): Clip length in frames.
-        clip_pre_trigger_delay (int, optional): Frames to include before trigger.
-        clip_embed_ai_annotations (bool, optional): Embed AI overlays in clip.
-        clip_target_fps (float, optional): Clip frame rate.
-        storage_config (ObjectStorageConfig, optional): Object storage config for clip uploads.
+        * Message formatting using Python format strings (e.g., `{result}` for inference results)
+        * Holdoff to suppress repeat notifications within a specified time/frame window
+        * Optional video clip saving upon notification trigger (with upload to object storage)
+        * Records triggered notifications in the result object's `notifications` dictionary
+        * Overlay annotation of active notification status on images
     """
 
     key_notifications = "notifications"  # extra result key
@@ -442,39 +462,31 @@ class EventNotifier(ResultAnalyzerBase):
         clip_target_fps: float = 30.0,
         storage_config: Optional[ObjectStorageConfig] = None,
     ):
-        """
-        Constructor.
+        """Constructor.
 
         Args:
-            name: name of the notification event
-            condition: condition to trigger notification; may be any valid Python expression, referencing
-                event names, as generated by preceding EventDetector analyzers.
-            holdoff: holdoff time to suppress repeated notifications; it is either integer holdoff value in frames,
-                floating-point holdoff value in seconds, or a tuple in a form (holdoff, unit), where unit is either
-                "seconds" or "frames".
-            message: message to display in the notification; may be valid Python format string, in which you can use
-                `{result}` placeholder with any valid derivatives to access current inference result and its attributes.
-                For example: "Objects detected: {result.results}"
-            notification_config: optional configuration of cloud notification service:
-                it can be path to the configuration file for notification service
-                or single notification service URL (see [https://github.com/caronc/apprise])
-            notification_tags: optional tags to use for cloud notifications
-                Tags can be separated by "and" (or commas) and "or" (or spaces).
-                For example:
-                "Tag1, Tag2" (equivalent to "Tag1 and Tag2"
-                "Tag1 Tag2" (equivalent to "Tag1 or Tag2")
-            show_overlay: if True, annotate image; if False, send through original image
-            annotation_color: Color to use for annotations, None to use complement to result overlay color
-            annotation_font_scale: font scale to use for annotations or None to use model default
-            annotation_pos: position to place annotation text (either predefined point or (x,y) tuple)
-            annotation_cool_down: time in seconds to keep notification on the screen
-            clip_save: if True, save video clips when notification is triggered
-            clip_sub_dir: the name of subdirectory in the bucket for video clip files
-            clip_duration: duration of the video clip to save (in frames)
-            clip_pre_trigger_delay: delay before the event to start clip saving (in frames)
-            clip_embed_ai_annotations: True to embed AI inference annotations into video clip, False to use original image
-            clip_target_fps: target frames per second for saved videos
-            storage_config: The object storage configuration (to save video clips)
+            name (str): Name of the notification.
+            condition (str): Python expression defining the condition to trigger the notification (references event names from `EventDetector`).
+            message (str, optional): Notification message format string. If empty, uses "Notification triggered: {name}". Default is "".
+            holdoff (int | float | Tuple[float, str], optional): Holdoff duration to suppress repeated notifications. If int, interpreted as frames; if float, as seconds; if tuple (value, "seconds"/"frames"), uses the specified unit. Default is 0 (no holdoff).
+            notification_config (str, optional): Notification service config file path or Apprise URL. If None, notifications are not sent to any external service.
+            notification_tags (str, optional): Tags to attach to notifications for filtering. Multiple tags can be separated by commas (for logical AND) or spaces (for logical OR).
+            show_overlay (bool, optional): Whether to overlay notification text on images. Default is True.
+            annotation_color (tuple, optional): RGB color for the annotation text background. If None, uses a complementary color to the result overlay.
+            annotation_font_scale (float, optional): Font scale for the annotation text. If None, uses the default model font scale.
+            annotation_pos (AnchorPoint | Tuple[int, int] | List[int], optional): Position to place annotation text (either an AnchorPoint or an (x,y) coordinate). Default is AnchorPoint.BOTTOM_LEFT.
+            annotation_cool_down (float, optional): Time in seconds to display the notification text on the image. Default is 3.0.
+            clip_save (bool, optional): If True, save a video clip when the notification triggers. Default is False.
+            clip_sub_dir (str, optional): Subdirectory name in the storage bucket for saved clips. Default is "" (no subdirectory).
+            clip_duration (int, optional): Length of the saved video clip in frames. Default is 0 (uses available frames around event).
+            clip_pre_trigger_delay (int, optional): Number of frames to include before the trigger event in the saved clip. Default is 0.
+            clip_embed_ai_annotations (bool, optional): If True, embed AI annotations in the saved clip. Default is True.
+            clip_target_fps (float, optional): Frame rate (FPS) for the saved video clip. Default is 30.0.
+            storage_config (ObjectStorageConfig, optional): Object storage configuration for uploading clips. If None, clips are only saved locally.
+
+        Raises:
+            ValueError: If holdoff unit is not "seconds" or "frames".
+            ImportError: If required optional packages are not installed.
         """
 
         self._frame = 0
@@ -523,7 +535,7 @@ class EventNotifier(ResultAnalyzerBase):
         # instantiate clip saver if required
         if clip_save and storage_config:
             self._clip_path = tempfile.mkdtemp()
-            full_clip_prefix = self._clip_path + (("/" + clip_sub_dir + "/") if clip_sub_dir else "/")
+            full_clip_prefix = self._clip_path + "/" + clip_sub_dir + "/"
 
             self._clip_saver = ClipSaver(
                 clip_duration,
@@ -545,18 +557,20 @@ class EventNotifier(ResultAnalyzerBase):
             )
 
     def analyze(self, result):
-        """
-        Evaluate the notification condition on the given inference result.
+        """Evaluate the notification condition on the given inference result.
 
-        If the condition is met and not suppressed by holdoff,
-        generate notification message stored in `result.notifications`.
-
-        Optionally save video clips when notification triggers, and schedule uploads.
+        If the condition is satisfied (and not within a holdoff period), generates a notification message and stores it in `result.notifications`.
+        Optionally saves a video clip when a notification is triggered, and schedules that clip for upload if storage is configured.
 
         Args:
-            result (InferenceResults): Inference result object.
-        """
+            result (InferenceResults): The inference result to analyze, which should include events detected by an `EventDetector`.
 
+        Returns:
+            None
+
+        Raises:
+            AttributeError: If the result does not contain events_detected (EventDetector not in chain).
+        """
         if not hasattr(result, EventDetector.key_events_detected):
             raise AttributeError(
                 "Detected events info is not available in the result: insert EventDetector analyzer in a chain"
@@ -633,19 +647,17 @@ class EventNotifier(ResultAnalyzerBase):
         self._frame += 1
 
     def annotate(self, result, image: np.ndarray) -> np.ndarray:
-        """
-        Annotate the image to display active notifications.
+        """Draws the active notification message on the image.
 
-        Displays the notification message if the notification is active and within cool-down time.
+        Only draws the message if the notification is currently active and within its cool-down period.
 
         Args:
-            result (InferenceResults): Result object with notifications.
-            image (np.ndarray): Image to annotate.
+            result (InferenceResults): The inference result object (may contain a notification entry).
+            image (np.ndarray): The image frame (BGR format) to annotate.
 
         Returns:
-            np.ndarray: Annotated image.
+            np.ndarray: The annotated image.
         """
-
         if not self._show_overlay:
             return image
 
@@ -693,11 +705,9 @@ class EventNotifier(ResultAnalyzerBase):
         )
 
     def finalize(self):
-        """
-        Finalize and clean up resources.
+        """Finalize and clean up resources.
 
-        Blocks until clip saver threads are finished, terminates notification server,
-        and deletes temporary clip directory if used.
+        Waits for all background clip-saving threads to finish, stops the notification server, and removes the temporary clip directory if it was used.
         """
         if self._clip_save:
             self._clip_saver.join_all_saver_threads()
