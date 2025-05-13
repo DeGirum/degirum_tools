@@ -915,15 +915,15 @@ class _Tracer:
 class ObjectTracker(ResultAnalyzerBase):
     """Analyzer that tracks objects across frames in a video stream.
 
-    This analyzer assigns persistent IDs to detected objects, allowing them to be tracked from frame to frame. 
-    It uses the BYTETrack multi-object tracking algorithm to match current detections with existing tracks and 
-    manage track life cycles (creation of new tracks, updating of existing ones, and removal of lost tracks). 
+    This analyzer assigns persistent IDs to detected objects, allowing them to be tracked from frame to frame.
+    It uses the BYTETrack multi-object tracking algorithm to match current detections with existing tracks and
+    manage track life cycles (creation of new tracks, updating of existing ones, and removal of lost tracks).
     Optionally, tracking can be restricted to specific object classes via the *class_list* parameter.
 
-    After each call to `analyze()`, the input result's detections are augmented with a `"track_id"` field for 
-    object identity. If a trail length is specified (non-zero *trail_depth*), the result will also contain 
-    `trails` and `trail_classes` dictionaries: `trails` maps each track ID to a list of recent bounding box 
-    coordinates (the object's trail), and `trail_classes` maps each track ID to the object's class label. 
+    After each call to `analyze()`, the input result's detections are augmented with a `"track_id"` field for
+    object identity. If a trail length is specified (non-zero *trail_depth*), the result will also contain
+    `trails` and `trail_classes` dictionaries: `trails` maps each track ID to a list of recent bounding box
+    coordinates (the object's trail), and `trail_classes` maps each track ID to the object's class label.
     These facilitate drawing object paths and labeling them.
 
     Functionality:
@@ -933,9 +933,9 @@ class ObjectTracker(ResultAnalyzerBase):
         - Trajectory history: Keeps a history of each object's movement up to *trail_depth* frames long.
         - Overlay support: Can overlay track IDs and trails on frames for visualization.
 
-    Typical usage involves calling `analyze()` on each frame's detection results to update tracks, then 
-    `annotate()` to visualize or output the tracked results. For instance, in a video processing loop, use 
-    `tracker.analyze(detections)` followed by `tracker.annotate(detections, frame)` to maintain and display 
+    Typical usage involves calling `analyze()` on each frame's detection results to update tracks, then
+    `annotate()` to visualize or output the tracked results. For instance, in a video processing loop, use
+    `tracker.analyze(detections)` followed by `tracker.annotate(detections, frame)` to maintain and display
     object tracks.
     """
 
