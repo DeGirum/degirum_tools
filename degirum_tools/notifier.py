@@ -96,9 +96,9 @@ class NotificationServer:
         _process (multiprocessing.Process): Background process handling notifications.
 
     Jobs:
-        * **job_file_upload** – Uploads a local file to object storage.
-        * **job_file_reference** – References a file that has already been uploaded (generates a link).
-        * **job_notification** – Sends a notification message via the configured service.
+        * **job_file_upload**: Uploads a local file to object storage.
+        * **job_file_reference**: References a file that has already been uploaded (generates a link).
+        * **job_notification**: Sends a notification message via the configured service.
 
     Usage:
         Instantiate with the desired configuration, then send jobs using `send_job()`.
