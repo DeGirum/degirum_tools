@@ -220,7 +220,7 @@ def ZoneCount(result, params):
             aggregation (str): Aggregation function to apply across zones. One of 'sum', 'max', 'min', 'mean', 'std'. Defaults to 'sum'.
 
     Returns:
-        int or float: Total count of matching objects in the selected zone(s).
+        Union[int, float]: Total count of matching objects in the selected zone(s).
 
     Raises:
         AttributeError: If `result.zone_counts` is missing (no ZoneCounter applied upstream).
@@ -278,7 +278,7 @@ def LineCount(result, params):
             directions (List[str]): Directions of crossing to include. One of 'left', 'right', 'top', 'bottom'. If None, all directions are counted.
 
     Returns:
-        int: Number of line-crossing events that match the specified filters.
+        count (int): Number of line-crossing events that match the specified filters.
 
     Raises:
         AttributeError: If `result.line_counts` is missing (no LineCounter applied upstream).
@@ -352,7 +352,7 @@ def ObjectCount(result, params):
             min_score (float): Minimum confidence score required for counting. If None, no score threshold is applied.
 
     Returns:
-        int: Number of detected objects that meet the specified class and score criteria.
+        count (int): Number of detected objects that meet the specified class and score criteria.
     """
 
     classes = None
@@ -495,7 +495,7 @@ class EventDetector(ResultAnalyzerBase):
             result (InferenceResults): The inference result to analyze (must contain necessary metrics from prior analyzers).
 
         Returns:
-            None: This method modifies the `result` in-place by adding to its `events_detected` attribute.
+            (None): This method modifies the `result` in-place by adding to its `events_detected` attribute.
 
         Raises:
             AttributeError: If the required metric data is missing in `result` (e.g., using ZoneCount without attaching `ZoneCounter`).

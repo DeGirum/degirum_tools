@@ -220,7 +220,7 @@ class NotificationServer:
             dependent (int, optional): ID of a job that should run after this job (to enforce order). Defaults to None.
 
         Returns:
-            int: The ID of the posted job.
+            id (int): The ID of the posted job.
         """
         job = NotificationServer.Job(job_type, payload, dependent)
         self._job_queue.put(job)
@@ -598,12 +598,13 @@ class EventNotifier(ResultAnalyzerBase):
 
         If the condition is satisfied (and not within a holdoff period), generates a notification message and stores it in `result.notifications`.
         Optionally saves a video clip when a notification is triggered, and schedules that clip for upload if storage is configured.
+        This method modifies the input result object in-place.
 
         Args:
             result (InferenceResults): The inference result to analyze, which should include events detected by an `EventDetector`.
 
         Returns:
-            None
+            (None): This method modifies the input result object in-place.
 
         Raises:
             AttributeError: If the result does not contain events_detected (EventDetector not in chain).

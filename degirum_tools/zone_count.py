@@ -344,6 +344,9 @@ class ZoneCounter(ResultAnalyzerBase):
         Args:
             result (InferenceResults): Inference result to analyze and augment with zone information.
 
+        Returns:
+            (None): This method modifies the input result object in-place.
+
         Raises:
             AttributeError: If result object is missing required attributes.
             TypeError: If result object is not of the expected type.

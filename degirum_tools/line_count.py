@@ -329,7 +329,7 @@ class LineCounter(ResultAnalyzerBase):
             result (InferenceResults): Model result object containing trails and detection info.
 
         Returns:
-            None: This method modifies the input result object in-place.
+            (None): This method modifies the input result object in-place.
 
         Raises:
             AttributeError: If result object is missing required attributes.
@@ -440,7 +440,7 @@ class LineCounter(ResultAnalyzerBase):
             image (np.ndarray): BGR image to annotate.
 
         Returns:
-            np.ndarray: Annotated image.
+            image (np.ndarray): Annotated image.
         """
         if not self._show_overlay or not hasattr(result, "line_counts"):
             return image
