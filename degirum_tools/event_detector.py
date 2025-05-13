@@ -1,40 +1,51 @@
 #
 # event_detector.py: event detector analyzer
 #
-# Copyright DeGirum Corporation 2024
+# Copyright DeGirum Corporation 2025
 # All rights reserved
 # Implements analyzer class to detect various events by analyzing inference results
 #
 
 """
-Event Detector Analyzer
-=======================
+Event Detector Analyzer Module Overview
+====================================
 
-This module provides [`EventDetector`](#eventdetector), a **result-post-processing analyzer**
-that converts outputs from analyzers (e.g., zone counters, line counters) into high-level,
-human-readable "events."
+This module provides an analyzer (`EventDetector`) for converting analyzer outputs into high-level,
+human-readable events. It enables detection of complex temporal patterns and conditions based on
+metrics from other analyzers like zone counters and line counters.
 
-Typical use cases include:
-    - Raising "PersonInZone" event when a person stays inside a ROI for N seconds.
-    - Firing "VehicleCountExceeded" event when the count exceeds a threshold.
-    - Detecting complex temporal patterns by combining multiple analyzers.
+Key Features:
+    - **Metric-Based Events**: Convert analyzer metrics into meaningful events
+    - **Temporal Patterns**: Detect conditions that must hold for specific durations
+    - **Complex Conditions**: Combine multiple metrics with logical operators
+    - **Data-Driven**: Configure events using YAML or dictionary definitions
+    - **Ring Buffer**: Internal state management for temporal conditions
+    - **Integration Support**: Works with any analyzer that produces metrics
+    - **Schema Validation**: Ensures event definitions match required format
 
-The analyzer is data-driven: behavior is described by a YAML or dict matching the schema defined
-in `event_definition_schema`.
+Typical Usage:
+    1. Configure auxiliary analyzers (e.g., ZoneCounter, LineCounter) for required metrics
+    2. Create an EventDetector instance with event definitions
+    3. Attach it to a model or compound model
+    4. Access detected events via result.events_detected
+    5. Use EventNotifier for event-based notifications
 
-Integration pattern:
-    1. Attach auxiliary analyzers (e.g., `ZoneCounter`, `LineCounter`) so the required metrics are present.
-    2. Create an `EventDetector` with a YAML description.
-    3. Attach it to a model or compound model.
-    4. Downstream components inspect `result.events_detected` or use `EventNotifier`.
+Integration Notes:
+    - Requires metrics from other analyzers to be present in results
+    - Event definitions must match the event_definition_schema
+    - Supports both YAML and dictionary-based configuration
+    - Events are stored in result.events_detected for downstream use
 
-Key Concepts:
-    - Metric: scalar number extracted from `InferenceResults` (zone count, line count, etc.)
-    - Comparator: operator for comparing the metric with a threshold
-    - Temporal window: duration over which the metric is evaluated
-    - Quantifier: duration or proportion the condition must hold to trigger the event
+Key Classes:
+    - `EventDetector`: Main analyzer class for detecting events
+    - `EventDefinitionSchema`: Schema for validating event definitions
 
-All timing logic is handled internally using a ring-buffer; no external state is required.
+Configuration Options:
+    - `event_definitions`: YAML file or dictionary containing event definitions
+    - `metrics`: Dictionary mapping metric names to their sources
+    - `temporal_window`: Default duration for evaluating conditions
+    - `quantifier`: Default proportion/duration for event triggers
+    - `comparator`: Default operator for comparing metrics to thresholds
 """
 
 import numpy as np
@@ -393,12 +404,15 @@ class EventDetector(ResultAnalyzerBase):
     ):
         """Initializes an EventDetector with a given event description and overlay settings.
 
-        The `event_description` defines the event's trigger name, metric, comparison, and timing requirements. It can be provided as a YAML string or an equivalent dictionary and must conform to the expected schema (`event_definition_schema`). In general, the description includes:
-          - **Trigger**: Name of the event to detect.
-          - **when**: Metric to evaluate (one of "ZoneCount", "LineCount", "ObjectCount", or "Custom").
-          - **Comparator**: A comparison operator (e.g., "is greater than") with a threshold value.
-          - **during**: Duration of the sliding window as `[value, unit]` (unit can be "frames" or "seconds").
-          - **for at least** / **for at most** (optional): Required proportion or count of the window that the condition must hold true to trigger the event.
+        The `event_description` defines the event's trigger name, metric, comparison, and timing requirements. It can be provided as a YAML string or an equivalent dictionary and must conform to the expected schema (`event_definition_schema`).
+
+        The description includes these key components:
+
+        - Trigger: Name of the event to detect
+        - when: Metric to evaluate (one of "ZoneCount", "LineCount", "ObjectCount", or "Custom")
+        - Comparator: A comparison operator (e.g., "is greater than") with a threshold value
+        - during: Duration of the sliding window as [value, unit] (unit can be "frames" or "seconds")
+        - for at least / for at most (optional): Required proportion or count of the window that the condition must hold true to trigger the event
 
         Args:
             event_description (Union[str, dict]): YAML string or dictionary specifying the event conditions (format must match the schema).

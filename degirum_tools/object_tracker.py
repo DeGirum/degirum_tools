@@ -1,7 +1,7 @@
 #
 # object_tracker.py: multi-object tracker
 #
-# Copyright DeGirum Corporation 2023
+# Copyright DeGirum Corporation 2025
 # All rights reserved
 #
 # Implements classes for multi-object tracking
@@ -31,18 +31,46 @@
 # SOFTWARE.
 
 """
-Object Tracker Module Overview
-==============================
+Object Tracker Analyzer Module Overview
+====================================
 
 Implements multi-object tracking using [BYTETrack algorithm](https://github.com/ifzhang/ByteTrack).
 
-Provides consistent track IDs for detected objects across frames,
-supporting trails visualization and integration with counting analyzers.
+Key Features:
+    - **Persistent Object Identity**: Maintains consistent track IDs across frames
+    - **Class Filtering**: Optionally tracks only specified object classes
+    - **Track Lifecycle Management**: Handles track creation, updating, and removal
+    - **Trail Visualization**: Records and displays object movement history
+    - **Track Retention**: Configurable buffer for handling temporary object disappearances
+    - **Visual Overlay**: Displays track IDs and optional trails on frames
+    - **Integration Support**: Provides track IDs for downstream analyzers (e.g., zone counting, line crossing)
 
-Key classes:
-    - STrack: Represents single track with state
-    - ObjectTracker: exposed analyzer integrating above functionality
+Typical Usage:
+    1. Create an `ObjectTracker` instance with desired tracking parameters
+    2. Process each frame's detection results through the tracker
+    3. Access track IDs and trails from the augmented results
+    4. Optionally visualize tracking results using the annotate method
+    5. Use track IDs in downstream analyzers for advanced analytics
 
+Integration Notes:
+    - Requires detection results with bounding boxes and confidence scores
+    - Track IDs are added to detection results as `track_id` field
+    - Trail information is stored in `trails` and `trail_classes` dictionaries
+    - Works effectively with zone counting and line crossing analyzers
+    - Supports both frame-based and time-based track retention
+
+Key Classes:
+    - `STrack`: Internal class representing a single tracked object with state
+    - `ObjectTracker`: Main analyzer class that processes detections and maintains tracks
+
+Configuration Options:
+    - `class_list`: Filter tracking to specific object classes
+    - `track_thresh`: Confidence threshold for initiating new tracks
+    - `track_buffer`: Frames to retain tracks after object disappearance
+    - `match_thresh`: IoU threshold for matching detections to existing tracks
+    - `trail_depth`: Number of recent positions to keep for trail visualization
+    - `show_overlay`: Enable/disable visual annotations
+    - `annotation_color`: Customize overlay appearance
 """
 
 import cv2, numpy as np, scipy.linalg

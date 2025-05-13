@@ -1,33 +1,71 @@
 #
 # notifier.py: notification analyzer
 #
-# Copyright DeGirum Corporation 2024
+# Copyright DeGirum Corporation 2025
 # All rights reserved
 #
 # Implements analyzer class to generate notifications based on triggered events.
 # It works with conjunction with EventDetector analyzer.
 #
 """
-Notification analyzer module.
+Notification Analyzer Module Overview
+====================================
 
-Implements the `NotificationServer` for asynchronous notification delivery and file uploads,
-and the `EventNotifier` for triggering notifications (and optional clip saving) on events.
+This module provides tools for generating and delivering notifications based on AI inference events.
+It implements two main components: `NotificationServer` for asynchronous notification delivery and file uploads,
+and `EventNotifier` for triggering notifications (and optional clip saving) on events.
 
-Examples:
-    Basic notification setup:
-        server = NotificationServer("json://console", "Test Alert")
-        server.send_job(NotificationServer.Job.job_notification, "Test message")
+Key Features:
+    - **Asynchronous Notification Delivery**: Background process handles notification sending and file uploads
+    - **Multiple Notification Channels**: Supports various notification services via Apprise integration
+    - **Event-Based Triggers**: Generates notifications when user-defined event conditions are met
+    - **Message Formatting**: Supports Python format strings for dynamic notification content
+    - **Holdoff Control**: Configurable time/frame windows to suppress repeat notifications
+    - **Video Clip Saving**: Optional video clip saving with upload to object storage
+    - **Visual Overlay**: Annotates active notification status on images
+    - **File Management**: Handles temporary file cleanup and object storage integration
 
-    Event notification with clip saving:
-        notifier = EventNotifier(
-            name="motion",
-            condition="motion_detected",
-            clip_save=True,
-            storage_config=storage_cfg
-        )
+Typical Usage:
+    1. Configure notification service (e.g., email, Slack, webhook) using Apprise URL or config file
+    2. Create `NotificationServer` instance with desired configuration
+    3. Define event conditions and create `EventNotifier` instances
+    4. Process inference results through the notifier chain
+    5. Notifications are sent asynchronously when conditions are met
 
-Raises:
-    ImportError: If optional dependencies (e.g., apprise) are not installed.
+Integration Notes:
+    - Requires `EventDetector` analyzer in the chain to provide event detection
+    - Optional dependencies (e.g., apprise) must be installed for external notification services
+    - Object storage configuration required for clip saving and upload functionality
+    - Supports both frame-based and time-based notification holdoff periods
+
+Key Classes:
+    - `NotificationServer`: Handles asynchronous notification delivery and file uploads
+    - `EventNotifier`: Analyzer for triggering notifications based on event conditions
+    - `NotificationServer.Job`: Enumeration of supported notification job types
+
+Configuration Options:
+    - `notification_url`: Apprise URL or config file for notification service
+    - `notification_title`: Default title for notifications
+    - `holdoff_frames`: Number of frames to wait between notifications
+    - `holdoff_seconds`: Time in seconds to wait between notifications
+    - `clip_save`: Enable/disable video clip saving
+    - `storage_config`: Object storage configuration for clip uploads
+    - `show_overlay`: Enable/disable visual annotations
+
+Example:
+    ```python
+    # Basic notification setup
+    server = NotificationServer("json://console", "Test Alert")
+    server.send_job(NotificationServer.Job.job_notification, "Test message")
+
+    # Event notification with clip saving
+    notifier = EventNotifier(
+        name="motion",
+        condition="motion_detected",
+        clip_save=True,
+        storage_config=storage_cfg
+    )
+    ```
 """
 import numpy as np, sys, multiprocessing, threading, time, os, queue, tempfile, shutil, datetime
 from typing import Tuple, List, Union, Optional, Dict
@@ -282,9 +320,7 @@ class NotificationServer:
 
             try:
                 if do_upload:
-                    storage.upload_file_to_object_storage(
-                        filepath, filename
-                    )
+                    storage.upload_file_to_object_storage(filepath, filename)
                     os.remove(filepath)  # remove local file after upload
                 url = storage.generate_presigned_url(filename)
 
@@ -534,7 +570,9 @@ class EventNotifier(ResultAnalyzerBase):
         # instantiate clip saver if required
         if clip_save and storage_config:
             self._clip_path = tempfile.mkdtemp()
-            full_clip_prefix = self._clip_path + (("/" + clip_sub_dir + "/") if clip_sub_dir else "/")
+            full_clip_prefix = self._clip_path + (
+                ("/" + clip_sub_dir + "/") if clip_sub_dir else "/"
+            )
 
             self._clip_saver = ClipSaver(
                 clip_duration,

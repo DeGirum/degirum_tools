@@ -1,92 +1,59 @@
 #
 # line_count.py: line crossing object counting support
 #
-# Copyright DeGirum Corporation 2023
+# Copyright DeGirum Corporation 2025
 # All rights reserved
 #
 # Implements classes for line crossing object counting
 #
 """
-Line Count Module Overview
-==========================
-This module provides tools for detecting and counting objects as they cross user-defined lines within video frames. It is particularly suited for applications such as surveillance, traffic monitoring, and crowd management, where it is crucial to determine the direction and frequency of object crossings over virtual boundaries.
+Line Count Analyzer Module Overview
+====================================
+
+This module provides an analyzer (`LineCounter`) for detecting and counting objects as they cross
+user-defined lines within video frames. It enables precise tracking of object movements across
+virtual boundaries for applications like traffic monitoring and crowd management.
 
 Key Features:
-    - **Flexible Line Definitions**: Lines are specified by two endpoints within the video frame.
-    - **Object Trail Tracking**: Uses tracked object paths to accurately detect crossings.
-    - **Directional Counting**: Counts crossings relative either to fixed image axes (up, down, left, right) or relative to the orientation of defined lines.
-    - **Class-Based Counting**: Optionally maintains crossing counts separately for different object classes.
-    - **Overlay Annotations**: Visualizes crossing lines and current count statistics directly on the video frames.
-
-Example Scenarios:
-    1. **Sports Ball Tracking**:
-       ```python
-       # Count how many times a ball crosses a goal line
-       counter = LineCounter(
-           lines=[(0, 300, 640, 300)],  # Goal line at y=300
-           absolute_directions=True
-       )
-       # Ball moving from (320, 200) to (320, 400) will increment bottom count
-       # Ball moving from (320, 400) to (320, 200) will increment top count
-       ```
-
-    2. **Traffic Flow Analysis**:
-       ```python
-       # Count vehicles crossing a road section
-       counter = LineCounter(
-           lines=[(100, 200, 500, 200)],  # Road section
-           per_class_display=True,  # Separate counts for cars, trucks, etc.
-           absolute_directions=False  # Count relative to road direction
-       )
-       # Car moving from (200, 150) to (200, 250) will increment right count
-       # Truck moving from (400, 250) to (400, 150) will increment left count
-       ```
-
-    3. **Crowd Movement Analysis**:
-       ```python
-       # Monitor people crossing a virtual boundary
-       counter = LineCounter(
-           lines=[(0, 240, 640, 240)],  # Horizontal boundary
-           anchor_point=AnchorPoint.BOTTOM_CENTER,  # Track feet position
-           count_first_crossing=True  # Count each person only once
-       )
-       # Person walking from (320, 200) to (320, 280) will increment bottom count
-       # Person walking from (320, 280) to (320, 200) will increment top count
-       ```
+    - **Flexible Line Definitions**: Support for multiple lines defined by endpoints
+    - **Directional Counting**: Track crossings in absolute (up/down/left/right) or relative directions
+    - **Object Trail Tracking**: Use tracked object paths for accurate crossing detection
+    - **Per-Class Counting**: Maintain separate counts for different object classes
+    - **Visual Overlay**: Display crossing lines and count statistics on frames
+    - **Interactive Editing**: Optional OpenCV mouse callback for line adjustment
+    - **First Crossing Mode**: Option to count each object only once per line
+    - **Trail Analysis**: Support for analyzing entire object trails or just latest segments
 
 Typical Usage:
-    1. Define the set of lines to monitor within video frames.
-    2. Create a `LineCounter` instance with the specified lines and desired counting options.
-    3. For each processed frame, call the `analyze()` method with tracking results.
-    4. Optionally visualize counting results by invoking the `annotate()` method.
-    5. Retrieve and process crossing counts from the `line_counts` attribute in the analysis results.
+    1. Define lines to monitor within video frames
+    2. Create a LineCounter instance with desired settings
+    3. Process inference results through the analyzer chain
+    4. Access crossing counts from result.line_counts
+    5. Optionally visualize lines and counts using annotate method
 
-Module Components:
-    - `SingleLineCounts`: Records directional counts (left, right, top, bottom) for absolute frame directions.
-    - `LineCounts`: Extends `SingleLineCounts` to include per-class counts.
-    - `SingleVectorCounts`: Tracks directional counts (left, right) relative to line orientation.
-    - `VectorCounts`: Extends `SingleVectorCounts` by providing per-class counting.
-    - `LineCounter`: Main analyzer class that processes tracked trails, detects crossings, updates counts, and optionally overlays annotations on frames.
+Integration Notes:
+    - Requires ObjectTracker analyzer upstream for trail data
+    - Works with any detection results containing bounding boxes
+    - Supports standard DeGirum PySDK result formats
+    - Handles partial/missing detections gracefully
 
-Key Configuration Options for `LineCounter`:
-    - `lines`: List of line coordinates (each as (x1, y1, x2, y2)) to monitor for crossings.
-    - `anchor_point`: Bounding box anchor point (e.g., bottom center) used for evaluating crossings.
-    - `whole_trail`: Whether to consider the object's entire tracked path or just its latest segment for crossing detection.
-    - `count_first_crossing`: If True, each object contributes only once per line per tracking session.
-    - `absolute_directions`: Determines if counting uses absolute (frame-based) or relative (line-based) directional metrics.
-    - `accumulate`: If True, maintains cumulative counts across frames; otherwise resets each frame.
-    - `per_class_display`: Enables separate counting for each detected object class.
-    - `show_overlay`: Activates visual annotations of lines and counts on video frames.
-    - `annotation_color`, `annotation_line_width`: Customizes visual appearance of annotations.
-    - `window_name`: Associates an OpenCV window for interactive, real-time line adjustments.
+Key Classes:
+    - `LineCounter`: Main analyzer class for counting line crossings
+    - `SingleLineCounts`: Tracks directional counts for absolute frame directions
+    - `LineCounts`: Extends SingleLineCounts with per-class counting
+    - `SingleVectorCounts`: Tracks directional counts relative to line orientation
+    - `VectorCounts`: Extends SingleVectorCounts with per-class counting
 
-Interactive Line Adjustment:
-    - Use `LineCounter.window_attach(window_name)` to enable interactive dragging and adjustment of lines through mouse interactions.
-
-Dependencies:
-    This module requires tracked object trajectories from an external object tracking module, typically provided by the `ObjectTracker` class.
-
-For detailed usage instructions, examples, and parameter explanations, refer directly to individual class and method docstrings within this module.
+Configuration Options:
+    - `lines`: List of line coordinates (x1, y1, x2, y2) to monitor
+    - `anchor_point`: Bounding box point used for crossing detection
+    - `whole_trail`: Use entire trail or just latest segment
+    - `count_first_crossing`: Count each object once per line
+    - `absolute_directions`: Use absolute or relative directions
+    - `per_class_display`: Enable per-class counting
+    - `show_overlay`: Enable visual annotations
+    - `annotation_color`: Customize overlay appearance
+    - `window_name`: Enable interactive line adjustment
 """
 import numpy as np, cv2
 from typing import List, Dict, Optional, Union, Any, Type

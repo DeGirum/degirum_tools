@@ -1,7 +1,7 @@
 #
 # zone_count.py: polygon zone object counting support
 #
-# Copyright DeGirum Corporation 2023
+# Copyright DeGirum Corporation 2025
 # All rights reserved
 #
 # Implements classes for polygon zone object counting
@@ -29,35 +29,49 @@
 # SOFTWARE.
 
 """
-Zone Count Module Overview
-==========================
+Zone Count Analyzer Module Overview
+====================================
 
-This module provides support for counting objects within polygonal zones in video frames or images.
-It offers classes that integrate with AI inference results to determine whether detected or tracked objects lie within user-defined polygon zones.
+This module provides an analyzer (`ZoneCounter`) for counting objects within polygonal zones in video frames
+or images. It integrates with AI inference results to determine whether detected or tracked objects lie
+within user-defined polygon zones.
 
-Core Features:
-    - **Polygonal zone definition:** Allows specifying arbitrary polygon shapes as counting zones.
-    - **Anchor-point and IoPA triggering:** Supports two approaches to determine if an object is inside a zone:
-        - Using object bounding box anchor points (e.g., bottom center, center).
-        - Using Intersection over Polygon Area (IoPA) threshold based on bounding boxes intersecting polygon.
-    - **Per-class counting support:** Optionally counts objects separately by class labels.
-    - **Object tracking integration:** Supports smoothing of counts over time using frame and time-based track presence.
-    - **Timeout support:** Configurable grace period for objects temporarily missing from zones before being considered outside.
-    - **Comprehensive overlay annotation:** Draws zones and optionally per-zone object counts or in-zone presence duration on images.
-    - **Interactive adjustment (optional):** OpenCV mouse callback support to interactively edit polygon zones in a GUI.
+Key Features:
+    - **Polygonal Zone Definition**: Support for arbitrary polygon shapes as counting zones
+    - **Multiple Trigger Methods**: Choose between anchor-point or IoPA-based zone entry detection
+    - **Per-Class Counting**: Track object counts separately by class labels
+    - **Tracking Integration**: Smooth counts over time using frame and time-based track presence
+    - **Timeout Control**: Configurable grace period for objects temporarily missing from zones
+    - **Visual Overlay**: Draw zones and per-zone object counts on images
+    - **Interactive Editing**: Optional OpenCV mouse callback support for zone adjustment
+    - **Zone Presence Tracking**: Monitor how long objects remain within zones
 
-Typical Use Case:
-    1. Define one or several polygon zones over the target video/image frame.
-    2. Instantiate `ZoneCounter`, specifying zones, classes to count, triggering method, and tracking options.
-    3. In the inference pipeline, feed detection or tracking results to `ZoneCounter.analyze()`.
-    4. Retrieve per-zone counts and per-object in-zone flags for further processing or event detection.
-    5. Optionally, call `ZoneCounter.annotate()` to draw zones and counts on images for visualization.
+Typical Usage:
+    1. Define polygon zones over the target video/image frame
+    2. Create a ZoneCounter instance with desired zones and settings
+    3. Process inference results through the analyzer chain
+    4. Access per-zone counts and object presence data
+    5. Optionally visualize zones and counts using annotate method
 
 Integration Notes:
-    - Requires detections to include bounding boxes and optionally track IDs for tracking-related functionality.
-    - Works effectively when used downstream of an object tracker analyzer to leverage track IDs.
-    - The module expects standard DeGirum PySDK result formats (e.g., `result.results` with dict entries for detected objects).
-    - Optional parameters enforce consistency and handling of partial/missing detections over time.
+    - Requires detection results with bounding boxes
+    - Optional track IDs for tracking-related functionality
+    - Works best with ObjectTracker analyzer upstream
+    - Supports standard DeGirum PySDK result formats
+    - Handles partial/missing detections gracefully
+
+Key Classes:
+    - `ZoneCounter`: Main analyzer class for counting objects in zones
+    - `ZonePresence`: Internal class for tracking object presence in zones
+
+Configuration Options:
+    - `zones`: List of polygon definitions for counting areas
+    - `classes`: Optional list of class labels to count
+    - `trigger_method`: Zone entry detection method (anchor or iopa)
+    - `tracking_timeout`: Frames to wait before removing lost objects
+    - `show_overlay`: Enable/disable visual annotations
+    - `show_counts`: Display count numbers on zone overlays
+    - `show_presence`: Show object presence duration in zones
 
 """
 

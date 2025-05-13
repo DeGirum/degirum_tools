@@ -1,22 +1,50 @@
 # object_selector.py: object selection analyzer
 #
-# Copyright DeGirum Corporation 2024
+# Copyright DeGirum Corporation 2025
 # All rights reserved
 # Implements analyzer class to select top K objects based on selection strategy.
 #
 
 """
 Object Selector Analyzer Module Overview
-========================================
+====================================
 
 This module provides an analyzer (`ObjectSelector`) for selecting the top-K detections from
-object detection results based on various strategies and optional tracking.
+object detection results based on various strategies and optional tracking. It enables
+intelligent filtering of detection results to focus on the most relevant objects.
 
-Key Concepts:
-    - **Selection Strategies**: Supports selecting by highest confidence score or largest bounding-box area.
-    - **Tracking Integration**: Optionally uses `track_id` fields to persist selections across frames with a timeout.
-    - **Annotation Overlay**: Optionally draws bounding boxes for selected objects on images.
+Key Features:
+    - **Selection Strategies**: Supports selecting by highest confidence score or largest bounding-box area
+    - **Tracking Integration**: Uses `track_id` fields to persist selections across frames with configurable timeout
+    - **Top-K Selection**: Configurable number of objects to select per frame
+    - **Visual Overlay**: Draws bounding boxes for selected objects on images
+    - **Selection Persistence**: Maintains selection state across frames when tracking is enabled
+    - **Timeout Control**: Configurable frame count before removing lost objects from selection
 
+Typical Usage:
+    1. Create an `ObjectSelector` instance with desired selection parameters
+    2. Process each frame's detection results through the selector
+    3. Access selected objects from the augmented results
+    4. Optionally visualize selected objects using the annotate method
+    5. Use selected objects in downstream analyzers for focused processing
+
+Integration Notes:
+    - Works with any detection results containing bounding boxes and confidence scores
+    - Optional integration with `ObjectTracker` for persistent selection across frames
+    - Selected objects are marked in the result object for downstream processing
+    - Supports both frame-based and tracking-based selection modes
+
+Key Classes:
+    - `ObjectSelector`: Main analyzer class that processes detections and maintains selections
+    - `ObjectSelectionStrategies`: Enumeration of available selection strategies
+
+Configuration Options:
+    - `top_k`: Number of objects to select per frame
+    - `selection_strategy`: Strategy for ranking objects (score or area)
+    - `use_tracking`: Enable/disable tracking-based selection persistence
+    - `tracking_timeout`: Frames to wait before removing lost objects
+    - `show_overlay`: Enable/disable visual annotations
+    - `annotation_color`: Customize overlay appearance
 """
 
 import numpy as np, copy, cv2

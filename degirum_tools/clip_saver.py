@@ -1,7 +1,7 @@
 #
 # clip_saver.py: video clip saving analyzer
 #
-# Copyright DeGirum Corporation 2024
+# Copyright DeGirum Corporation 2025
 # All rights reserved
 #
 # Implements analyzer class to save video clips triggered by event or notification
@@ -9,29 +9,46 @@
 #
 
 """
-Clip-Saving Analyzer Module Overview
+Clip Saving Analyzer Module Overview
 ====================================
 
-`ClipSavingAnalyzer` is a [`ResultAnalyzerBase`](result_analyzer_base.md)
-sub-class that records short video snippets when user-defined trigger
-names appear in an `InferenceResults`.
+This module provides an analyzer (`ClipSavingAnalyzer`) for recording video snippets triggered by events
+or notifications. It captures frames before and after trigger events, saving them as video clips with
+optional AI annotations and metadata.
 
-Typical flow:
-    1. Up-stream gizmos (e.g. [`EventDetector`](event_detector.md), [`EventNotifier`](event_notifier.md))
-       attach event/notification strings to each result.
-    2. `ClipSavingAnalyzer` watches for a match in its trigger set.
-    3. When a trigger fires, an internal [`ClipSaver`](video_support.md)
-       back-fills N frames before the trigger and records M frames after, saving
-       a .mp4 and .json.
+Key Features:
+    - **Pre/Post Buffering**: Configurable frame count before and after trigger events
+    - **Optional Overlays**: Embed AI bounding boxes and labels in the saved clips
+    - **Side-car JSON**: Save raw inference results alongside video files
+    - **Thread-Safe**: Each clip is written by its own worker thread
+    - **Frame Rate Control**: Configurable target FPS for saved clips
+    - **Event Integration**: Works with EventDetector and EventNotifier triggers
+    - **Storage Support**: Optional integration with object storage for clip uploads
 
-Key features:
-    - Pre/Post buffering: configurable frame count before/after trigger
-    - Optional overlays: embed AI bounding-boxes / labels in the clip
-    - Side-car JSON: save raw inference results alongside the video
-    - Thread-safe: each clip is written by its own worker thread
+Typical Usage:
+    1. Create a `ClipSavingAnalyzer` instance with desired buffer and output settings
+    2. Process inference results through the analyzer chain
+    3. When triggers occur, clips are automatically saved with pre/post frames
+    4. Access saved clips and their associated metadata files
+    5. Optionally upload clips to object storage for remote access
 
-See the class-level documentation below for constructor parameters and
-usage patterns.
+Integration Notes:
+    - Works with any analyzer that adds trigger names to results
+    - Requires video frames to be available in the result object
+    - Supports both local file storage and object storage uploads
+    - Thread-safe for concurrent clip saving operations
+
+Key Classes:
+    - `ClipSavingAnalyzer`: Main analyzer class for saving video clips
+    - `ClipSaver`: Internal class handling clip writing and buffering
+
+Configuration Options:
+    - `clip_duration`: Number of frames to save after trigger
+    - `clip_prefix`: Base path for saved clip files
+    - `pre_trigger_delay`: Frames to include before trigger
+    - `embed_ai_annotations`: Enable/disable AI overlays in clips
+    - `save_ai_result_json`: Enable/disable metadata saving
+    - `target_fps`: Frame rate for saved video clips
 """
 
 from typing import Set
