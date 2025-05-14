@@ -14,6 +14,7 @@ Notification Analyzer Module Overview
 This module provides tools for generating and delivering notifications based on AI inference events.
 It implements two main components: `NotificationServer` for asynchronous notification delivery and file uploads,
 and `EventNotifier` for triggering notifications (and optional clip saving) on events.
+A NotificationServer instance is automatically started by EventNotifier.
 
 Key Features:
     - **Asynchronous Notification Delivery**: Background process handles notification sending and file uploads
@@ -52,20 +53,6 @@ Configuration Options:
     - `storage_config`: Object storage configuration for clip uploads
     - `show_overlay`: Enable/disable visual annotations
 
-Example:
-    ```python
-    # Basic notification setup
-    server = NotificationServer("json://console", "Test Alert")
-    server.send_job(NotificationServer.Job.job_notification, "Test message")
-
-    # Event notification with clip saving
-    notifier = EventNotifier(
-        name="motion",
-        condition="motion_detected",
-        clip_save=True,
-        storage_config=storage_cfg
-    )
-    ```
 """
 import numpy as np, sys, multiprocessing, threading, time, os, queue, tempfile, shutil, datetime
 from typing import Tuple, List, Union, Optional, Dict
