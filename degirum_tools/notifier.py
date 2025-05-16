@@ -12,47 +12,50 @@ Notification Analyzer Module Overview
 ====================================
 
 This module provides tools for generating and delivering notifications based on AI inference events.
-It implements two main components: `NotificationServer` for asynchronous notification delivery and file uploads,
-and `EventNotifier` for triggering notifications (and optional clip saving) on events.
-A NotificationServer instance is automatically started by EventNotifier.
+It implements the `EventNotifier` analyzer for triggering notifications and optional clip saving on events.
 
 Key Features:
-    - **Asynchronous Notification Delivery**: Background process handles notification sending and file uploads
-    - **Multiple Notification Channels**: Supports various notification services via Apprise integration
-    - **Event-Based Triggers**: Generates notifications when user-defined event conditions are met
-    - **Message Formatting**: Supports Python format strings for dynamic notification content
-    - **Holdoff Control**: Configurable time/frame windows to suppress repeat notifications
-    - **Video Clip Saving**: Optional video clip saving with upload to object storage
-    - **Visual Overlay**: Annotates active notification status on images
-    - **File Management**: Handles temporary file cleanup and object storage integration
+    - Event-Based Triggers: Generates notifications when user-defined event conditions are met
+    - Message Formatting: Supports Python format strings for dynamic notification content
+    - Holdoff Control: Configurable time/frame windows to suppress repeat notifications
+    - Video Clip Saving: Optional video clip saving with local or cloud storage
+    - Visual Overlay: Annotates active notification status on images
+    - File Management: Handles temporary file cleanup and storage integration
 
 Typical Usage:
-    1. Configure notification service (e.g., email, Slack, webhook) using Apprise URL or config file
-    2. Create `NotificationServer` instance with desired configuration
-    3. Define event conditions and create `EventNotifier` instances
-    4. Process inference results through the notifier chain
-    5. Notifications are sent asynchronously when conditions are met
+    1. Configure notification service. For external services, use Apprise URL or config file. For console output, use "json://console" as notification_config
+    2. Define event conditions and create `EventNotifier` instances
+    3. Process inference results through the notifier chain
+    4. Notifications are sent when conditions are met
 
 Integration Notes:
     - Requires `EventDetector` analyzer in the chain to provide event detection
     - Optional dependencies (e.g., apprise) must be installed for external notification services
-    - Object storage configuration required for clip saving and upload functionality
+    - Storage configuration required for clip saving (supports both local and cloud storage)
     - Supports both frame-based and time-based notification holdoff periods
 
 Key Classes:
-    - `NotificationServer`: Handles asynchronous notification delivery and file uploads
     - `EventNotifier`: Analyzer for triggering notifications based on event conditions
-    - `NotificationServer.Job`: Enumeration of supported notification job types
 
 Configuration Options:
-    - `notification_url`: Apprise URL or config file for notification service
+    - `notification_config`: Apprise URL or config file for notification service, or "json://console" for stdout output
     - `notification_title`: Default title for notifications
     - `holdoff_frames`: Number of frames to wait between notifications
     - `holdoff_seconds`: Time in seconds to wait between notifications
     - `clip_save`: Enable/disable video clip saving
-    - `storage_config`: Object storage configuration for clip uploads
+    - `storage_config`: Storage configuration for clip saving (supports local and cloud storage)
     - `show_overlay`: Enable/disable visual annotations
 
+Example:
+    For local storage configuration:
+    ```python
+    clip_storage_config = ObjectStorageConfig(
+        endpoint="./",  # path to local folder
+        access_key="",  # not needed for local storage
+        secret_key="",  # not needed for local storage
+        bucket="my_bucket_dir",  # subdirectory name for local storage
+    )
+    ```
 """
 import numpy as np, sys, multiprocessing, threading, time, os, queue, tempfile, shutil, datetime
 from typing import Tuple, List, Union, Optional, Dict
@@ -453,7 +456,7 @@ class EventNotifier(ResultAnalyzerBase):
     Features:
         * Message formatting using Python format strings (e.g., `{result}` for inference results)
         * Holdoff to suppress repeat notifications within a specified time/frame window
-        * Optional video clip saving upon notification trigger (with upload to object storage)
+        * Optional video clip saving upon notification trigger with local or cloud storage
         * Records triggered notifications in the result object's `notifications` dictionary
         * Overlay annotation of active notification status on images
     """
@@ -491,7 +494,7 @@ class EventNotifier(ResultAnalyzerBase):
             condition (str): Python expression defining the condition to trigger the notification (references event names from `EventDetector`).
             message (str, optional): Notification message format string. If empty, uses "Notification triggered: {name}". Default is "".
             holdoff (int | float | Tuple[float, str], optional): Holdoff duration to suppress repeated notifications. If int, interpreted as frames; if float, as seconds; if tuple (value, "seconds"/"frames"), uses the specified unit. Default is 0 (no holdoff).
-            notification_config (str, optional): Notification service config file path or Apprise URL. If None, notifications are not sent to any external service.
+            notification_config (str, optional): Notification service config file path, Apprise URL, or "json://console" for stdout output. If None, notifications are not sent to any external service.
             notification_tags (str, optional): Tags to attach to notifications for filtering. Multiple tags can be separated by commas (for logical AND) or spaces (for logical OR).
             show_overlay (bool, optional): Whether to overlay notification text on images. Default is True.
             annotation_color (tuple, optional): RGB color for the annotation text background. If None, uses a complementary color to the result overlay.
@@ -504,7 +507,7 @@ class EventNotifier(ResultAnalyzerBase):
             clip_pre_trigger_delay (int, optional): Number of frames to include before the trigger event in the saved clip. Default is 0.
             clip_embed_ai_annotations (bool, optional): If True, embed AI annotations in the saved clip. Default is True.
             clip_target_fps (float, optional): Frame rate (FPS) for the saved video clip. Default is 30.0.
-            storage_config (ObjectStorageConfig, optional): Object storage configuration for uploading clips. If None, clips are only saved locally.
+            storage_config (ObjectStorageConfig, optional): Storage configuration for clip saving. For local storage, use endpoint="./" and local directory as bucket. For cloud storage, use S3-compatible endpoint and credentials. If None, clips are only saved locally.
 
         Raises:
             ValueError: If holdoff unit is not "seconds" or "frames".
