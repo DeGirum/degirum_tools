@@ -50,7 +50,7 @@ Example:
     For local storage configuration:
     ```python
     clip_storage_config = ObjectStorageConfig(
-        endpoint="./",  # path to local folder
+        endpoint=".",  # path to local folder
         access_key="",  # not needed for local storage
         secret_key="",  # not needed for local storage
         bucket="my_bucket_dir",  # subdirectory name for local storage
