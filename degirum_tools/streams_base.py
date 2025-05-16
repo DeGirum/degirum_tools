@@ -12,6 +12,7 @@ import threading, queue, copy, time
 from abc import ABC, abstractmethod
 from typing import Optional, Any, List, Dict, Union, Iterator
 from .environment import get_test_mode
+from degirum.exceptions import DegirumException
 
 
 class StreamMeta:
@@ -337,7 +338,7 @@ class Gizmo(ABC):
         self._connected_gizmos: set = set()
         self._abort = False
         self.composition: Optional[Composition] = None
-        self.error: Optional[Exception] = None
+        self.error: Optional[DegirumException] = None
         self.name = self.__class__.__name__
         self.result_cnt = 0  # gizmo result counter
         self.start_time_s = time.time()  # gizmo start time
@@ -399,6 +400,7 @@ class Gizmo(ABC):
         Returns:
             set: A set of Gizmo objects that are connected (directly or indirectly) to this gizmo.
         """
+
         def _get_connected(gizmo, visited):
             visited.add(gizmo)
             for g in gizmo._connected_gizmos:
@@ -566,7 +568,7 @@ class Composition:
                 )
                 gizmo.send_result(Stream._poison)
             except Exception as e:
-                gizmo.error = e
+                gizmo.error = DegirumException(str(e))
                 gizmo.composition.request_stop()
 
         for gizmo in self._gizmos:
@@ -664,13 +666,12 @@ class Composition:
         errors = ""
         for gizmo in self._gizmos:
             if gizmo.error is not None:
-                errors += f"Error detected during execution of {gizmo.name}:\n  {type(gizmo.error)}: {str(gizmo.error)}\n\n"
+                errors += f"Error detected during execution of {gizmo.name}:\n  {type(gizmo.error)}: {str(gizmo.error)}\n\n{gizmo.error.traceback}\n\n"
         if errors:
             raise Exception(errors)
 
     def stop(self):
-        """Stop the composition by aborting all gizmos and waiting for all threads to finish.
-        """
+        """Stop the composition by aborting all gizmos and waiting for all threads to finish."""
         self.request_stop()
         self.wait()
 
