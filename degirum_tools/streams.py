@@ -200,68 +200,68 @@ def load_composition(
 ) -> Composition:
     """Load a [Composition](streams_base.md#composition) of gizmos and connections from a description.
 
-    The description can be provided as a JSON/YAML file path, a YAML string, or a Python dictionary 
+    The description can be provided as a JSON/YAML file path, a YAML string, or a Python dictionary
     conforming to the JSON schema defined in `composition_definition_schema`.
 
-    Composition Description Schema (YAML):  
+    Composition Description Schema (YAML):
     ```yaml
-    type: object  
-    additionalProperties: false  
-    required: [gizmos, connections]  
-    properties:  
-        vars:  
-            type: object  
-            description: The collection of variables, keyed by variable name  
-            additionalProperties: false  
-            patternProperties:  
-                "^[a-zA-Z_][a-zA-Z0-9_]*$":  
-                    oneOf:  
-                      - type: [string, number, boolean, array]  
-                        description: The variable value; can be $(expression) to evaluate  
-                      - type: object  
-                        description: The only object key is the class name to instantiate; value are the constructor parameters  
-                        additionalProperties: false  
-                        minProperties: 1  
-                        maxProperties: 1  
-                        patternProperties:  
-                            "^[a-zA-Z_][a-zA-Z0-9_.]*$":  
-                                type: object  
-                                description: The constructor parameters of the object  
-                                additionalProperties: true  
-        gizmos:  
-            type: object  
-            description: The collection of gizmos, keyed by gizmo instance name  
-            additionalProperties: false  
-            patternProperties:  
-                "^[a-zA-Z_][a-zA-Z0-9_]*$":  
-                    oneOf:  
-                      - type: string  
-                        description: The gizmo class name to instantiate (if no parameters are needed)  
-                      - type: object  
-                        description: The only object key is the class name to instantiate; value are the constructor parameters  
-                        additionalProperties: false  
-                        minProperties: 1  
-                        maxProperties: 1  
-                        patternProperties:  
-                            "^[a-zA-Z_][a-zA-Z0-9_.]*$":  
-                                type: object  
-                                description: The constructor parameters of the gizmo  
-                                additionalProperties: true  
-        connections:  
-            type: array  
-            description: The list of connections between gizmos  
-            items:  
-                type: array  
-                description: The connection between gizmos  
-                items:  
-                    oneOf:  
-                        - type: string  
-                        - type: array  
-                          description: Gizmo with input index  
-                          prefixItems:  
-                            - type: string  
-                            - type: number  
-                          items: false  
+    type: object
+    additionalProperties: false
+    required: [gizmos, connections]
+    properties:
+        vars:
+            type: object
+            description: The collection of variables, keyed by variable name
+            additionalProperties: false
+            patternProperties:
+                "^[a-zA-Z_][a-zA-Z0-9_]*$":
+                    oneOf:
+                      - type: [string, number, boolean, array]
+                        description: The variable value; can be $(expression) to evaluate
+                      - type: object
+                        description: The only object key is the class name to instantiate; value are the constructor parameters
+                        additionalProperties: false
+                        minProperties: 1
+                        maxProperties: 1
+                        patternProperties:
+                            "^[a-zA-Z_][a-zA-Z0-9_.]*$":
+                                type: object
+                                description: The constructor parameters of the object
+                                additionalProperties: true
+        gizmos:
+            type: object
+            description: The collection of gizmos, keyed by gizmo instance name
+            additionalProperties: false
+            patternProperties:
+                "^[a-zA-Z_][a-zA-Z0-9_]*$":
+                    oneOf:
+                      - type: string
+                        description: The gizmo class name to instantiate (if no parameters are needed)
+                      - type: object
+                        description: The only object key is the class name to instantiate; value are the constructor parameters
+                        additionalProperties: false
+                        minProperties: 1
+                        maxProperties: 1
+                        patternProperties:
+                            "^[a-zA-Z_][a-zA-Z0-9_.]*$":
+                                type: object
+                                description: The constructor parameters of the gizmo
+                                additionalProperties: true
+        connections:
+            type: array
+            description: The list of connections between gizmos
+            items:
+                type: array
+                description: The connection between gizmos
+                items:
+                    oneOf:
+                        - type: string
+                        - type: array
+                          description: Gizmo with input index
+                          prefixItems:
+                            - type: string
+                            - type: number
+                          items: false
     ```
 
     Args:

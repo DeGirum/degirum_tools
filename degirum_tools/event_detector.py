@@ -404,107 +404,107 @@ class EventDetector(ResultAnalyzerBase):
     ):
         """Initializes an EventDetector with a given event description and overlay settings.
 
-        The `event_description` defines the event's trigger name, metric, comparison, and timing requirements. 
+        The `event_description` defines the event's trigger name, metric, comparison, and timing requirements.
         It can be provided as a YAML string or an equivalent dictionary and must conform to the expected schema (`event_definition_schema`).
 
         The description includes these key components:
-        - Trigger: Name of the event to detect  
-        - when: Metric to evaluate (one of "ZoneCount", "LineCount", "ObjectCount", or "Custom")  
-        - Comparator: A comparison operator (e.g., "is greater than") with a threshold value  
-        - during: Duration of the sliding window as `[value, unit]` (unit can be "frames" or "seconds")  
-        - for at least / for at most (optional): Required portion of the window that the condition must hold true to trigger the event  
+        - Trigger: Name of the event to detect
+        - when: Metric to evaluate (one of "ZoneCount", "LineCount", "ObjectCount", or "Custom")
+        - Comparator: A comparison operator (e.g., "is greater than") with a threshold value
+        - during: Duration of the sliding window as `[value, unit]` (unit can be "frames" or "seconds")
+        - for at least / for at most (optional): Required portion of the window that the condition must hold true to trigger the event
 
-        **Event Definition Schema (YAML)**:  
+        **Event Definition Schema (YAML)**:
         ```yaml
-        type: object  
-        additionalProperties: false  
-        properties:  
-            Trigger:  
-                type: string  
-                description: The name of event to raise  
-            when:  
-                type: string  
-                enum: [ZoneCount, LineCount, ObjectCount, Custom]  
-                description: The name of the metric to evaluate  
-            with:  
-                type: object  
-                additionalProperties: false  
-                properties:  
-                    classes:  
-                        type: array  
-                        items:  
-                            type: string  
-                        description: The class labels to count; if not specified, all classes are counted  
-                    index:  
-                        type: integer  
-                        description: The location number (zone or line index) to count; if not specified, all locations are counted  
-                    directions:  
-                        type: array  
-                        items:  
-                            type: string  
-                            enum: [left, right, top, bottom]  
-                        description: The line intersection directions to count; if not specified, all directions are counted  
-                    min score:  
-                        type: number  
-                        description: The minimum score of the object to count  
-                        minimum: 0  
-                        maximum: 1  
-                    aggregation:  
-                        type: string  
-                        enum: [sum, max, min, mean, std]  
-            is equal to:  
-                type: number  
-                description: The value to compare against  
-            is not equal to:  
-                type: number  
-                description: The value to compare against  
-            is greater than:  
-                type: number  
-                description: The value to compare against  
-            is greater than or equal to:  
-                type: number  
-                description: The value to compare against  
-            is less than:  
-                type: number  
-                description: The value to compare against  
-            is less than or equal to:  
-                type: number  
-                description: The value to compare against  
-            during:  
-                type: array  
-                prefixItems:  
-                    - type: number  
-                    - enum: [seconds, frames, second, frame]  
-                items: false  
-                description: Duration to evaluate the metric  
-            for at least:  
-                type: array  
-                prefixItems:  
-                    - type: number  
-                    - enum: [percent, frames, frame]  
-                items: false  
-                description: Minimum duration the metric must hold true to trigger the event  
-            for at most:  
-                type: array  
-                prefixItems:  
-                    - type: number  
-                    - enum: [percent, frames, frame]  
-                items: false  
-                description: Maximum duration the metric can hold true for the event to trigger  
-        required: [Trigger, when, during]  
-        oneOf:  
-            - required: [is equal to]  
-              type: object  
-            - required: [is not equal to]  
-              type: object  
-            - required: [is greater than]  
-              type: object  
-            - required: [is greater than or equal to]  
-              type: object  
-            - required: [is less than]  
-              type: object  
-            - required: [is less than or equal to]  
-              type: object  
+        type: object
+        additionalProperties: false
+        properties:
+            Trigger:
+                type: string
+                description: The name of event to raise
+            when:
+                type: string
+                enum: [ZoneCount, LineCount, ObjectCount, Custom]
+                description: The name of the metric to evaluate
+            with:
+                type: object
+                additionalProperties: false
+                properties:
+                    classes:
+                        type: array
+                        items:
+                            type: string
+                        description: The class labels to count; if not specified, all classes are counted
+                    index:
+                        type: integer
+                        description: The location number (zone or line index) to count; if not specified, all locations are counted
+                    directions:
+                        type: array
+                        items:
+                            type: string
+                            enum: [left, right, top, bottom]
+                        description: The line intersection directions to count; if not specified, all directions are counted
+                    min score:
+                        type: number
+                        description: The minimum score of the object to count
+                        minimum: 0
+                        maximum: 1
+                    aggregation:
+                        type: string
+                        enum: [sum, max, min, mean, std]
+            is equal to:
+                type: number
+                description: The value to compare against
+            is not equal to:
+                type: number
+                description: The value to compare against
+            is greater than:
+                type: number
+                description: The value to compare against
+            is greater than or equal to:
+                type: number
+                description: The value to compare against
+            is less than:
+                type: number
+                description: The value to compare against
+            is less than or equal to:
+                type: number
+                description: The value to compare against
+            during:
+                type: array
+                prefixItems:
+                    - type: number
+                    - enum: [seconds, frames, second, frame]
+                items: false
+                description: Duration to evaluate the metric
+            for at least:
+                type: array
+                prefixItems:
+                    - type: number
+                    - enum: [percent, frames, frame]
+                items: false
+                description: Minimum duration the metric must hold true to trigger the event
+            for at most:
+                type: array
+                prefixItems:
+                    - type: number
+                    - enum: [percent, frames, frame]
+                items: false
+                description: Maximum duration the metric can hold true for the event to trigger
+        required: [Trigger, when, during]
+        oneOf:
+            - required: [is equal to]
+              type: object
+            - required: [is not equal to]
+              type: object
+            - required: [is greater than]
+              type: object
+            - required: [is greater than or equal to]
+              type: object
+            - required: [is less than]
+              type: object
+            - required: [is less than or equal to]
+              type: object
         ```
 
         Args:
