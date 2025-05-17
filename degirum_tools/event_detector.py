@@ -1,11 +1,52 @@
 #
 # event_detector.py: event detector analyzer
 #
-# Copyright DeGirum Corporation 2024
+# Copyright DeGirum Corporation 2025
 # All rights reserved
-#
 # Implements analyzer class to detect various events by analyzing inference results
 #
+
+"""
+Event Detector Analyzer Module Overview
+====================================
+
+This module provides an analyzer (`EventDetector`) for converting analyzer outputs into high-level,
+human-readable events. It enables detection of complex temporal patterns and conditions based on
+metrics from other analyzers like zone counters and line counters.
+
+Key Features:
+    - **Metric-Based Events**: Convert analyzer metrics into meaningful events
+    - **Temporal Patterns**: Detect conditions that must hold for specific durations
+    - **Complex Conditions**: Combine multiple metrics with logical operators
+    - **Data-Driven**: Configure events using YAML or dictionary definitions
+    - **Ring Buffer**: Internal state management for temporal conditions
+    - **Integration Support**: Works with any analyzer that produces metrics
+    - **Schema Validation**: Ensures event definitions match required format
+
+Typical Usage:
+    1. Configure auxiliary analyzers (e.g., ZoneCounter, LineCounter) for required metrics
+    2. Create an EventDetector instance with event definitions
+    3. Attach it to a model or compound model
+    4. Access detected events via result.events_detected
+    5. Use EventNotifier for event-based notifications
+
+Integration Notes:
+    - Requires metrics from other analyzers to be present in results
+    - Event definitions must match the event_definition_schema
+    - Supports both YAML and dictionary-based configuration
+    - Events are stored in result.events_detected for downstream use
+
+Key Classes:
+    - `EventDetector`: Main analyzer class for detecting events
+    - `EventDefinitionSchema`: Schema for validating event definitions
+
+Configuration Options:
+    - `event_definitions`: YAML file or dictionary containing event definitions
+    - `metrics`: Dictionary mapping metric names to their sources
+    - `temporal_window`: Default duration for evaluating conditions
+    - `quantifier`: Default proportion/duration for event triggers
+    - `comparator`: Default operator for comparing metrics to thresholds
+"""
 
 import numpy as np
 import yaml, time, jsonschema
@@ -167,17 +208,23 @@ event_definition_schema = yaml.safe_load(event_definition_schema_text)
 
 
 def ZoneCount(result, params):
-    """
-    Get the number of objects in the specified zone.
-    It uses the following result attributes:
-        result.zone_counts
+    """Computes the number of detected objects inside a specified zone or zones.
+
+    Requires that `result.zone_counts` is present (produced by a `ZoneCounter` analyzer). This function can filter the count by object class and aggregate counts across multiple zones if needed.
 
     Args:
-        result: PySDK model result object
-        params: metric parameters as defined in "With" field of the event description
+        result (InferenceResults): Inference results object containing zone count data.
+        params (dict, optional): Additional parameters to filter/aggregate the count.
+            classes (List[str]): Class labels to include. If None, all classes are counted.
+            index (int): Zone index to count. If None, all zones are included.
+            aggregation (str): Aggregation function to apply across zones. One of 'sum', 'max', 'min', 'mean', 'std'. Defaults to 'sum'.
 
     Returns:
-        number of objects in the zone(s) belonging to the specified classes
+        Union[int, float]: Total count of matching objects in the selected zone(s).
+
+    Raises:
+        AttributeError: If `result.zone_counts` is missing (no ZoneCounter applied upstream).
+        ValueError: If a specified zone index is out of range for the available zones.
     """
 
     if not hasattr(result, "zone_counts"):
@@ -219,18 +266,28 @@ def ZoneCount(result, params):
 
 
 def LineCount(result, params):
-    """
-    Count the number of objects in the specified zone.
-    It uses the following result attributes:
-        result.line_counts
+    """Computes the number of object crossings on a specified line (or across all lines).
+
+    Relies on a `result.line_counts` attribute (produced by a `LineCounter` analyzer). This function can filter count by object class and crossing direction for fine-grained event definitions.
 
     Args:
-        result: PySDK model result object
-        params: metric parameters
+        result (InferenceResults): Inference results object containing line crossing counts.
+        params (dict, optional): Filter parameters from the event's "with" clause.
+            index (int): Line index to count. If None, all lines are considered.
+            classes (List[str]): Class labels to include. If None, all detected classes are counted.
+            directions (List[str]): Directions of crossing to include. One of 'left', 'right', 'top', 'bottom'. If None, all directions are counted.
 
     Returns:
-        float: number of objects in the zone
+        count (int): Number of line-crossing events that match the specified filters.
+
+    Raises:
+        AttributeError: If `result.line_counts` is missing (no LineCounter applied upstream).
+        ValueError: If a specified line index is out of range for the available lines.
     """
+    if not hasattr(result, "line_counts"):
+        raise AttributeError(
+            "Line counts are not available in the result: insert LineCounter analyzer upstream."
+        )
 
     index = None
     classes = None
@@ -284,18 +341,18 @@ def LineCount(result, params):
 
 
 def ObjectCount(result, params):
-    """
-    Get the number of detected objects satisfying the specified conditions.
-    It uses the following result attributes:
-        result.results[]["label"]
-        result.results[]["score"]
+    """Counts the detected objects in the result, with optional class and score filtering.
+
+    This metric does not require any auxiliary analyzer; it simply tallies detections, optionally constrained by object class and minimum confidence score.
 
     Args:
-        result: PySDK model result object
-        params: metric parameters as defined in "With" field of the event description
+        result (InferenceResults): The inference results object containing detections.
+        params (dict, optional): Filter parameters.
+            classes (List[str]): Class labels to include. If None, all detected classes are counted.
+            min_score (float): Minimum confidence score required for counting. If None, no score threshold is applied.
 
     Returns:
-        number of detected objects satisfying the specified conditions
+        count (int): Number of detected objects that meet the specified class and score criteria.
     """
 
     classes = None
@@ -320,9 +377,18 @@ def ObjectCount(result, params):
 
 
 class EventDetector(ResultAnalyzerBase):
-    """
-    Class to detect various events by analyzing inference results
+    """Analyzes inference results over time to detect high-level events based on metric conditions.
 
+    This analyzer monitors a chosen metric (e.g., ZoneCount, LineCount, or ObjectCount) over a sliding time window and triggers an event when a specified condition is satisfied. The condition consists of a comparison of the metric value against a threshold, and a temporal requirement that the condition holds for a certain duration or proportion of the window. When the condition is met, the event name is added to the `events_detected` set in the result.
+
+    For example, you can detect an event "PersonInZone" when the count of persons in a region (`ZoneCount`) remains above 0 for N seconds, or a "VehicleCountExceeded" event when a line-crossing count exceeds a threshold within a frame. Multiple `EventDetector` instances can be attached to the same model to detect different events in parallel.
+
+    Attributes:
+        key_events_detected (str): Name of the result attribute that stores detected event names (defaults to "events_detected").
+        comparators (Dict[str, Callable[[float, float], bool]]): Mapping of comparator keywords (e.g., "is greater than") to the corresponding comparison functions used internally.
+
+    Note:
+        Ensure that required analyzers (such as `ZoneCounter` or `LineCounter`) are attached before this detector so that the necessary metric data is present in `result`. The `EventDetector` maintains all state internally (using a ring buffer for timing) and is therefore stateless to callers. It is safe to use in a single-threaded inference pipeline (thread-safe per inference thread).
     """
 
     key_events_detected = "events_detected"
@@ -336,18 +402,121 @@ class EventDetector(ResultAnalyzerBase):
         annotation_font_scale: Optional[float] = None,
         annotation_pos: Union[AnchorPoint, tuple] = AnchorPoint.BOTTOM_LEFT,
     ):
-        """
-        Constructor
+        """Initializes an EventDetector with a given event description and overlay settings.
+
+        The `event_description` defines the event's trigger name, metric, comparison, and timing requirements.
+        It can be provided as a YAML string or an equivalent dictionary and must conform to the expected schema (`event_definition_schema`).
+
+        The description includes these key components:
+        - Trigger: Name of the event to detect
+        - when: Metric to evaluate (one of "ZoneCount", "LineCount", or "ObjectCount")
+        - Comparator: A comparison operator (e.g., "is greater than") with a threshold value
+        - during: Duration of the sliding window as `[value, unit]` (unit can be "frames" or "seconds")
+        - for at least / for at most (optional): Required portion of the window that the condition must hold true to trigger the event
+
+        **Event Definition Schema (YAML)**:
+        ```yaml
+        type: object
+        additionalProperties: false
+        properties:
+            Trigger:
+                type: string
+                description: The name of event to raise
+            when:
+                type: string
+                enum: [ZoneCount, LineCount, ObjectCount]
+                description: The name of the metric to evaluate
+            with:
+                type: object
+                additionalProperties: false
+                properties:
+                    classes:
+                        type: array
+                        items:
+                            type: string
+                        description: The class labels to count; if not specified, all classes are counted
+                    index:
+                        type: integer
+                        description: The location number (zone or line index) to count; if not specified, all locations are counted
+                    directions:
+                        type: array
+                        items:
+                            type: string
+                            enum: [left, right, top, bottom]
+                        description: The line intersection directions to count; if not specified, all directions are counted
+                    min score:
+                        type: number
+                        description: The minimum score of the object to count
+                        minimum: 0
+                        maximum: 1
+                    aggregation:
+                        type: string
+                        enum: [sum, max, min, mean, std]
+            is equal to:
+                type: number
+                description: The value to compare against
+            is not equal to:
+                type: number
+                description: The value to compare against
+            is greater than:
+                type: number
+                description: The value to compare against
+            is greater than or equal to:
+                type: number
+                description: The value to compare against
+            is less than:
+                type: number
+                description: The value to compare against
+            is less than or equal to:
+                type: number
+                description: The value to compare against
+            during:
+                type: array
+                prefixItems:
+                    - type: number
+                    - enum: [seconds, frames, second, frame]
+                items: false
+                description: Duration to evaluate the metric
+            for at least:
+                type: array
+                prefixItems:
+                    - type: number
+                    - enum: [percent, frames, frame]
+                items: false
+                description: Minimum duration the metric must hold true to trigger the event
+            for at most:
+                type: array
+                prefixItems:
+                    - type: number
+                    - enum: [percent, frames, frame]
+                items: false
+                description: Maximum duration the metric can hold true for the event to trigger
+        required: [Trigger, when, during]
+        oneOf:
+            - required: [is equal to]
+              type: object
+            - required: [is not equal to]
+              type: object
+            - required: [is greater than]
+              type: object
+            - required: [is greater than or equal to]
+              type: object
+            - required: [is less than]
+              type: object
+            - required: [is less than or equal to]
+              type: object
+        ```
 
         Args:
-            event_description: event description. It is a dictionary, which defines
-                how to detect the event. The dictionary should conform to the schema provided
-                in the `event_definition_schema` variable.
-                Alternatively, it can be a string in YAML format, which will be parsed into a dictionary.
-            show_overlay: if True, annotate image; if False, send through original image
-            annotation_color: Color to use for annotations, None to use complement to result overlay color
-            annotation_font_scale: font scale to use for annotations or None to use model default
-            annotation_pos: position to place annotation text (either predefined point or (x,y) tuple)
+            event_description (Union[str, dict]): YAML string or dictionary defining the event conditions (must match the schema above).
+            show_overlay (bool, optional): Whether to draw a label on the frame when the event fires. Defaults to True.
+            annotation_color (tuple, optional): RGB color for the label background. If None, a contrasting color is auto-chosen. Defaults to None.
+            annotation_font_scale (float, optional): Font scale for the overlay text. If None, uses a default scale. Defaults to None.
+            annotation_pos (Union[AnchorPoint, tuple], optional): Position for the overlay label (an `AnchorPoint` or (x,y) coordinate). Defaults to `AnchorPoint.BOTTOM_LEFT`.
+
+        Raises:
+            jsonschema.ValidationError: If `event_description` does not conform to the required schema for events.
+            ValueError: If no comparison operator is specified in the event description.
         """
 
         self._show_overlay = show_overlay
@@ -411,15 +580,18 @@ class EventDetector(ResultAnalyzerBase):
     }
 
     def analyze(self, result):
-        """
-        Detect event analyzing given result according to rules provided in the event description.
+        """Evaluates the configured event condition on an inference result and updates the result if the event is detected.
 
-        If event is detected, the event name will be appended to the `events_detected` set in the result object.
-        If result object does not have `events_detected` attribute, it will be created
-        and initialized with the single element set containing detected event name.
+        The method computes the metric value, compares it to the threshold, maintains a history of condition states, and triggers the event when the condition holds for the required duration.
 
         Args:
-            result: PySDK model result object
+            result (InferenceResults): The inference result to analyze (must contain necessary metrics from prior analyzers).
+
+        Returns:
+            (None): This method modifies the `result` in-place by adding to its `events_detected` attribute.
+
+        Raises:
+            AttributeError: If the required metric data is missing in `result` (e.g., using ZoneCount without attaching `ZoneCounter`).
         """
 
         # evaluate metric and compare with threshold
@@ -460,15 +632,20 @@ class EventDetector(ResultAnalyzerBase):
             result.events_detected.add(self._event_name)
 
     def annotate(self, result, image: np.ndarray) -> np.ndarray:
-        """
-        Display fired events on a given image
+        """Draws the event label onto the image frame if the event is active for this result.
+
+        The overlay text is rendered only when all of the following conditions are true:
+            - `self._show_overlay` is True for this EventDetector.
+            - The event's name is present in `result.events_detected` for the current frame.
+
+        If these conditions are met, the event name is drawn on the image at the configured position. The label's background color defaults to the complement of the model's overlay color (if no `annotation_color` was specified), and the text color is automatically chosen for optimal contrast.
 
         Args:
-            result: PySDK result object to display (should be the same as used in analyze() method)
-            image (np.ndarray): image to display on
+            result (InferenceResults): The result object from the model (after analysis), which may contain the event in its `events_detected` set.
+            image (np.ndarray): The BGR image frame to annotate.
 
         Returns:
-            np.ndarray: annotated image
+            np.ndarray: The same image frame with the event label overlay (if the event was detected). If no overlay was added, the image is returned unmodified.
         """
 
         if (
