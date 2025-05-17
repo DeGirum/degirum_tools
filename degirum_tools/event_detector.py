@@ -379,7 +379,7 @@ def ObjectCount(result, params):
 class EventDetector(ResultAnalyzerBase):
     """Analyzes inference results over time to detect high-level events based on metric conditions.
 
-    This analyzer monitors a chosen metric (e.g., ZoneCount, LineCount, ObjectCount, or custom metrics) over a sliding time window and triggers an event when a specified condition is satisfied. The condition consists of a comparison of the metric value against a threshold, and a temporal requirement that the condition holds for a certain duration or proportion of the window. When the condition is met, the event name is added to the `events_detected` set in the result.
+    This analyzer monitors a chosen metric (e.g., ZoneCount, LineCount, or ObjectCount) over a sliding time window and triggers an event when a specified condition is satisfied. The condition consists of a comparison of the metric value against a threshold, and a temporal requirement that the condition holds for a certain duration or proportion of the window. When the condition is met, the event name is added to the `events_detected` set in the result.
 
     For example, you can detect an event "PersonInZone" when the count of persons in a region (`ZoneCount`) remains above 0 for N seconds, or a "VehicleCountExceeded" event when a line-crossing count exceeds a threshold within a frame. Multiple `EventDetector` instances can be attached to the same model to detect different events in parallel.
 
@@ -409,7 +409,7 @@ class EventDetector(ResultAnalyzerBase):
 
         The description includes these key components:
         - Trigger: Name of the event to detect
-        - when: Metric to evaluate (one of "ZoneCount", "LineCount", "ObjectCount", or "Custom")
+        - when: Metric to evaluate (one of "ZoneCount", "LineCount", or "ObjectCount")
         - Comparator: A comparison operator (e.g., "is greater than") with a threshold value
         - during: Duration of the sliding window as `[value, unit]` (unit can be "frames" or "seconds")
         - for at least / for at most (optional): Required portion of the window that the condition must hold true to trigger the event
@@ -424,7 +424,7 @@ class EventDetector(ResultAnalyzerBase):
                 description: The name of event to raise
             when:
                 type: string
-                enum: [ZoneCount, LineCount, ObjectCount, Custom]
+                enum: [ZoneCount, LineCount, ObjectCount]
                 description: The name of the metric to evaluate
             with:
                 type: object
