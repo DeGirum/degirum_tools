@@ -158,7 +158,7 @@ class SingleVectorCounts:
     (as opposed to absolute frame directions). It measures how many objects crossed from one side of
     the line to the other. Specifically, `right` represents crossings from the left side to the right
     side of the line (following the line's direction vector), and `left` represents crossings from the
-    right side to the left side of the line. This is typically used by `LineCounter` when
+    right side to the left side of the line. This is used by `LineCounter` when
     `absolute_directions=False` (relative direction mode).
 
     Attributes:
@@ -194,15 +194,14 @@ class VectorCounts(SingleVectorCounts):
 
     This class maintains overall crossing counts for a line (relative to its orientation) and also
     tracks counts per object class. It inherits the total `left` and `right` counts (for all objects)
-    from `SingleVectorCounts`, and adds a dictionary of per-class counts. It is typically used by
-    `LineCounter` when counting in relative mode with `per_class_display=True`.
+    from `SingleVectorCounts`, and adds a dictionary of per-class counts. It is used by `LineCounter` when
+    `per_class_display=True` and `absolute_directions=False`.
 
     Attributes:
         left (int): Total number of objects crossing from the right side to the left side of the line (all classes).
         right (int): Total number of objects crossing from the left side to the right side of the line (all classes).
         for_class (Dict[str, SingleVectorCounts]): Mapping from class label to a `SingleVectorCounts`
             object for that class. Each entry contains the left/right counts for objects of that specific class.
-
     """
 
     def __init__(self):
