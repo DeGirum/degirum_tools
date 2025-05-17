@@ -40,9 +40,9 @@ Key Classes:
 
 Configuration Options:
     - `top_k`: Number of objects to select per frame
-    - `selection_strategy`: Strategy for ranking objects (score or area)
+    - `selection_strategy`: Strategy for ranking objects (by highest confidence score or by largest bounding box area)
     - `use_tracking`: Enable/disable tracking-based selection persistence
-    - `tracking_timeout`: Frames to wait before removing lost objects
+    - `tracking_timeout`: Frames to wait before removing lost objects from selection
     - `show_overlay`: Enable/disable visual annotations
     - `annotation_color`: Customize overlay appearance
 """
