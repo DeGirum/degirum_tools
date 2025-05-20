@@ -376,16 +376,20 @@ class NotificationServer:
             # process queue
             if queue_is_active:
                 try:
+                    # Setting timeout to None causes infinite wait when pending jobs is empty
                     job = job_queue.get(
-                        timeout=queue_poll_interval_s if pending_jobs else None
+                        timeout=queue_poll_interval_s if pending_jobs else 10
                     )
-                    if job is None:  # poison pill received
-                        queue_is_active = False
                 except queue.Empty:
                     job = None
 
                 if job is not None:
                     pending_jobs[job.id] = job
+
+                # Upon queue empty exception, queue is active is never set to false, resulting in 
+                # (if not pending jobs) to keep resetting loop infinitely
+                if job is None:  # poison pill received
+                    queue_is_active = False
 
             if not pending_jobs:
                 continue
