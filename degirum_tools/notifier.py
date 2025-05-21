@@ -386,7 +386,7 @@ class NotificationServer:
                 if job is not None:
                     pending_jobs[job.id] = job
 
-                # Upon queue empty exception, queue is active is never set to false, resulting in 
+                # Upon queue empty exception, queue is active is never set to false, resulting in
                 # (if not pending jobs) to keep resetting loop infinitely
                 if job is None:  # poison pill received
                     queue_is_active = False
