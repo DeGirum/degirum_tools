@@ -238,6 +238,8 @@ def attach_analyzers(
             if model._custom_postprocessor is not None and hasattr(
                 model._custom_postprocessor, "_custom_postprocessor_saved"
             ):
+                for analyzer in model._custom_postprocessor._analyzers:
+                    analyzer.finalize()
                 # restore the original custom postprocessor
                 model._custom_postprocessor = (
                     model._custom_postprocessor._custom_postprocessor_saved
