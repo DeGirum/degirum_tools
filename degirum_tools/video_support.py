@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 
 class VideoCaptureGst:
     def __init__(self, pipeline_str):
-        # Import GStreamer libraries using optional package support
+        # Import GStreamer libraries using optional package support .
         gi = env.import_optional_package("gi")
         gi.require_version("Gst", "1.0")
         from gi.repository import Gst, GLib
