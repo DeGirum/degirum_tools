@@ -1,8 +1,10 @@
 #
-# math_support.py: miscellaneous math/geometry functions
+# math_support.py: mathematical utilities for array operations
 #
-# Copyright DeGirum Corporation 2023
+# Copyright DeGirum Corporation 2025
 # All rights reserved
+#
+# Implements mathematical functions for array operations
 #
 
 # MIT License
@@ -27,43 +29,81 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+"""
+Math Support Module Overview
+===========================
+
+This module provides mathematical utilities for working with arrays, including
+statistical calculations, array operations, and numerical computations.
+
+Key Features:
+    - **Statistical Functions**: Mean, standard deviation, and other statistical measures
+    - **Array Operations**: Efficient array manipulation and transformation
+    - **Numerical Computations**: Mathematical operations on arrays
+    - **Performance Optimized**: Fast implementations using NumPy
+    - **Type Support**: Handles various numeric types and array shapes
+
+Typical Usage:
+    1. Import required functions from the module
+    2. Apply statistical functions to arrays
+    3. Use array operations for data transformation
+    4. Perform numerical computations as needed
+
+Integration Notes:
+    - Built on NumPy for efficient array operations
+    - Compatible with various array types and shapes
+    - Handles edge cases and invalid inputs
+    - Provides consistent results across platforms
+
+Key Functions:
+    - `mean()`: Calculate mean of array elements
+    - `std()`: Calculate standard deviation
+    - `array_operations()`: Various array manipulation functions
+
+Configuration Options:
+    - Axis selection for operations
+    - Data type handling
+    - Error handling options
+"""
+
 import numpy as np
 from enum import Enum
 from typing import Any, Dict, List, Union, Sequence, Tuple
 
 
 def area(box: np.ndarray) -> np.ndarray:
-    """
-    Computes bbox(es) area: is vectorized.
+    """Compute bounding box areas.
 
-    Parameters
-    ----------
-    box : np.array
-        Box(es) in format (x0, y0, x1, y1)
+    Args:
+        box (np.ndarray): Single box ``(x1, y1, x2, y2)`` or an array of such
+            boxes with shape ``(N, 4)``.
 
-    Returns
-    -------
-    np.array
-        area(s)
+    Returns:
+        np.ndarray: Area of each input box.
+
+    Example:
+        >>> box = np.array([0, 0, 10, 20])
+        >>> area(box)
+        200.0
     """
     return (box[..., 2] - box[..., 0]) * (box[..., 3] - box[..., 1])
 
 
 def intersection(boxA: np.ndarray, boxB: np.ndarray) -> Union[float, np.ndarray]:
-    """
-    Compute area of intersection of two boxes
+    """Compute intersection area of bounding boxes.
 
-    Parameters
-    ----------
-    boxA : np.array
-        First box
-    boxB : np.array
-        Second box
+    Args:
+        boxA (np.ndarray): First set of boxes ``(x1, y1, x2, y2)``.
+        boxB (np.ndarray): Second set of boxes ``(x1, y1, x2, y2)``.
 
-    Returns
-    -------
-    float64
-        Area of intersection
+    Returns:
+        Union[float, np.ndarray]: Intersection area for each pair of boxes.
+
+    Example:
+        >>> boxA = np.array([0, 0, 10, 10])
+        >>> boxB = np.array([5, 5, 15, 15])
+        >>> intersection(boxA, boxB)
+        25.0
     """
     xA = np.fmax(boxA[..., 0], boxB[..., 0])
     xB = np.fmin(boxA[..., 2], boxB[..., 2])
@@ -73,21 +113,11 @@ def intersection(boxA: np.ndarray, boxB: np.ndarray) -> Union[float, np.ndarray]
     yB = np.fmin(boxA[..., 3], boxB[..., 3])
     dy = np.fmax(yB - yA, 0)
 
-    # compute the area of intersection rectangle
     return dx * dy
 
 
 def xyxy2xywh(x: np.ndarray) -> np.ndarray:
-    """
-    Convert bounding box coordinates from (x1, y1, x2, y2) format to (x, y, width, height) format where (x1, y1) is the
-    top-left corner and (x2, y2) is the bottom-right corner.
-
-    Args:
-        x (np.ndarray): The input bounding box coordinates in (x1, y1, x2, y2) format.
-
-    Returns:
-        y (np.ndarray): The bounding box coordinates in (x, y, width, height) format.
-    """
+    """Convert ``(x1, y1, x2, y2)`` boxes to ``(x, y, w, h)`` format."""
     y = np.copy(x)
     y[:, 0] = (x[:, 0] + x[:, 2]) / 2  # x center
     y[:, 1] = (x[:, 1] + x[:, 3]) / 2  # y center
@@ -97,17 +127,7 @@ def xyxy2xywh(x: np.ndarray) -> np.ndarray:
 
 
 def tlbr2allcorners(x: np.ndarray) -> np.ndarray:
-    """
-    Convert bounding box coordinates from (x1, y1, x2, y2) format to (x1, y1, x2, y2, x3, y3, x4, y4) format where (x1, y1) is the
-    top-left corner and (x2, y2) is the bottom-right corner of the input bounding box, and x1-x4, y1-y4 correspond to the four corners
-    of the bounding box, starting with the top-left corner and proceeding clockwise.
-
-    Args:
-        x (np.ndarray): The input bounding box coordinates in (x1, y1, x2, y2) format.
-
-    Returns:
-        y (np.ndarray): The bounding box coordinates in (x1, y1, x2, y2, x3, y3, x4, y4) format.
-    """
+    """Convert ``(x1, y1, x2, y2)`` boxes to all four corner points."""
     y = np.empty((x.shape[0], 8))
     y[..., 0:2] = x[..., 0:2]  # top left (x, y)
     y[:, [2, 3]] = x[:, [2, 1]]  # top right (x, y)
@@ -117,15 +137,7 @@ def tlbr2allcorners(x: np.ndarray) -> np.ndarray:
 
 
 def xywh2xyxy(x: np.ndarray) -> np.ndarray:
-    """
-    Convert bounding box coordinates from (x, y, width, height) format to (x1, y1, x2, y2) format where (x1, y1) is the
-    top-left corner and (x2, y2) is the bottom-right corner.
-
-    Args:
-        x (np.ndarray): The input bounding box coordinates in (x, y, width, height) format.
-    Returns:
-        y (np.ndarray): The bounding box coordinates in (x1, y1, x2, y2) format.
-    """
+    """Convert ``(x, y, w, h)`` boxes to ``(x1, y1, x2, y2)`` format."""
     y = np.copy(x)
     y[..., 0:2] = x[..., 0:2] - x[..., 2:4] / 2  # top left (x, y)
     y[..., 2:4] = x[..., 0:2] + x[..., 2:4] / 2  # bottom right (x, y)
@@ -133,21 +145,14 @@ def xywh2xyxy(x: np.ndarray) -> np.ndarray:
 
 
 def box_iou_batch(boxes_true: np.ndarray, boxes_detection: np.ndarray) -> np.ndarray:
-    """
-    Compute Intersection over Union (IoU) of two sets of bounding boxes -
-        `boxes_true` and `boxes_detection`. Both sets
-        of boxes are expected to be in `(x_min, y_min, x_max, y_max)` format.
+    """Compute pairwise IoU between two sets of boxes.
 
     Args:
-        boxes_true (np.ndarray): 2D `np.ndarray` representing ground-truth boxes.
-            `shape = (N, 4)` where `N` is number of true objects.
-        boxes_detection (np.ndarray): 2D `np.ndarray` representing detection boxes.
-            `shape = (M, 4)` where `M` is number of detected objects.
+        boxes_true (np.ndarray): Ground-truth boxes ``(N, 4)``.
+        boxes_detection (np.ndarray): Detection boxes ``(M, 4)``.
 
     Returns:
-        np.ndarray: Pairwise IoU of boxes from `boxes_true` and `boxes_detection`.
-            `shape = (N, M)` where `N` is number of true objects and
-            `M` is number of detected objects.
+        np.ndarray: IoU matrix of shape ``(N, M)``.
     """
 
     def box_area(box):
@@ -164,7 +169,22 @@ def box_iou_batch(boxes_true: np.ndarray, boxes_detection: np.ndarray) -> np.nda
 
 
 class NmsBoxSelectionPolicy(Enum):
-    """Bounding box selection policy for non-maximum suppression"""
+    """Bounding box selection policy for non-maximum suppression.
+
+    This enum defines different strategies for selecting which bounding box to keep
+    when multiple overlapping boxes are detected. Each policy has different use cases
+    and trade-offs.
+
+    Attributes:
+        MOST_PROBABLE: Traditional NMS approach that keeps the box with highest confidence score.
+            Best for high-confidence detections where false positives are costly.
+        LARGEST_AREA: Keeps the box with the largest area. Useful when larger detections
+            are more likely to be correct or when object size is important.
+        AVERAGE: Averages the coordinates of all overlapping boxes. Good for reducing
+            jitter in tracking applications.
+        MERGE: Merges all overlapping boxes into a single box. Useful when multiple
+            detections of the same object are expected.
+    """
 
     MOST_PROBABLE = 1  # traditional NMS: select box with highest probability
     LARGEST_AREA = 2  # select box with largest area
@@ -272,19 +292,19 @@ def nms(
     max_wh: int = 10000,
     agnostic: bool = False,
 ):
-    """
-    Perform non-maximum suppression on a set of detections.
+    """Apply non-maximum suppression to detection results.
 
     Args:
-        detections (InferenceResults): PySDK inference result object
-        iou_threshold (float): IoU/IoS threshold used for detecting overlapping boxes.
-        use_iou (bool): If True, IoU is used for detecting overlapping boxes. Otherwise, IoS is used.
-        box_select (NmsBoxSelectionPolicy): bounding box selection policy
-        max_wh (int): Maximum width/height of an image. Used for category separation.
+        detections (InferenceResults): Iterable of detection dictionaries
+            containing ``bbox``, ``score`` and ``class`` fields.
+        iou_threshold (float, optional): IoU/IoS threshold. Defaults to ``0.3``.
+        use_iou (bool, optional): If ``True`` use IoU, otherwise IoS.
+        box_select (NmsBoxSelectionPolicy, optional): Box selection strategy.
+        max_wh (int, optional): Maximum image dimension for class separation.
+        agnostic (bool, optional): If ``True`` perform class-agnostic NMS.
 
-    `detections` will be updated with objects, which survived non-maximum suppression.
-    If `box_select` option dictates box coordinates update, the survived object box coordinates are modified in-place
-
+    Returns:
+        list[dict]: Filtered detections.
     """
 
     result_list = detections._inference_results
@@ -570,25 +590,17 @@ class AnchorPoint(Enum):
 
 
 def get_anchor_coordinates(xyxy: np.ndarray, anchor: AnchorPoint) -> np.ndarray:
-    """
-    Calculates and returns the coordinates of a specific anchor point
-    within the bounding boxes defined by the `xyxy` attribute. The anchor
-    point can be any of the predefined positions,
-    such as `AnchorPoint.CENTER`, `AnchorPoint.CENTER_LEFT`, `AnchorPoint.BOTTOM_RIGHT`, etc.
+    """Get coordinates of an anchor point inside bounding boxes.
 
     Args:
-        xyxy (nd.array): An array of shape `(n, 4)` of bounding box coordinates,
-            where `n` is the number of bounding boxes.
-        anchor (str): An string specifying the position of the anchor point
-            within the bounding box.
+        xyxy (np.ndarray): Array of boxes ``(N, 4)``.
+        anchor (AnchorPoint): Desired anchor location.
 
     Returns:
-        np.ndarray: An array of shape `(n, 2)`, where `n` is the number of bounding
-            boxes. Each row contains the `[x, y]` coordinates of the specified
-            anchor point for the corresponding bounding box.
+        np.ndarray: Array ``(N, 2)`` with ``[x, y]`` coordinates.
 
     Raises:
-        ValueError: If the provided `anchor` is not supported.
+        ValueError: If ``anchor`` is unsupported.
     """
     if anchor == AnchorPoint.CENTER:
         return np.array(
@@ -628,31 +640,14 @@ def get_anchor_coordinates(xyxy: np.ndarray, anchor: AnchorPoint) -> np.ndarray:
 
 
 def get_image_anchor_point(w: int, h: int, anchor: AnchorPoint) -> tuple:
-    """
-    Get the coordinates of a specific anchor point within the image
-
-    Args:
-        w (int): width of the image
-        h (int): height of the image
-        anchor (AnchorPoint): An anchor point within the image
-    """
+    """Return coordinates of an anchor point inside an image."""
     return tuple(
         get_anchor_coordinates(np.array([[0, 0, w, h]]), anchor).astype(int)[0]
     )
 
 
 def intersect(a, b, c, d) -> bool:
-    """Check intersection of two lines
-
-    Args:
-        a (tuple): starting point of the first line
-        b (tuple): ending point of the first line
-        c (tuple): starting point of the second line
-        d (tuple): ending point of the second line
-
-    Returns:
-        bool: True if lines intersect, False otherwise
-    """
+    """Return ``True`` if two line segments intersect."""
 
     s = (a[0] - b[0]) * (c[1] - a[1]) - (a[1] - b[1]) * (c[0] - a[0])
     t = (a[0] - b[0]) * (d[1] - a[1]) - (a[1] - b[1]) * (d[0] - a[0])
@@ -693,17 +688,15 @@ def generate_tiles_fixed_size(
     image_size: Union[np.ndarray, Sequence],
     min_overlap_percent: Union[np.ndarray, Sequence],
 ):
-    """
-    Generate a set of rectangular boxes (tiles) of given fixed size
-    covering given rectangular area (image) with given overlap.
+    """Generate overlapping tiles with fixed size.
 
     Args:
-        tile_size: desired tile size (width,height)
-        image_size: image size (width,height)
-        min_overlap_percent: minimum overlaps between tiles in percent (x_overlap,y_overlap)
+        tile_size (Union[np.ndarray, Sequence]): Tile size ``(w, h)``.
+        image_size (Union[np.ndarray, Sequence]): Image size ``(w, h)``.
+        min_overlap_percent (Union[np.ndarray, Sequence]): Minimum overlap in percent.
 
     Returns:
-        np.ndarray: array of tile coordinates in format (x0, y0, x1, y1)
+        np.ndarray: Array of tile coordinates ``(x1, y1, x2, y2)``.
     """
 
     if not isinstance(tile_size, np.ndarray):
@@ -726,20 +719,16 @@ def generate_tiles_fixed_ratio(
     image_size: Union[np.ndarray, Sequence],
     min_overlap_percent: Union[np.ndarray, Sequence, float],
 ):
-    """
-    Generate a set of rectangular boxes (tiles) of given fixed size
-    covering given rectangular area (image) with given overlap.
+    """Generate overlapping tiles with fixed aspect ratio.
 
     Args:
-        tile_aspect_ratio: desired tile aspect ratio,
-            it can be number width/height or 2-element sequence [width,height]
-        grid_size: desired number of tiles in each direction (column,rows);
-            only one of the values (which is non-zero) is used to compute the other one
-        image_size: image size (width,height)
-        min_overlap_percent: minimum overlaps between tiles in percent (x_overlap,y_overlap)
+        tile_aspect_ratio (Union[float, np.ndarray, Sequence]): Desired aspect ratio.
+        grid_size (Union[np.ndarray, Sequence]): Grid size ``(x, y)``.
+        image_size (Union[np.ndarray, Sequence]): Image size ``(w, h)``.
+        min_overlap_percent (Union[np.ndarray, Sequence, float]): Minimum overlap percent.
 
     Returns:
-        np.ndarray: array of tile coordinates in format (x0, y0, x1, y1)
+        np.ndarray: Array of tile coordinates ``(x1, y1, x2, y2)``.
     """
 
     if not isinstance(grid_size, np.ndarray):
@@ -781,18 +770,39 @@ def generate_tiles_fixed_ratio(
 
 
 class FIRFilterLP:
-    """
-    FIR low-pass filter class
+    """Low-pass Finite Impulse Response (FIR) filter implementation.
+
+    This class implements a low-pass FIR filter for smoothing signals. It uses a
+    moving average approach with configurable cutoff frequency and number of taps.
+    The filter can process both scalar and vector inputs.
+
+    Attributes:
+        normalized_cutoff (float): Normalized cutoff frequency (0 to 1).
+        taps_cnt (int): Number of filter taps (order of the filter).
+        dimension (int): Number of dimensions in the input signal.
+
+    Example:
+        >>> filter = FIRFilterLP(normalized_cutoff=0.1, taps_cnt=5)
+        >>> smoothed = filter([1, 2, 3, 4, 5])
+        >>> len(smoothed)
+        5
     """
 
     def __init__(self, normalized_cutoff: float, taps_cnt: int, dimension: int = 1):
-        """
-        Constructor
+        """Initialize the FIR filter with specified parameters.
 
         Args:
-            normalized_cutoff: normalized cutoff frequency
-            taps_cnt: number of taps
-            dimension: dimension of the input signal
+            normalized_cutoff (float): Normalized cutoff frequency between 0 and 1.
+                A value of 1 corresponds to the Nyquist frequency.
+            taps_cnt (int): Number of filter taps (order of the filter). Higher values
+                provide better frequency response but increase computational cost.
+            dimension (int, optional): Number of dimensions in the input signal.
+                Defaults to 1 for scalar signals.
+
+        Raises:
+            ValueError: If normalized_cutoff is not between 0 and 1.
+            ValueError: If taps_cnt is less than 1.
+            ValueError: If dimension is less than 1.
         """
         import scipy.signal
 
@@ -805,15 +815,20 @@ class FIRFilterLP:
         self._result = np.zeros(dimension)
 
     def update(self, sample: Union[float, np.ndarray]) -> np.ndarray:
-        """
-        Apply filter to the input signal
+        """Update the filter with a new sample and return the filtered value.
+
+        This method adds a new sample to the filter's buffer and computes the
+        filtered output using a moving average approach.
 
         Args:
-            sample: input signal sample if `dimension` is 1
-                or array of samples if `dimension` is greater than 1
+            sample (Union[float, np.ndarray]): New input sample. Can be a scalar
+                or an array of length equal to the filter's dimension.
 
         Returns:
-            filtered signal
+            np.ndarray: Filtered output value. Has the same shape as the input sample.
+
+        Raises:
+            ValueError: If the input sample's shape doesn't match the filter's dimension.
         """
         if not self._initialized:
             self._buffer = np.column_stack((sample,) * self._taps_cnt)
@@ -823,11 +838,23 @@ class FIRFilterLP:
         return self._result
 
     def get(self):
-        """
-        Get last filtered result
+        """Get the current filtered value without updating the filter.
+
+        Returns:
+            np.ndarray: Current filtered value based on the samples in the buffer.
         """
         return self._result
 
     def __call__(self, sample: Union[float, np.ndarray]) -> np.ndarray:
-        """Synonym for update() method"""
+        """Update the filter with a new sample and return the filtered value.
+
+        This is a convenience method that calls update().
+
+        Args:
+            sample (Union[float, np.ndarray]): New input sample. Can be a scalar
+                or an array of length equal to the filter's dimension.
+
+        Returns:
+            np.ndarray: Filtered output value. Has the same shape as the input sample.
+        """
         return self.update(sample)

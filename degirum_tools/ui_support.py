@@ -1,11 +1,55 @@
 #
 # ui_support.py: UI support classes and functions
 #
-# Copyright DeGirum Corporation 2023-2024
+# Copyright DeGirum Corporation 2025
 # All rights reserved
 #
 # Implements classes and functions to handle image display, progress indication, etc.
 #
+
+"""
+UI Support Module Overview
+=========================
+
+This module provides a comprehensive set of utilities for user interface operations,
+including image display, text rendering, progress tracking, and performance monitoring.
+It supports both traditional GUI environments and Jupyter notebooks.
+
+Key Features:
+    - **Image Display**: Show images in GUI windows or Jupyter notebooks
+    - **Text Rendering**: Draw text with customizable fonts, colors, and positions
+    - **Progress Tracking**: Display progress bars with speed and percentage
+    - **Performance Monitoring**: Measure and display FPS
+    - **Environment Detection**: Auto-detect and adapt to different display environments
+    - **Color Utilities**: Convert between color spaces and compute complementary colors
+
+Typical Usage:
+    1. Use `Display` class for showing images in any environment
+    2. Draw text on images with `put_text()`
+    3. Track progress with `Progress` class
+    4. Monitor performance with `FPSMeter`
+    5. Stack images with `stack_images()`
+
+Integration Notes:
+    - Works in both GUI and Jupyter notebook environments
+    - Automatically detects and adapts to the display environment
+    - Supports both OpenCV and PIL image formats
+    - Handles video files in Jupyter notebooks
+    - Provides consistent interface across different platforms
+
+Key Classes:F
+    - `Display`: Main class for showing images and videos
+    - `Progress`: Progress bar with speed and percentage display
+    - `FPSMeter`: Frames per second measurement
+    - `Timer`: Simple timing utility
+    - `stdoutRedirector`: Context manager for redirecting stdout
+
+Configuration Options:
+    - Font settings (face, scale, thickness)
+    - Color schemes (RGB/BGR)
+    - Progress bar appearance
+    - Display window properties
+"""
 
 import cv2, sys, os, time, PIL.Image, numpy as np, random, string
 from .environment import get_test_mode, in_colab, in_notebook, to_valid_filename
@@ -17,40 +61,56 @@ from pathlib import Path
 
 
 def deduce_text_color(bg_color: tuple):
-    """Deduce text color from background color
+    """Return a readable text color.
+
+    Chooses black or white based on the luminance of ``bg_color`` so that text
+    remains legible.
 
     Args:
-        bg_color - background color (RGB)
+        bg_color (tuple): Background color as an ``(R, G, B)`` tuple.
+
+    Returns:
+        Tuple[int, int, int]: ``(R, G, B)`` value for black or white text.
     """
     return (0, 0, 0) if luminance(bg_color) > 180 else (255, 255, 255)
 
 
 def color_complement(color):
-    """Return color complement: 255 - color
+    """Return the complement of an RGB color.
 
     Args:
-        color - color to complement (RGB)
+        color (tuple | list): Color specified as ``(R, G, B)``.
+
+    Returns:
+        Tuple[int, int, int]: Complementary color in ``(R, G, B)`` format.
     """
     adj_color = color[0] if isinstance(color, list) else color
     return tuple([255 - c for c in adj_color])
 
 
 def rgb_to_bgr(color):
-    """Convert color from RGB to BGR and return color in BGR
+    """Convert an RGB color tuple to BGR.
 
     Args:
-        color - color to convert (RGB)
+        color (tuple): Color in ``(R, G, B)`` format.
+
+    Returns:
+        Tuple[int, int, int]: Color in ``(B, R, G)`` order for OpenCV functions.
     """
     return color[::-1]
 
 
 def ipython_display(obj: Any, clear: bool = False, display_id: Optional[str] = None):
-    """
-    Display object in IPython environment
+    """Display an object in IPython notebooks.
 
     Args:
-        obj - object to display; can be PIL/OpenCV image object or image/video filename/URL
-        clear - True to clear previous output
+        obj (Any): Object to display. Supported types are ``PIL.Image``,
+            ``numpy.ndarray`` images, or a string path/URL to an image or video.
+        clear (bool, optional): Whether to clear the previous output. Defaults to ``False``.
+        display_id (Optional[str], optional): Custom display ID to update an existing output.
+
+    Raises:
+        Exception: If the object type is unsupported.
     """
 
     import IPython.display
@@ -105,22 +165,35 @@ def put_text(
     font_thickness: int = 1,
     line_spacing: float = 1,
 ) -> np.ndarray:
-    """Draw given text on given OpenCV image at given point with given color
+    """Draw text on an image with customizable appearance and positioning.
+
+    This function draws text on an OpenCV image with support for multi-line text,
+    background colors, and automatic positioning. The text can be placed relative
+    to any corner of the image, and will automatically adjust to stay within
+    image boundaries.
 
     Args:
-        image - numpy array with image
-        label - text to draw
-        corner_xy - text corner coordinate tuple (x,y); meaning depends on `corner_position` argument
-        corner_position - where to place text relative to corner_xy
-        font_color - text color (RGB)
-        bg_color - background color (RGB) or None for transparent
-        font_face - font to use
-        font_scale - font scale factor to use
-        font_thickness - font thickness to use
-        line_spacing - line spacing factor
+        image (np.ndarray): Input image in OpenCV format (BGR).
+        label (str): Text to draw. Can contain newlines for multi-line text.
+        corner_xy (tuple): Base coordinates (x, y) for text placement.
+        corner_position (CornerPosition, optional): Position of text relative to
+            corner_xy. Defaults to TOP_LEFT.
+        font_color (tuple): Text color in RGB format.
+        bg_color (Optional[tuple], optional): Background color in RGB format.
+            If None, no background is drawn. Defaults to None.
+        font_face (int, optional): OpenCV font face. Defaults to FONT_HERSHEY_PLAIN.
+        font_scale (float, optional): Font size multiplier. Defaults to 1.
+        font_thickness (int, optional): Font thickness in pixels. Defaults to 1.
+        line_spacing (float, optional): Multiplier for line spacing. Defaults to 1.
 
     Returns:
-        image with text drawn
+        np.ndarray: Image with text drawn on it.
+
+    Example:
+        >>> img = np.zeros((100, 200, 3), dtype=np.uint8)
+        >>> img = put_text(img, "Hello\nWorld", (10, 10),
+        ...                font_color=(255, 255, 255),
+        ...                bg_color=(0, 0, 0))
     """
 
     if not label:
@@ -241,20 +314,22 @@ def stack_images(
     labels: Optional[list] = None,
     font_color: tuple = (255, 255, 255),
 ) -> Union[np.ndarray, PIL.Image.Image]:
-    """Stacks two images, either vertically or horizontally with the option to downscale
-        the images and have labels in the bottom left corner. The two images must be the same
-        size on the stacking dimension.
+    """Stack two images either horizontally or vertically.
 
     Args:
-        image1 - numpy array or PIL image
-        image2 - numpy array or PIL image
-        dimension: str - "horizontal" or "vertical", specifies dimension to stack
-        downscale: Optional[float] - scaling factor from 0.0-1/0 for the images
-        labels: Optional[list] - string labels for image1 and image2
-        font_color: tuple - font color in the form of a RGB tuple
+        image1 (np.ndarray | PIL.Image.Image): First image.
+        image2 (np.ndarray | PIL.Image.Image): Second image.
+        dimension (str, optional): ``"horizontal"`` or ``"vertical"``. Defaults to
+            ``"horizontal"``.
+        downscale (Optional[float], optional): Scaling factor for both images if
+            less than ``1.0``.
+        labels (Optional[list], optional): Optional text labels for ``image1``
+            and ``image2``.
+        font_color (tuple, optional): RGB color for labels. Defaults to white.
 
     Returns:
-        stacked image with optional resizing and labels
+        np.ndarray | PIL.Image.Image: Combined image with optional resizing and
+        labels.
     """
     ret_type: Callable = np.array
 
@@ -343,7 +418,22 @@ def stack_images(
 
 
 class FPSMeter:
-    """Simple FPS meter class"""
+    """Frame rate measurement utility.
+
+    This class provides functionality to measure and track frames per second (FPS)
+    over a configurable window of time. It's useful for monitoring performance
+    in video processing and real-time applications.
+
+    Attributes:
+        avg_len (int): Number of samples to use for FPS calculation.
+
+    Example:
+        >>> meter = FPSMeter(avg_len=30)
+        >>> for frame in video:
+        ...     process_frame(frame)
+        ...     fps = meter.record()
+        ...     print(f"Current FPS: {fps:.1f}")
+    """
 
     def __init__(self, avg_len: int = 100):
         """Constructor
@@ -379,7 +469,23 @@ class FPSMeter:
 
 
 class Display:
-    """Class to handle OpenCV image display"""
+    """Display manager for showing images and videos in various environments.
+
+    This class provides a unified interface for displaying images and videos in
+    both GUI windows and Jupyter notebooks. It automatically detects the display
+    environment and adapts its behavior accordingly.
+
+    Attributes:
+        window_name (str): Name of the display window in GUI mode.
+        show_fps (bool): Whether to show FPS counter on displayed images.
+        width (Optional[int]): Target width for displayed images.
+        height (Optional[int]): Target height for displayed images.
+
+    Example:
+        >>> with Display("My Window") as display:
+        ...     display.show(my_image)
+        ...     display.show_image(another_image)
+    """
 
     def __init__(
         self,
@@ -600,7 +706,23 @@ class Timer:
 
 
 class Progress:
-    """Simple progress indicator"""
+    """Progress bar with speed and percentage display.
+
+    This class provides a progress bar that shows completion percentage, speed,
+    and optional messages. It works in both GUI and Jupyter notebook environments.
+
+    Attributes:
+        last_step (Optional[int]): Total number of steps (None for indeterminate).
+        start_step (int): Starting step number.
+        bar_len (int): Length of the progress bar in characters.
+        speed_units (str): Units to display for speed (e.g., "FPS", "items/s").
+
+    Example:
+        >>> progress = Progress(last_step=100)
+        >>> for i in range(100):
+        ...     process_item(i)
+        ...     progress.step(message=f"Processing item {i}")
+    """
 
     def __init__(
         self,
@@ -625,6 +747,10 @@ class Progress:
         self.reset()
 
     def reset(self):
+        """Reset the progress bar to its initial state.
+
+        This method resets the current step, message, and timing information.
+        """
         self._start_time = time.time()
         self._step = self._start_step
         self._percent = 0.0
