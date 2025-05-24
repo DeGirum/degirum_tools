@@ -81,10 +81,6 @@ def area(box: np.ndarray) -> np.ndarray:
     Returns:
         np.ndarray: Area of each input box.
 
-    Example:
-        >>> box = np.array([0, 0, 10, 20])
-        >>> area(box)
-        200.0
     """
     return (box[..., 2] - box[..., 0]) * (box[..., 3] - box[..., 1])
 
@@ -99,11 +95,6 @@ def intersection(boxA: np.ndarray, boxB: np.ndarray) -> Union[float, np.ndarray]
     Returns:
         Union[float, np.ndarray]: Intersection area for each pair of boxes.
 
-    Example:
-        >>> boxA = np.array([0, 0, 10, 10])
-        >>> boxB = np.array([5, 5, 15, 15])
-        >>> intersection(boxA, boxB)
-        25.0
     """
     xA = np.fmax(boxA[..., 0], boxB[..., 0])
     xB = np.fmin(boxA[..., 2], boxB[..., 2])
@@ -781,11 +772,6 @@ class FIRFilterLP:
         taps_cnt (int): Number of filter taps (order of the filter).
         dimension (int): Number of dimensions in the input signal.
 
-    Example:
-        >>> filter = FIRFilterLP(normalized_cutoff=0.1, taps_cnt=5)
-        >>> smoothed = filter([1, 2, 3, 4, 5])
-        >>> len(smoothed)
-        5
     """
 
     def __init__(self, normalized_cutoff: float, taps_cnt: int, dimension: int = 1):

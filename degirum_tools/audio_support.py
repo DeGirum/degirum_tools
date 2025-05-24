@@ -76,10 +76,6 @@ def open_audio_stream(
         Exception: If the audio stream cannot be opened or the WAV file format
             is invalid.
 
-    Example:
-        >>> with open_audio_stream(16000, 1024, 0) as stream:
-        ...     for frame in audio_source(stream, lambda: False):
-        ...         process_audio_frame(frame)
     """
 
     pyaudio = env.import_optional_package("pyaudio")
@@ -204,11 +200,6 @@ def audio_source(
         Optional[np.ndarray]: Waveform of ``int16`` samples or ``None`` when no
         data is available and ``non_blocking`` is ``True``.
 
-    Example:
-        >>> with open_audio_stream(16000, 1024, 0) as stream:
-        ...     for frame in audio_source(stream, lambda: False):
-        ...         if frame is not None:
-        ...             process_frame(frame)
     """
 
     try:
@@ -246,11 +237,6 @@ def audio_overlapped_source(
         Optional[np.ndarray]: Waveform of ``int16`` samples with 50% overlap, or
         ``None`` when no data is available and ``non_blocking`` is ``True``.
 
-    Example:
-        >>> with open_audio_stream(16000, 1024, 0) as stream:
-        ...     for frame in audio_overlapped_source(stream, lambda: False):
-        ...         if frame is not None:
-        ...             process_overlapping_frame(frame)
     """
 
     chunk_length = stream.frames_per_buffer

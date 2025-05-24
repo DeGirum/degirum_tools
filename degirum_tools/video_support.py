@@ -87,11 +87,6 @@ def open_video_stream(
     Raises:
         Exception: If the video stream cannot be opened.
 
-    Example:
-        >>> with open_video_stream(0) as stream:
-        ...     ret, frame = stream.read()
-        ...     if ret:
-        ...         process_frame(frame)
     """
 
     if env.get_test_mode() or video_source is None:
@@ -269,10 +264,6 @@ class VideoWriter:
         fps (float): Target frame rate.
         count (int): Number of frames written.
 
-    Example:
-        >>> writer = VideoWriter("output.mp4", w=640, h=480, fps=30.0)
-        >>> writer.write(frame)
-        >>> writer.release()
     """
 
     def __init__(self, fname: str, w: int = 0, h: int = 0, fps: float = 30.0):
@@ -493,11 +484,6 @@ class ClipSaver:
         save_ai_result_json (bool): Whether to save AI results as JSON.
         target_fps (float): Frame rate for saved clips.
 
-    Example:
-        >>> saver = ClipSaver(clip_duration=30, file_prefix="clips/event_")
-        >>> for frame in video_stream:
-        ...     result = model.predict(frame)
-        ...     saver.forward(result, triggers=["person_detected"])
     """
 
     def __init__(
