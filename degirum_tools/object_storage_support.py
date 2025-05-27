@@ -7,6 +7,24 @@
 # Implements class for cloud object storage manipulations
 #
 
+"""
+Object Storage Support Module Overview
+=====================================
+
+Helper utilities for interacting with cloud object storage services such as
+MinIO. The module also provides a lightweight local file-system backend for
+testing without a remote service.
+
+Key Classes:
+    - ``ObjectStorageConfig``: Configuration parameters for object storage.
+    - ``ObjectStorage``: Convenience wrapper around common bucket operations.
+
+Typical Usage:
+    1. Create an ``ObjectStorageConfig`` with connection parameters.
+    2. Instantiate ``ObjectStorage`` using the configuration.
+    3. Upload, download, or delete files using the instance methods.
+"""
+
 
 import time, os, shutil
 import datetime
@@ -17,8 +35,14 @@ from .environment import import_optional_package
 
 @dataclass
 class ObjectStorageConfig:
-    """
-    Object storage configuration dataclass
+    """Configuration for object storage connections.
+
+    Attributes:
+        endpoint (str): Object storage endpoint URL or local path.
+        access_key (str): Access key for the storage account.
+        secret_key (str): Secret key for the storage account.
+        bucket (str): Bucket name or local directory name.
+        url_expiration_s (int): Expiration time for presigned URLs.
     """
 
     endpoint: str  # The object storage endpoint URL or local path for local storage
@@ -27,24 +51,21 @@ class ObjectStorageConfig:
     bucket: str  # The name of the bucket to manage or directory name for local storage
     url_expiration_s: int = 3600  # The expiration time for the presigned URL in seconds
 
-    def construct_direct_url(self, object_name: str):
-        """
-        Construct a URL to download a file from cloud object storage bucket.
-        File may not exist in the bucket prior to this call.
+    def construct_direct_url(self, object_name: str) -> str:
+        """Construct a direct URL to an object.
 
         Args:
-            object_name: The name of the object (path within the bucket)
-
-        Returns:
-            The URL to access the object
+            object_name (str): Name of the object inside the bucket.
         """
 
         return f"{self.endpoint}/{self.bucket}/{object_name}"
 
 
 class _LocalMinio:
-    """
-    LocalMinio class for simulating Minio object storage operations on the local filesystem
+    """Filesystem-backed mock of MinIO.
+
+    Provides a subset of the MinIO API for unit tests and local development
+    without requiring a running server.
     """
 
     @dataclass
@@ -59,25 +80,44 @@ class _LocalMinio:
         metadata: Optional[dict] = None
         version_id: Optional[str] = None
 
-    def __init__(self, base_dir):
-        """Constructor
-        Set the base directory for all buckets and create it if it doesn't exist
+    def __init__(self, base_dir: str):
+        """Initialize the local storage backend.
+
+        Args:
+            base_dir (str): Directory used to store all buckets. It will be
+                created if it does not already exist.
         """
         self.base_dir = os.path.abspath(base_dir)
         os.makedirs(self.base_dir, exist_ok=True)
 
     def bucket_exists(self, bucket_name):
-        """Check if a directory for the bucket exists"""
+        """Check whether a bucket directory exists.
+
+        Args:
+            bucket_name (str): Name of the bucket to check.
+        """
         bucket_path = os.path.join(self.base_dir, bucket_name)
         return os.path.isdir(bucket_path)
 
     def make_bucket(self, bucket_name):
-        """Create a directory for the bucket"""
+        """Create a new bucket directory.
+
+        Args:
+            bucket_name (str): Name of the bucket to create.
+        """
         bucket_path = os.path.join(self.base_dir, bucket_name)
         os.makedirs(bucket_path, exist_ok=True)
 
     def list_objects(self, bucket_name, prefix="", recursive=False):
-        """List all objects in a bucket with optional prefix and recursion"""
+        """Iterate over objects stored in a bucket.
+
+        Args:
+            bucket_name (str): Bucket name to inspect.
+            prefix (str, optional): Only return objects that start with this
+                prefix. Defaults to an empty string.
+            recursive (bool, optional): If ``True`` search subdirectories
+                recursively. Defaults to ``False``.
+        """
         bucket_path = os.path.join(self.base_dir, bucket_name)
         if not os.path.isdir(bucket_path):
             raise FileNotFoundError(f"Bucket '{bucket_name}' does not exist.")
@@ -102,7 +142,7 @@ class _LocalMinio:
                     )
 
     def remove_object(self, bucket_name, object_name):
-        """Remove a specific object (file) from the bucket"""
+        """Remove a specific object (file) from the bucket."""
         object_path = os.path.join(self.base_dir, bucket_name, object_name)
         if not os.path.isfile(object_path):
             raise FileNotFoundError(
@@ -123,11 +163,15 @@ class _LocalMinio:
     def presigned_get_object(
         self, bucket_name, object_name, expires=datetime.timedelta(hours=1)
     ):
-        """Return the path to the original file as a simulated presigned URL"""
+        """Return a simulated presigned URL.
+
+        For the local backend this simply returns the path to ``object_name``
+        inside ``bucket_name``. The ``expires`` parameter is ignored.
+        """
         return os.path.join(self.base_dir, bucket_name, object_name)
 
     def fput_object(self, bucket_name, object_name, file_path):
-        """Upload a file to the specified bucket and object path"""
+        """Upload a file to the specified bucket and object path."""
         bucket_path = os.path.join(self.base_dir, bucket_name)
         if not os.path.isdir(bucket_path):
             raise FileNotFoundError(f"Bucket '{bucket_name}' does not exist.")
@@ -137,7 +181,7 @@ class _LocalMinio:
         shutil.copy2(file_path, dest_path)
 
     def fget_object(self, bucket_name, object_name, file_path):
-        """Download an object (file) from the bucket to the local filesystem"""
+        """Download an object (file) from the bucket to the local filesystem."""
         object_path = os.path.join(self.base_dir, bucket_name, object_name)
         if not os.path.isfile(object_path):
             raise FileNotFoundError(
@@ -148,7 +192,7 @@ class _LocalMinio:
         shutil.copy2(object_path, file_path)
 
     def stat_object(self, bucket_name, object_name):
-        """Retrieve metadata for a specific object"""
+        """Retrieve metadata for a specific object."""
         object_path = os.path.join(self.base_dir, bucket_name, object_name)
         if not os.path.isfile(object_path):
             raise FileNotFoundError(
@@ -163,13 +207,21 @@ class _LocalMinio:
 
 
 class ObjectStorage:
+    """Convenience wrapper around common object storage operations.
+
+    This helper abstracts interaction with either a real MinIO server or a
+    local directory acting as an object store. It exposes simple methods for
+    bucket management and file uploads/downloads.
+    """
 
     def __init__(self, config: ObjectStorageConfig):
-        """
-        Constructor
+        """Initialize the storage helper.
+
+        Depending on ``config.endpoint`` this helper connects either to a real
+        MinIO server or to a local directory used as a mock object store.
 
         Args:
-            config: ObjectStorageConfig object containing object storage configuration
+            config (ObjectStorageConfig): Storage configuration.
         """
 
         self._config = config
@@ -191,10 +243,13 @@ class ObjectStorage:
             )
 
     def check_bucket_exits(self, retries=1):
-        """
-        Check if the bucket exists in cloud object storage
+        """Check whether the configured bucket exists.
+
         Args:
-            retries: Number of retries to check if the bucket exists
+            retries (int, optional): Number of retry attempts.
+
+        Returns:
+            bool (bool): ``True`` if the bucket exists.
         """
 
         try:
@@ -212,8 +267,10 @@ class ObjectStorage:
             ) from e
 
     def ensure_bucket_exists(self):
-        """
-        Ensure the bucket exists in cloud object storage
+        """Create the bucket if it does not exist.
+
+        Raises:
+            RuntimeError: If bucket creation fails.
         """
 
         try:
@@ -225,11 +282,13 @@ class ObjectStorage:
             ) from e
 
     def list_bucket_contents(self):
-        """
-        List the contents of the bucket in cloud object storage
+        """List objects in the bucket.
 
         Returns:
-            Iterator of objects in the bucket of None if the bucket does not exist
+            (Iterable or None): Iterator over objects, or ``None`` if the bucket does not exist.
+
+        Raises:
+            RuntimeError: If listing fails.
         """
 
         try:
@@ -242,12 +301,7 @@ class ObjectStorage:
         return None
 
     def delete_bucket_contents(self) -> bool:
-        """
-        Delete the bucket contents from cloud object storage
-
-        Returns:
-            True if bucket contents were deleted, False if bucket does not exist
-        """
+        """Remove all objects from the bucket."""
 
         try:
             if self._client.bucket_exists(self._config.bucket):
@@ -262,8 +316,10 @@ class ObjectStorage:
         return False
 
     def delete_bucket(self):
-        """
-        Delete the bucket with all contents from cloud object storage
+        """Delete the bucket and all of its objects.
+
+        Raises:
+            RuntimeError: If the bucket cannot be removed.
         """
 
         try:
@@ -275,15 +331,13 @@ class ObjectStorage:
             )
 
     def generate_presigned_url(self, object_name: str):
-        """
-        Generate a presigned URL to download a file from cloud object storage bucket.
-        File must exist in the bucket prior to this call.
+        """Return a presigned download URL for an object.
 
         Args:
-            object_name: The name of the object (path within the bucket)
+            object_name (str): Name of the object within the bucket.
 
         Returns:
-            The presigned URL to download the object
+            (str): Temporary download URL for the object.
         """
 
         try:
@@ -298,13 +352,14 @@ class ObjectStorage:
             ) from e
 
     def upload_file_to_object_storage(self, file_path: str, object_name: str):
-        """
-        Upload a file to cloud object storage bucket.
+        """Upload a file to the configured bucket.
 
         Args:
-            file_path: The local path of the file to upload
-            object_name: The name of the object (path within the bucket)
+            file_path (str): Path of the local file to upload.
+            object_name (str): Name of the object within the bucket.
 
+        Raises:
+            RuntimeError: If the upload fails.
         """
 
         try:
@@ -321,12 +376,14 @@ class ObjectStorage:
         object_name: str,
         file_path: str,
     ):
-        """
-        Download a file from cloud object storage bucket.
+        """Download a file from the configured bucket.
 
         Args:
-            object_name: The name of the object (path within the bucket)
-            file_path: The local path of the file to download to
+            object_name (str): Name of the object within the bucket.
+            file_path (str): Local path where the file will be saved.
+
+        Raises:
+            RuntimeError: If the download fails.
         """
 
         try:
@@ -340,11 +397,13 @@ class ObjectStorage:
         self,
         object_name: str,
     ):
-        """
-        Delete a file from cloud object storage bucket.
+        """Delete a file from the configured bucket.
 
         Args:
-            object_name: The name of the object (path within the bucket)
+            object_name (str): Name of the object within the bucket.
+
+        Raises:
+            RuntimeError: If the deletion fails.
         """
 
         try:
@@ -358,11 +417,10 @@ class ObjectStorage:
         self,
         object_name: str,
     ):
-        """
-        Checks if a file exists in cloud object storage bucket.
+        """Check whether a file exists in the configured bucket.
 
         Args:
-            object_name: The name of the object (path within the bucket)
+            object_name (str): Name of the object within the bucket.
         """
 
         try:

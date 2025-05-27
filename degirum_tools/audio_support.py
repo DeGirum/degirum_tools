@@ -1,11 +1,51 @@
 #
 # audio_support.py: audio stream handling classes and functions
 #
-# Copyright DeGirum Corporation 2023
+# Copyright DeGirum Corporation 2025
 # All rights reserved
 #
 # Implements classes and functions to handle audio streams
 #
+
+"""
+Audio Support Module Overview
+============================
+
+This module provides utilities for opening microphone or file-based audio streams and for
+generating audio frames. The module provides context managers and generators that simplify
+audio capture and processing workflows.
+
+Key Features:
+    - **Audio Stream Management**: Open and manage audio streams from microphones and files
+    - **Buffer Generation**: Generate audio frames with configurable buffer sizes
+    - **Overlapping Buffers**: Support for overlapping audio buffers
+    - **Format Support**: Handle WAV files and microphone input
+    - **Stream Control**: Non-blocking and blocking stream operations
+    - **Error Handling**: Robust error handling for stream operations
+
+Typical Usage:
+    1. Call `open_audio_stream()` to create an audio stream
+    2. Iterate over `audio_source()` or `audio_overlapped_source()` to process frames
+    3. Use non-blocking mode for real-time processing
+    4. Handle stream errors and cleanup
+
+Integration Notes:
+    - Works with PyAudio for microphone input
+    - Supports WAV file format
+    - Handles both local and remote audio sources
+    - Provides consistent interface across platforms
+
+Key Functions:
+    - `open_audio_stream()`: Context manager for microphone or WAV files
+    - `audio_source()`: Generator yielding audio buffers
+    - `audio_overlapped_source()`: Generator yielding overlapping buffers
+
+Configuration Options:
+    - Sampling rate
+    - Buffer size
+    - Source selection
+    - Blocking mode
+"""
 
 import queue, numpy as np
 from contextlib import contextmanager
@@ -17,13 +57,24 @@ from typing import Union, Callable, Generator, Optional, Any
 def open_audio_stream(
     sampling_rate_hz: int, buffer_size: int, audio_source: Union[int, str, None] = None
 ) -> Generator[Any, None, None]:
-    """Open PyAudio audio stream
+    """Open an audio stream.
+
+    This context manager opens a microphone or WAV file as an audio stream and
+    automatically closes it when the context exits.
 
     Args:
-        sampling_rate_hz - desired sample rate in Hz
-        buffer_size - read buffer size
-        audio_source - 0-based index for local microphones or local WAV file path
-    Returns context manager yielding audio stream object and closing it on exit
+        sampling_rate_hz (int): Desired sample rate in hertz.
+        buffer_size (int): Buffer size in frames.
+        audio_source (Union[int, str, None], optional): Source identifier. Use an
+            integer for a microphone index, a string for a WAV file path or URL,
+            or ``None`` to use the default source.
+
+    Yields:
+        Stream-like object with get() method returning audio buffers.
+
+    Raises:
+        Exception: If the audio stream cannot be opened or the WAV file format
+            is invalid.
     """
 
     pyaudio = env.import_optional_package("pyaudio")
@@ -62,14 +113,17 @@ def open_audio_stream(
                 )
 
             def __enter__(self):
+                """Return self for context manager support."""
                 pass
 
             def __exit__(self, exc_type, exc_val, exc_tb):
+                """Release audio resources when exiting the context."""
                 self._stream.stop_stream()  # stop audio streaming
                 self._stream.close()  # close audio stream
                 self._audio.terminate()  # terminate audio library
 
             def get(self, no_wait=False):
+                """Return the next audio block or ``None`` if not available."""
                 if no_wait:
                     return self._result_queue.get_nowait()
                 else:
@@ -112,12 +166,15 @@ def open_audio_stream(
                 self._sample_width = self._wav.getsampwidth()
 
             def __enter__(self):
+                """Return self for context manager support."""
                 pass
 
             def __exit__(self, exc_type, exc_val, exc_tb):
+                """Close the WAV file on context exit."""
                 self._wav.close()
 
             def get(self, no_wait=False):
+                """Return the next audio block from the WAV file."""
                 buf = self._wav.readframes(self.frames_per_buffer)
                 if len(buf) < self.frames_per_buffer * self._sample_width:
                     raise StopIteration
@@ -127,17 +184,19 @@ def open_audio_stream(
 
 
 def audio_source(
-    stream, check_abort: Callable[[], bool], non_blocking: bool = False
+    stream: Any, check_abort: Callable[[], bool], non_blocking: bool = False
 ) -> Generator[Optional[np.ndarray], None, None]:
-    """Generator function, which returns audio frames captured from given audio stream.
-    Useful to pass to model batch_predict().
+    """Yield audio frames from a stream.
 
-    stream - audio stream context manager object returned by open_audio_stream()
-    check_abort - check-for-abort function or lambda; stream will be terminated when it returns True
-    non_blocking - True for non-blocking mode (immediately yields None if a block is not captured yet)
-        False for blocking mode (waits for the end of the block capture and always yields captured block)
+    Args:
+        stream (Any): Audio stream object returned by ``open_audio_stream()``.
+        check_abort (Callable[[], bool]): Callback that returns ``True`` to stop
+            iteration.
+        non_blocking (bool, optional): If ``True`` and no frame is available,
+            ``None`` is yielded instead of blocking. Defaults to ``False``.
 
-    Yields audio waveform captured from given audio stream
+    Yields:
+        Waveform of int16 samples or None when no data is available and non_blocking is True.
     """
 
     try:
@@ -156,17 +215,23 @@ def audio_source(
 
 
 def audio_overlapped_source(
-    stream, check_abort: Callable[[], bool], non_blocking: bool = False
+    stream: Any, check_abort: Callable[[], bool], non_blocking: bool = False
 ) -> Generator[Optional[np.ndarray], None, None]:
-    """Generator function, which returns audio frames captured from given audio stream with half-length overlap.
-    Useful to pass to model batch_predict().
+    """Generate audio frames with 50% overlap.
 
-    stream - audio stream context manager object returned by open_audio_stream()
-    check_abort - check-for-abort function or lambda; stream will be terminated when it returns True
-    non_blocking - True for non-blocking mode (immediately yields None if a block is not captured yet)
-        False for blocking mode (waits for the end of the block capture and always yields captured block)
+    The function reads blocks from ``stream`` and yields frames that overlap by
+    half of their length. Overlapping frames produce smoother results for audio
+    analysis.
 
-    Yields audio waveform captured from given audio stream with half-length overlap.
+    Args:
+        stream (Any): Audio stream object returned by ``open_audio_stream()``.
+        check_abort (Callable[[], bool]): Callback that returns ``True`` to stop
+            iteration.
+        non_blocking (bool, optional): If ``True`` and no frame is available,
+            ``None`` is yielded instead of blocking. Defaults to ``False``.
+
+    Yields:
+        Waveform of int16 samples with 50% overlap, or None when no data is available and non_blocking is True.
     """
 
     chunk_length = stream.frames_per_buffer

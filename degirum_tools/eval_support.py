@@ -5,6 +5,42 @@
 # All rights reserved
 #
 
+"""
+Model Evaluation Support Module Overview
+======================================
+
+This module provides base classes and utilities for model evaluation, including
+performance metrics calculation, ground truth comparison, and evaluation result
+reporting. It supports various evaluation scenarios and metrics.
+
+Key Features:
+    - **Base Evaluator Class**: Abstract base class for model evaluators
+    - **YAML Configuration**: Support for evaluator configuration via YAML files
+    - **Flexible Evaluation**: Support for different evaluation metrics and scenarios
+    - **Result Reporting**: Standardized evaluation result reporting
+    - **Ground Truth Integration**: Support for comparing model outputs with ground truth
+
+Typical Usage:
+    1. Create a custom evaluator by subclassing ModelEvaluatorBase
+    2. Configure the evaluator using YAML or constructor parameters
+    3. Run evaluation on test datasets
+    4. Analyze and report evaluation results
+
+Integration Notes:
+    - Works with DeGirum PySDK models
+    - Supports standard evaluation metrics
+    - Handles various input formats
+    - Provides extensible evaluation framework
+
+Key Classes:
+    - `ModelEvaluatorBase`: Base class for model evaluators
+
+Configuration Options:
+    - Model parameters
+    - Evaluation metrics
+    - Dataset paths
+    - Ground truth format
+"""
 
 import yaml, io
 import degirum as dg
@@ -14,15 +50,28 @@ from abc import ABC, abstractmethod
 
 
 class ModelEvaluatorBase(ABC):
+    """Base class for model evaluators.
+
+    This abstract class initializes a model object, loads configuration
+    parameters and defines the interface for performing evaluation.
+
+    Args:
+        model (dg.model.Model): Model instance to evaluate.
+        **kwargs (Any): Arbitrary model or evaluator parameters. Keys matching the
+            model attributes are applied directly to the model. Remaining keys
+            are assigned to the evaluator instance if such attributes exist.
+
+    Attributes:
+        model (dg.model.Model): The model being evaluated.
+    """
 
     def __init__(self, model: dg.model.Model, **kwargs):
-        """
-        Constructor.
+        """Initialize the evaluator.
+
         Args:
-            model: PySDK model object
-            kwargs (dict): arbitrary set of model parameters and evaluation parameters;
-                must be either valid names of model object properties
-                or non-model parameters as defined in ModelEvaluatorBase constructor
+            model (dg.model.Model): PySDK model object.
+            **kwargs (Any): Arbitrary model or evaluator parameters. Keys must either
+                match model attributes or attributes of ``ModelEvaluatorBase``.
         """
 
         #
@@ -47,15 +96,15 @@ class ModelEvaluatorBase(ABC):
     def init_from_yaml(
         cls, model: dg.model.Model, config_yaml: Union[str, io.TextIOBase]
     ) -> Self:
-        """
-        Construct model evaluator object from a yaml file.
+        """Construct an evaluator from a YAML file.
 
         Args:
-            model: PySDK model object
-            config_yaml: path or file stream of the YAML file that contains model parameters and evaluator parameters
+            model (dg.model.Model): PySDK model object.
+            config_yaml (Union[str, io.TextIOBase]): Path or open stream with
+                evaluator configuration in YAML format.
 
         Returns:
-            model evaluator object
+            Self: Instantiated evaluator object.
         """
 
         if isinstance(config_yaml, io.TextIOBase):
@@ -72,13 +121,15 @@ class ModelEvaluatorBase(ABC):
         ground_truth_annotations_path: str,
         max_images: int = 0,
     ) -> list:
-        """
-        Perform model evaluation on given dataset.
+        """Evaluate the model on a dataset.
 
         Args:
-            image_folder_path (str): Path to images
-            ground_truth_annotations_path (str): Path to the ground truth JSON annotations file (COCO format)
-            max_images (int): max number of images used for evaluation. 0: all images in `image_folder_path` are used.
+            image_folder_path (str): Directory containing evaluation images.
+            ground_truth_annotations_path (str): Path to the ground truth JSON
+                file in COCO format.
+            max_images (int, optional): Maximum number of images to process.
+                ``0`` uses all images. Defaults to ``0``.
 
-        Returns the evaluation statistics (algorithm specific)
+        Returns:
+            Evaluation statistics (algorithm specific).
         """

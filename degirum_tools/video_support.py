@@ -1,11 +1,52 @@
 #
 # video_support.py: video stream handling classes and functions
 #
-# Copyright DeGirum Corporation 2024
+# Copyright DeGirum Corporation 2025
 # All rights reserved
 #
 # Implements classes and functions to handle video streams for capturing and saving
 #
+
+"""
+Video Support Module Overview
+============================
+
+This module provides comprehensive video stream handling capabilities, including
+capturing from various sources, saving to files, and managing video clips. It
+supports local cameras, IP cameras, video files, and YouTube videos.
+
+Key Features:
+    - **Multi-Source Support**: Capture from local cameras, IP cameras, video files, and YouTube
+    - **Video Writing**: Save video streams with configurable quality and format
+    - **Frame Extraction**: Convert video files to JPEG sequences
+    - **Clip Management**: Save video clips triggered by events with pre/post buffers
+    - **FPS Control**: Frame rate management for both capture and writing
+    - **Stream Properties**: Query video stream dimensions and frame rate
+
+Typical Usage:
+    1. Open video streams with `open_video_stream()`
+    2. Process frames using `video_source()` generator
+    3. Save videos with `VideoWriter` or `open_video_writer()`
+    4. Extract frames using `video2jpegs()`
+    5. Save event-triggered clips with `ClipSaver`
+
+Integration Notes:
+    - Works with OpenCV's VideoCapture and VideoWriter
+    - Supports YouTube videos through pafy
+    - Handles both real-time and file-based video sources
+    - Provides context managers for safe resource handling
+    - Thread-safe for concurrent video operations
+
+Key Classes:
+    - `VideoWriter`: Main class for saving video streams
+    - `ClipSaver`: Manages saving video clips with pre/post buffers
+
+Configuration Options:
+    - Video quality and format settings
+    - Frame rate control
+    - Clip duration and buffer size
+    - Output file naming and paths
+"""
 
 import time, os, threading, cv2, urllib, copy, json, uuid
 import numpy as np
@@ -23,18 +64,29 @@ from typing import Union, Generator, Optional, Callable, Any, List, Dict, Tuple
 def open_video_stream(
     video_source: Union[int, str, Path, None] = None, max_yt_quality: int = 0
 ) -> Generator[cv2.VideoCapture, None, None]:
-    """Open OpenCV video stream from camera with given identifier.
+    """Open a video stream from various sources.
 
-    video_source - 0-based index for local cameras
-       or IP camera URL in the format "rtsp://<user>:<password>@<ip or hostname>",
-       or local video file path,
-       or URL to mp4 video file,
-       or YouTube video URL
-    max_yt_quality - The maximum video quality for YouTube videos. The units are
-       in pixels for the height of the video. Will open a video with the highest
-       resolution less than or equal to max_yt_quality. If 0, open the best quality.
+    This function provides a context manager for opening video streams from different
+    sources, including local cameras, IP cameras, video files, and YouTube videos.
+    The stream is automatically closed when the context is exited.
 
-    Returns context manager yielding video stream object and closing it on exit
+    Args:
+        video_source (Union[int, str, Path, None], optional): Video source specification:
+            - int: 0-based index for local cameras
+            - str: IP camera URL (rtsp://user:password@hostname)
+            - str: Local video file path
+            - str: URL to mp4 video file
+            - str: YouTube video URL
+            - None: Use environment variable or default camera
+        max_yt_quality (int, optional): Maximum video quality for YouTube videos in
+            pixels (height). If 0, use best quality. Defaults to 0.
+
+    Yields:
+        cv2.VideoCapture: OpenCV video capture object.
+
+    Raises:
+        Exception: If the video stream cannot be opened.
+
     """
 
     if env.get_test_mode() or video_source is None:
@@ -107,14 +159,14 @@ def open_video_stream(
 def get_video_stream_properties(
     video_source: Union[int, str, Path, None, cv2.VideoCapture],
 ) -> tuple:
-    """
-    Get video stream properties
+    """Return the dimensions and frame rate of a video source.
 
     Args:
-        video_source - VideoCapture object or argument of open_video_stream() function
+        video_source (Union[int, str, Path, None, cv2.VideoCapture]): Video
+            source identifier or an already opened ``VideoCapture`` object.
 
     Returns:
-        tuple of (width, height, fps)
+        ``(width, height, fps)`` describing the video stream.
     """
 
     def get_props(stream: cv2.VideoCapture) -> tuple:
@@ -134,13 +186,14 @@ def get_video_stream_properties(
 def video_source(
     stream: cv2.VideoCapture, fps: Optional[float] = None
 ) -> Generator[np.ndarray, None, None]:
-    """Generator function, which returns video frames captured from given video stream.
-    Useful to pass to model batch_predict().
+    """Yield frames from a video stream.
 
-    stream - video stream context manager object returned by open_video_stream()
-    fps - optional fps cap. If greater than the actual FPS, it will do nothing.
-       If less than the current fps, it will decimate frames accordingly.
-    Yields video frame captured from given video stream
+    Args:
+        stream (cv2.VideoCapture): Open video stream.
+        fps (Optional[float], optional): Target frame rate cap.
+
+    Yields:
+        Frames from the stream.
     """
 
     is_file = stream.get(cv2.CAP_PROP_FRAME_COUNT) > 0
@@ -198,17 +251,36 @@ def video_source(
 
 
 class VideoWriter:
-    """
-    H264 mp4 video stream writer class
+    """Video stream writer with configurable quality and format.
+
+    This class provides functionality to save video streams to files with
+    configurable dimensions, frame rate, and format. It supports both
+    OpenCV and PIL image formats as input.
+
+    Use `open_video_writer()` to create a video writer instance with proper cleanup.
+
+    Attributes:
+        filename (str): Output video file path.
+        width (int): Video width in pixels.
+        height (int): Video height in pixels.
+        fps (float): Target frame rate.
+        count (int): Number of frames written.
+
     """
 
     def __init__(self, fname: str, w: int = 0, h: int = 0, fps: float = 30.0):
-        """Create, open, and return video stream writer
+        """Initialize the video writer.
 
         Args:
-            fname: filename to save video
-            w, h: frame width/height (optional, can be zero to deduce on first frame)
-            fps: frames per second
+            fname (str): Output video file path.
+            w (int, optional): Video width in pixels. If 0, use input frame width.
+                Defaults to 0.
+            h (int, optional): Video height in pixels. If 0, use input frame height.
+                Defaults to 0.
+            fps (float, optional): Target frame rate. Defaults to 30.0.
+
+        Raises:
+            Exception: If the video writer cannot be created.
         """
         import platform
 
@@ -240,10 +312,18 @@ class VideoWriter:
             )
 
     def write(self, img: ImageType):
-        """
-        Write image to video stream
+        """Write a frame to the video file.
+
+        This method writes a single frame to the video file. The frame can be
+        in either OpenCV (BGR) or PIL format.
+
         Args:
-            img (np.ndarray): image to write
+            img (ImageType): Frame to write. Can be:
+                - OpenCV image (np.ndarray)
+                - PIL Image
+
+        Raises:
+            Exception: If the frame cannot be written.
         """
         im_sz = image_size(img)
         if self._writer is None:
@@ -256,10 +336,11 @@ class VideoWriter:
         self._writer.write(to_opencv(img))
 
     def release(self):
-        """
-        Close video stream
-        """
+        """Release the video writer resources.
 
+        This method should be called when finished writing to ensure all
+        resources are properly released.
+        """
         if self._writer is None:
             return
 
@@ -272,15 +353,27 @@ class VideoWriter:
             self._writer.release()
 
     def __enter__(self):
+        """Enter the context manager.
+
+        Returns:
+            VideoWriter: The current instance.
+        """
         pass
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        """Exit the context manager.
+
+        This method ensures the video writer is properly released when
+        exiting the context.
+        """
         self.release()
 
     @property
     def count(self):
-        """
-        Returns number of frames written to video stream
+        """Get the number of frames written.
+
+        Returns:
+            (int): Number of frames written to the video file.
         """
         return self._count
 
@@ -288,11 +381,18 @@ class VideoWriter:
 def create_video_writer(
     fname: str, w: int = 0, h: int = 0, fps: float = 30.0
 ) -> VideoWriter:
-    """Create, open, and return OpenCV video stream writer
+    """Create and return a video writer.
 
-    fname - filename to save video
-    w, h - frame width/height (optional, can be zero to deduce on first frame)
-    fps - frames per second
+    Args:
+        fname (str): Output filename for the video file.
+        w (int, optional): Frame width in pixels. ``0`` uses the width of the
+            first frame. Defaults to ``0``.
+        h (int, optional): Frame height in pixels. ``0`` uses the height of the
+            first frame. Defaults to ``0``.
+        fps (float, optional): Target frames per second. Defaults to ``30.0``.
+
+    Returns:
+        VideoWriter: Open video writer instance.
     """
 
     directory = Path(fname).parent
@@ -306,11 +406,21 @@ def create_video_writer(
 def open_video_writer(
     fname: str, w: int = 0, h: int = 0, fps: float = 30.0
 ) -> Generator[VideoWriter, None, None]:
-    """Create, open, and yield OpenCV video stream writer; release on exit
+    """Context manager for ``VideoWriter``.
 
-    fname - filename to save video
-    w, h - frame width/height (optional, can be zero to deduce on first frame)
-    fps - frames per second
+    This function creates a video writer, yields it for use inside the context,
+    and releases it automatically on exit.
+
+    Args:
+        fname (str): Output filename for the video file.
+        w (int, optional): Frame width in pixels. ``0`` uses the width of the
+            first frame. Defaults to ``0``.
+        h (int, optional): Frame height in pixels. ``0`` uses the height of the
+            first frame. Defaults to ``0``.
+        fps (float, optional): Target frames per second. Defaults to ``30.0``.
+
+    Yields:
+        VideoWriter: Open video writer instance ready for use.
     """
 
     writer = create_video_writer(fname, w, h, fps)
@@ -327,14 +437,18 @@ def video2jpegs(
     jpeg_prefix: str = "frame_",
     preprocessor: Optional[Callable[[np.ndarray], np.ndarray]] = None,
 ) -> int:
-    """Decode video file into a set of jpeg images
+    """Convert a video file into a sequence of JPEG images.
 
-    video_file - filename of a video file
-    jpeg_path - directory path to store decoded jpeg files
-    jpeg_prefix - common prefix for jpeg file names
-    preprocessor - optional image preprocessing function to be applied to each frame before saving into file
-    Returns number of decoded frames
+    Args:
+        video_file (str): Path to the input video file.
+        jpeg_path (str): Directory where JPEG files will be stored.
+        jpeg_prefix (str, optional): Prefix for generated image filenames.
+            Defaults to ``"frame_"``.
+        preprocessor (Callable[[np.ndarray], np.ndarray], optional): Optional
+            function applied to each frame before saving.
 
+    Returns:
+        int: Number of frames written to ``jpeg_path``.
     """
 
     path_to_jpeg = Path(jpeg_path)
@@ -358,9 +472,24 @@ def video2jpegs(
 
 
 class ClipSaver:
-    """
-    Class to to save video clips triggered at particular frame
-    with a specified duration before and after the event.
+    """Video clip saver with pre/post trigger buffering.
+
+    This class provides functionality to save video clips triggered by events,
+    with configurable pre-trigger and post-trigger buffers. It maintains a
+    circular buffer of frames and saves clips when triggers occur.
+
+    This class is primarily used by two other components in DeGirum Tools.
+    1. ClipSavingAnalyzer wraps ClipSaver and triggers clips from event names found in EventNotifier or EventDetector results.
+    2. EventNotifier can instantiate and use ClipSaver to record clips when a notification fires, optionally uploading those clips through NotificationServer.
+
+    Attributes:
+        clip_duration (int): Total length of output clips in frames.
+        file_prefix (str): Base path for saved clip files.
+        pre_trigger_delay (int): Frames to include before trigger.
+        embed_ai_annotations (bool): Whether to include AI annotations in clips.
+        save_ai_result_json (bool): Whether to save AI results as JSON.
+        target_fps (float): Frame rate for saved clips.
+
     """
 
     def __init__(
@@ -373,16 +502,22 @@ class ClipSaver:
         save_ai_result_json: bool = True,
         target_fps=30.0,
     ):
-        """
-        Constructor
+        """Initialize the clip saver.
 
         Args:
-            clip_duration: duration of the video clip to save (in frames)
-            file_prefix: path and file prefix for video clip files
-            pre_trigger_delay: delay before the event to start clip saving (in frames)
-            embed_ai_annotations: True to embed AI inference annotations into video clip, False to use original image
-            save_ai_result_json: True to save AI result JSON file along with video clip
-            target_fps: target frames per second for saved videos
+            clip_duration (int): Total length of output clips in frames (pre-buffer + post-buffer).
+            file_prefix (str): Base path for saved clip files. Frame number and extension
+                are appended automatically.
+            pre_trigger_delay (int, optional): Frames to include before trigger. Defaults to 0.
+            embed_ai_annotations (bool, optional): If True, use InferenceResults.image_overlay
+                to include bounding boxes/labels in the clip. Defaults to True.
+            save_ai_result_json (bool, optional): If True, save a JSON file with raw
+                inference results alongside the video. Defaults to True.
+            target_fps (float, optional): Frame rate for saved clips. Defaults to 30.0.
+
+        Raises:
+            ValueError: If clip_duration is not positive.
+            ValueError: If pre_trigger_delay is negative or exceeds clip_duration.
         """
 
         if pre_trigger_delay >= clip_duration:
@@ -409,18 +544,23 @@ class ClipSaver:
         self._thread_name = "dgtools_ClipSaverThread_" + str(uuid.uuid4())
 
     def forward(self, result, triggers: List[str] = []) -> Tuple[List[str], bool]:
-        """
-        Buffer given result in internal circular buffer.
-        Initiate saving video clip if triggers list if not empty.
+        """Process a frame and save clips if triggers occur.
+
+        This method adds the current frame to the buffer and saves clips if any
+        triggers are present. The saved clips include pre-trigger frames from
+        the buffer.
 
         Args:
-            result: PySDK model result object
-            triggers: list of event names or notifications which trigger video clip saving
+            result (Any): InferenceResults object containing the current frame and
+                detection results.
+            triggers (List[str], optional): List of trigger names that occurred
+                in this frame. Defaults to [].
 
         Returns:
-            tuple of 2 elements:
-                - all filenames related to the video clip if event is triggered in this frame, empty list otherwise
-                - True if new files are created, False if files are reused from the previous event
+            List of saved clip filenames and whether any clips were saved.
+
+        Raises:
+            Exception: If the frame cannot be saved.
         """
 
         # add result to the clip buffer
@@ -456,8 +596,10 @@ class ClipSaver:
         return (self._filenames if triggered else [], new_files)
 
     def _save_clip(self):
-        """
-        Save video clip from the buffer
+        """Save a video clip with pre-trigger frames.
+
+        This method creates a new thread to save the clip, including frames
+        from the buffer before the trigger and the current frame.
         """
 
         builtin_types = (int, float, str, bool, tuple, list, dict, set)
@@ -548,8 +690,14 @@ class ClipSaver:
         threading.Thread(target=save, args=(context,), name=self._thread_name).start()
 
     def join_all_saver_threads(self) -> int:
-        """
-        Join all threads started by this instance
+        """Wait for all clip saving threads to complete.
+
+        This method blocks until all background clip saving threads have
+        finished. It's useful to call this before exiting to ensure all
+        clips are properly saved.
+
+        Returns:
+            Number of threads that were joined.
         """
 
         # save unfinished clip if any
