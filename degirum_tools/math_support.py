@@ -763,9 +763,8 @@ def generate_tiles_fixed_ratio(
 class FIRFilterLP:
     """Low-pass Finite Impulse Response (FIR) filter implementation.
 
-    This class implements a low-pass FIR filter for smoothing signals. It uses a
-    moving average approach with configurable cutoff frequency and number of taps.
-    The filter can process both scalar and vector inputs.
+    This class implements a low-pass FIR filter for smoothing signals. It uses convolution
+    with designed filter coefficients (FIR kernel) with configurable cutoff frequency and number of taps.
 
     Attributes:
         normalized_cutoff (float): Normalized cutoff frequency (0 to 1).
@@ -781,7 +780,7 @@ class FIRFilterLP:
             normalized_cutoff (float): Normalized cutoff frequency between 0 and 1.
                 A value of 1 corresponds to the Nyquist frequency.
             taps_cnt (int): Number of filter taps (order of the filter). Higher values
-                provide better frequency response but increase computational cost.
+                provide better frequency response but increase computational cost and delay.
             dimension (int, optional): Number of dimensions in the input signal.
                 Defaults to 1 for scalar signals.
 
@@ -804,7 +803,7 @@ class FIRFilterLP:
         """Update the filter with a new sample and return the filtered value.
 
         This method adds a new sample to the filter's buffer and computes the
-        filtered output using a moving average approach.
+        filtered output by convolving the input samples with the FIR filter coefficients.
 
         Args:
             sample (Union[float, np.ndarray]): New input sample. Can be a scalar
