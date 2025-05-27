@@ -219,7 +219,7 @@ class ObjectStorage:
     """Convenience wrapper around common object storage operations.
 
     This helper abstracts interaction with either a real MinIO server or a
-    local directory acting as a mock object store. It exposes simple methods for
+    local directory acting as an object store. It exposes simple methods for
     bucket management and file uploads/downloads.
     """
 
