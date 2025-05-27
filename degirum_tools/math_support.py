@@ -298,7 +298,7 @@ def nms(
         agnostic (bool, optional): If ``True`` perform class-agnostic NMS.
 
     Returns:
-        (list[dict]): A list of dictionaries containing filtered detections.
+        None. ``detections`` is modified in place with the filtered results.
     """
 
     result_list = detections._inference_results
