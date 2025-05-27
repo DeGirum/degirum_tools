@@ -14,7 +14,7 @@ object detection results based on various strategies and optional tracking. It e
 intelligent filtering of detection results to focus on the most relevant objects.
 
 Key Features:
-    - **Selection Strategies**: Supports selecting by highest confidence score or largest bounding-box area
+    - **Selection Strategies**: Supports selecting by highest confidence score, largest bounding-box area, or by custom metric
     - **Tracking Integration**: Uses `track_id` fields to persist selections across frames with configurable timeout
     - **Top-K Selection**: Configurable number of objects to select per frame
     - **Visual Overlay**: Draws bounding boxes for selected objects on images
@@ -40,7 +40,7 @@ Key Classes:
 
 Configuration Options:
     - `top_k`: Number of objects to select per frame
-    - `selection_strategy`: Strategy for ranking objects (by highest confidence score or by largest bounding box area)
+    - `selection_strategy`: Strategy for ranking objects (by highest confidence score, by largest bounding box area, or by custom metric)
     - `use_tracking`: Enable/disable tracking-based selection persistence
     - `tracking_timeout`: Frames to wait before removing lost objects from selection
     - `show_overlay`: Enable/disable visual annotations
@@ -49,7 +49,7 @@ Configuration Options:
 
 import numpy as np, copy, cv2
 from enum import Enum
-from typing import List, Optional
+from typing import List, Optional, Callable
 from dataclasses import dataclass
 from .result_analyzer_base import ResultAnalyzerBase
 from .math_support import area
@@ -61,12 +61,14 @@ class ObjectSelectionStrategies(Enum):
     Enumeration of object selection strategies.
 
     Members:
+        CUSTOM_METRIC (int): Selects objects with the highest custom metric value.    
         HIGHEST_SCORE (int): Selects objects with the highest confidence scores.
         LARGEST_AREA (int): Selects objects with the largest bounding-box area.
     """
 
+    CUSTOM_METRIC = 0  # select objects with highest custom metric value
     HIGHEST_SCORE = 1  # select objects with highest score
-    LARGEST_AREA = 2  # select objects with largest area
+    LARGEST_AREA = 2  # select objects with largest area    
 
 
 class ObjectSelector(ResultAnalyzerBase):
@@ -102,6 +104,7 @@ class ObjectSelector(ResultAnalyzerBase):
         *,
         top_k: int = 1,
         selection_strategy: ObjectSelectionStrategies = ObjectSelectionStrategies.HIGHEST_SCORE,
+        custom_metric: Optional[Callable] = None,
         use_tracking: bool = True,
         tracking_timeout: int = 30,
         show_overlay: bool = True,
@@ -113,6 +116,7 @@ class ObjectSelector(ResultAnalyzerBase):
         Args:
             top_k (int, optional): Number of objects to select. Default 1.
             selection_strategy (ObjectSelectionStrategies, optional): Strategy for ranking objects. Default ObjectSelectionStrategies.HIGHEST_SCORE.
+            custom_metric (callable, optional): Custom metric function to use for selection. If provided, overrides the default strategies. The function should take a detection dictionary and return a numeric value.
             use_tracking (bool, optional): Whether to enable tracking-based selection. If True, only objects with a `track_id` field are selected (requires an ObjectTracker to precede this analyzer in the pipeline). Default True.
             tracking_timeout (int, optional): Number of frames to wait before removing an object from selection if it is not detected. Default 30.
             show_overlay (bool, optional): Whether to draw bounding boxes around selected objects on the output image. If False, the image is passed through unchanged. Default True.
@@ -123,6 +127,11 @@ class ObjectSelector(ResultAnalyzerBase):
         """
         self._top_k = top_k
         self._selection_strategy = selection_strategy
+        self._custom_metric = custom_metric
+        if selection_strategy == ObjectSelectionStrategies.CUSTOM_METRIC and custom_metric is None:
+            raise ValueError(
+                "Custom metric must be provided when selection strategy is CUSTOM_METRIC."
+            )
         self._use_tracking = use_tracking
         self._selected_objects: List[ObjectSelector._SelectedObject] = []
         self._tracking_timeout = tracking_timeout
@@ -145,7 +154,12 @@ class ObjectSelector(ResultAnalyzerBase):
 
         all_detections = result._inference_results
 
-        if self._selection_strategy == ObjectSelectionStrategies.LARGEST_AREA:
+        if self._selection_strategy == ObjectSelectionStrategies.CUSTOM_METRIC:
+
+            def metric(det):
+                return self._custom_metric(det) if self._custom_metric is not None else 0
+
+        elif self._selection_strategy == ObjectSelectionStrategies.LARGEST_AREA:
 
             def metric(det):
                 return area(np.array(det["bbox"]))
