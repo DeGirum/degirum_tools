@@ -70,12 +70,11 @@ def open_audio_stream(
             or ``None`` to use the default source.
 
     Yields:
-        Any: Stream-like object with ``get()`` method returning audio buffers.
+        Stream-like object with get() method returning audio buffers.
 
     Raises:
         Exception: If the audio stream cannot be opened or the WAV file format
             is invalid.
-
     """
 
     pyaudio = env.import_optional_package("pyaudio")
@@ -197,9 +196,7 @@ def audio_source(
             ``None`` is yielded instead of blocking. Defaults to ``False``.
 
     Yields:
-        Optional[np.ndarray]: Waveform of ``int16`` samples or ``None`` when no
-        data is available and ``non_blocking`` is ``True``.
-
+        Waveform of int16 samples or None when no data is available and non_blocking is True.
     """
 
     try:
@@ -234,9 +231,7 @@ def audio_overlapped_source(
             ``None`` is yielded instead of blocking. Defaults to ``False``.
 
     Yields:
-        Optional[np.ndarray]: Waveform of ``int16`` samples with 50% overlap, or
-        ``None`` when no data is available and ``non_blocking`` is ``True``.
-
+        Waveform of int16 samples with 50% overlap, or None when no data is available and non_blocking is True.
     """
 
     chunk_length = stream.frames_per_buffer

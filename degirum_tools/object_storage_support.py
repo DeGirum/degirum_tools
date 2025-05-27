@@ -56,9 +56,6 @@ class ObjectStorageConfig:
 
         Args:
             object_name (str): Name of the object inside the bucket.
-
-        Returns:
-            str: Fully-qualified URL pointing to the object.
         """
 
         return f"{self.endpoint}/{self.bucket}/{object_name}"
@@ -98,9 +95,6 @@ class _LocalMinio:
 
         Args:
             bucket_name (str): Name of the bucket to check.
-
-        Returns:
-            bool: ``True`` if the bucket directory is present.
         """
         bucket_path = os.path.join(self.base_dir, bucket_name)
         return os.path.isdir(bucket_path)
@@ -123,9 +117,6 @@ class _LocalMinio:
                 prefix. Defaults to an empty string.
             recursive (bool, optional): If ``True`` search subdirectories
                 recursively. Defaults to ``False``.
-
-        Yields:
-            _LocalMinio.Object: Metadata for each object found.
         """
         bucket_path = os.path.join(self.base_dir, bucket_name)
         if not os.path.isdir(bucket_path):
@@ -151,7 +142,7 @@ class _LocalMinio:
                     )
 
     def remove_object(self, bucket_name, object_name):
-        """Remove a specific object (file) from the bucket"""
+        """Remove a specific object (file) from the bucket."""
         object_path = os.path.join(self.base_dir, bucket_name, object_name)
         if not os.path.isfile(object_path):
             raise FileNotFoundError(
@@ -180,7 +171,7 @@ class _LocalMinio:
         return os.path.join(self.base_dir, bucket_name, object_name)
 
     def fput_object(self, bucket_name, object_name, file_path):
-        """Upload a file to the specified bucket and object path"""
+        """Upload a file to the specified bucket and object path."""
         bucket_path = os.path.join(self.base_dir, bucket_name)
         if not os.path.isdir(bucket_path):
             raise FileNotFoundError(f"Bucket '{bucket_name}' does not exist.")
@@ -190,7 +181,7 @@ class _LocalMinio:
         shutil.copy2(file_path, dest_path)
 
     def fget_object(self, bucket_name, object_name, file_path):
-        """Download an object (file) from the bucket to the local filesystem"""
+        """Download an object (file) from the bucket to the local filesystem."""
         object_path = os.path.join(self.base_dir, bucket_name, object_name)
         if not os.path.isfile(object_path):
             raise FileNotFoundError(
@@ -201,7 +192,7 @@ class _LocalMinio:
         shutil.copy2(object_path, file_path)
 
     def stat_object(self, bucket_name, object_name):
-        """Retrieve metadata for a specific object"""
+        """Retrieve metadata for a specific object."""
         object_path = os.path.join(self.base_dir, bucket_name, object_name)
         if not os.path.isfile(object_path):
             raise FileNotFoundError(
@@ -258,7 +249,7 @@ class ObjectStorage:
             retries (int, optional): Number of retry attempts.
 
         Returns:
-            bool: ``True`` if the bucket exists.
+            bool (bool): ``True`` if the bucket exists.
         """
 
         try:
@@ -294,7 +285,7 @@ class ObjectStorage:
         """List objects in the bucket.
 
         Returns:
-            Iterable | None: Iterator over objects, or ``None`` if the bucket does not exist.
+            (Iterable or None): Iterator over objects, or ``None`` if the bucket does not exist.
 
         Raises:
             RuntimeError: If listing fails.
@@ -310,12 +301,7 @@ class ObjectStorage:
         return None
 
     def delete_bucket_contents(self) -> bool:
-        """Remove all objects from the bucket.
-
-        Returns:
-            bool: ``True`` if the bucket existed and was emptied,
-            ``False`` otherwise.
-        """
+        """Remove all objects from the bucket."""
 
         try:
             if self._client.bucket_exists(self._config.bucket):
@@ -351,7 +337,7 @@ class ObjectStorage:
             object_name (str): Name of the object within the bucket.
 
         Returns:
-            str: Temporary download URL for the object.
+            (str): Temporary download URL for the object.
         """
 
         try:
@@ -435,9 +421,6 @@ class ObjectStorage:
 
         Args:
             object_name (str): Name of the object within the bucket.
-
-        Returns:
-            Any | None: Object metadata if the file exists, otherwise ``None``.
         """
 
         try:

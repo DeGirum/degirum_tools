@@ -131,5 +131,5 @@ class ModelEvaluatorBase(ABC):
                 ``0`` uses all images. Defaults to ``0``.
 
         Returns:
-            list: Evaluation statistics (algorithm specific).
+            Evaluation statistics (algorithm specific).
         """

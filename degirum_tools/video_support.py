@@ -166,7 +166,7 @@ def get_video_stream_properties(
             source identifier or an already opened ``VideoCapture`` object.
 
     Returns:
-        tuple: ``(width, height, fps)`` describing the video stream.
+        ``(width, height, fps)`` describing the video stream.
     """
 
     def get_props(stream: cv2.VideoCapture) -> tuple:
@@ -193,7 +193,7 @@ def video_source(
         fps (Optional[float], optional): Target frame rate cap.
 
     Yields:
-        np.ndarray: Frames from the stream.
+        Frames from the stream.
     """
 
     is_file = stream.get(cv2.CAP_PROP_FRAME_COUNT) > 0
@@ -373,7 +373,7 @@ class VideoWriter:
         """Get the number of frames written.
 
         Returns:
-            int: Number of frames written to the video file.
+            (int): Number of frames written to the video file.
         """
         return self._count
 
@@ -557,8 +557,7 @@ class ClipSaver:
                 in this frame. Defaults to [].
 
         Returns:
-            Tuple[List[str], bool]: List of saved clip filenames and whether
-                any clips were saved.
+            List of saved clip filenames and whether any clips were saved.
 
         Raises:
             Exception: If the frame cannot be saved.
@@ -698,7 +697,7 @@ class ClipSaver:
         clips are properly saved.
 
         Returns:
-            int: Number of threads that were joined.
+            Number of threads that were joined.
         """
 
         # save unfinished clip if any
