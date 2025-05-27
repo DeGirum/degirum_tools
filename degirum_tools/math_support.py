@@ -33,37 +33,42 @@
 Math Support Module Overview
 ===========================
 
-This module provides mathematical utilities for working with arrays, including
-statistical calculations, array operations, and numerical computations.
+This module provides mathematical utilities for geometric operations and signal processing.
+It includes functions for bounding box manipulation, non-maximum suppression, image tiling,
+and a lightweight FIR low-pass filter implementation.
 
 Key Features:
-    - **Statistical Functions**: Mean, standard deviation, and other statistical measures
-    - **Array Operations**: Efficient array manipulation and transformation
-    - **Numerical Computations**: Mathematical operations on arrays
-    - **Performance Optimized**: Fast implementations using NumPy
-    - **Type Support**: Handles various numeric types and array shapes
+    - **Bounding Box Operations**: Area calculation, IoU computation, coordinate conversions
+    - **Non-maximum Suppression**: Multiple selection policies for detection filtering
+    - **Edge Box Fusion**: Handling overlapping detections with configurable thresholds
+    - **Image Tiling**: Utilities for fixed size or aspect ratio tiling
+    - **FIR Filter**: Lightweight low-pass filter implementation for signal smoothing
 
 Typical Usage:
     1. Import required functions from the module
-    2. Apply statistical functions to arrays
-    3. Use array operations for data transformation
-    4. Perform numerical computations as needed
+    2. Use bounding box operations for detection processing
+    3. Apply NMS or box fusion for post-processing detections
+    4. Generate image tiles for processing large images
+    5. Use FIRFilterLP for smoothing numeric sequences
 
 Integration Notes:
     - Built on NumPy for efficient array operations
-    - Compatible with various array types and shapes
-    - Handles edge cases and invalid inputs
+    - Compatible with various bounding box formats (xyxy, xywh)
     - Provides consistent results across platforms
+    - Includes comprehensive error handling
 
 Key Functions:
-    - `mean()`: Calculate mean of array elements
-    - `std()`: Calculate standard deviation
-    - `array_operations()`: Various array manipulation functions
+    - `area()`: Calculate bounding box areas
+    - `intersection()`: Compute intersection area of bounding boxes
+    - `nms()`: Apply non-maximum suppression
+    - `edge_box_fusion()`: Fuse overlapping edge detections
+    - `generate_tiles_fixed_size()`: Generate overlapping image tiles
 
 Configuration Options:
-    - Axis selection for operations
-    - Data type handling
-    - Error handling options
+    - NMS selection policies
+    - Box fusion thresholds
+    - Tile overlap parameters
+    - Filter coefficients
 """
 
 import numpy as np
@@ -79,8 +84,7 @@ def area(box: np.ndarray) -> np.ndarray:
             boxes with shape ``(N, 4)``.
 
     Returns:
-        np.ndarray: Area of each input box.
-
+        Area of each input box.
     """
     return (box[..., 2] - box[..., 0]) * (box[..., 3] - box[..., 1])
 
@@ -93,8 +97,7 @@ def intersection(boxA: np.ndarray, boxB: np.ndarray) -> Union[float, np.ndarray]
         boxB (np.ndarray): Second set of boxes ``(x1, y1, x2, y2)``.
 
     Returns:
-        Union[float, np.ndarray]: Intersection area for each pair of boxes.
-
+        Intersection area for each pair of boxes.
     """
     xA = np.fmax(boxA[..., 0], boxB[..., 0])
     xB = np.fmin(boxA[..., 2], boxB[..., 2])
@@ -143,7 +146,7 @@ def box_iou_batch(boxes_true: np.ndarray, boxes_detection: np.ndarray) -> np.nda
         boxes_detection (np.ndarray): Detection boxes ``(M, 4)``.
 
     Returns:
-        np.ndarray: IoU matrix of shape ``(N, M)``.
+        IoU matrix of shape ``(N, M)``.
     """
 
     def box_area(box):
@@ -167,13 +170,13 @@ class NmsBoxSelectionPolicy(Enum):
     and trade-offs.
 
     Attributes:
-        MOST_PROBABLE: Traditional NMS approach that keeps the box with highest confidence score.
+        MOST_PROBABLE (int): Traditional NMS approach that keeps the box with highest confidence score.
             Best for high-confidence detections where false positives are costly.
-        LARGEST_AREA: Keeps the box with the largest area. Useful when larger detections
+        LARGEST_AREA (int): Keeps the box with the largest area. Useful when larger detections
             are more likely to be correct or when object size is important.
-        AVERAGE: Averages the coordinates of all overlapping boxes. Good for reducing
+        AVERAGE (int): Averages the coordinates of all overlapping boxes. Good for reducing
             jitter in tracking applications.
-        MERGE: Merges all overlapping boxes into a single box. Useful when multiple
+        MERGE (int): Merges all overlapping boxes into a single box. Useful when multiple
             detections of the same object are expected.
     """
 
@@ -295,7 +298,7 @@ def nms(
         agnostic (bool, optional): If ``True`` perform class-agnostic NMS.
 
     Returns:
-        list[dict]: Filtered detections.
+        (list[dict]): A list of dictionaries containing filtered detections.
     """
 
     result_list = detections._inference_results
@@ -477,8 +480,8 @@ def edge_box_fusion(
         destructive (bool): Keep skipped boxes (underneath the `score_threshold`) in the results.
 
     Returns:
-        DetectionResult.results: A list of dictionaries that contain detection results as defined in PySDK.
-        Boxes that are not fused are kept if destructive is False, otherwise they are discarded.
+        (DetectionResult.results): A list of dictionaries that contain detection results as defined in PySDK.
+            Boxes that are not fused are kept if destructive is False, otherwise they are discarded.
     """
 
     boxes_list = []
@@ -567,7 +570,7 @@ def edge_box_fusion(
 
 
 class AnchorPoint(Enum):
-    """Position of a point of interest within the bounding box"""
+    """Position of a point of interest within the bounding box."""
 
     CENTER = 1
     CENTER_LEFT = 2
@@ -588,7 +591,7 @@ def get_anchor_coordinates(xyxy: np.ndarray, anchor: AnchorPoint) -> np.ndarray:
         anchor (AnchorPoint): Desired anchor location.
 
     Returns:
-        np.ndarray: Array ``(N, 2)`` with ``[x, y]`` coordinates.
+        Array ``(N, 2)`` with ``[x, y]`` coordinates.
 
     Raises:
         ValueError: If ``anchor`` is unsupported.
@@ -687,7 +690,10 @@ def generate_tiles_fixed_size(
         min_overlap_percent (Union[np.ndarray, Sequence]): Minimum overlap in percent.
 
     Returns:
-        np.ndarray: Array of tile coordinates ``(x1, y1, x2, y2)``.
+        (np.ndarray): Array of shape ``(N, M, 4)`` containing tile coordinates, where
+            N is the number of rows in the tile grid,
+            M is the number of columns in the tile grid,
+            and 4 represents the coordinates ``(x1, y1, x2, y2)`` for each tile.
     """
 
     if not isinstance(tile_size, np.ndarray):
@@ -719,7 +725,10 @@ def generate_tiles_fixed_ratio(
         min_overlap_percent (Union[np.ndarray, Sequence, float]): Minimum overlap percent.
 
     Returns:
-        np.ndarray: Array of tile coordinates ``(x1, y1, x2, y2)``.
+        (np.ndarray): Array of shape ``(N, M, 4)`` containing tile coordinates, where
+            N is the number of rows in the tile grid,
+            M is the number of columns in the tile grid,
+            and 4 represents the coordinates ``(x1, y1, x2, y2)`` for each tile.
     """
 
     if not isinstance(grid_size, np.ndarray):
@@ -810,7 +819,7 @@ class FIRFilterLP:
                 or an array of length equal to the filter's dimension.
 
         Returns:
-            np.ndarray: Filtered output value. Has the same shape as the input sample.
+            Filtered output value with the same shape as the input sample.
 
         Raises:
             ValueError: If the input sample's shape doesn't match the filter's dimension.
@@ -826,7 +835,7 @@ class FIRFilterLP:
         """Get the current filtered value without updating the filter.
 
         Returns:
-            np.ndarray: Current filtered value based on the samples in the buffer.
+            Current filtered value based on the samples in the buffer.
         """
         return self._result
 
@@ -840,6 +849,6 @@ class FIRFilterLP:
                 or an array of length equal to the filter's dimension.
 
         Returns:
-            np.ndarray: Filtered output value. Has the same shape as the input sample.
+            Filtered output value with the same shape as the input sample.
         """
         return self.update(sample)
