@@ -70,7 +70,7 @@ def deduce_text_color(bg_color: tuple):
         bg_color (tuple): Background color as an ``(R, G, B)`` tuple.
 
     Returns:
-        Tuple[int, int, int]: ``(R, G, B)`` value for black or white text.
+        (Tuple[int, int, int]): ``(R, G, B)`` value for black or white text.
     """
     return (0, 0, 0) if luminance(bg_color) > 180 else (255, 255, 255)
 
@@ -82,7 +82,7 @@ def color_complement(color):
         color (tuple | list): Color specified as ``(R, G, B)``.
 
     Returns:
-        Tuple[int, int, int]: Complementary color in ``(R, G, B)`` format.
+        (Tuple[int, int, int]): Complementary color in ``(R, G, B)`` format.
     """
     adj_color = color[0] if isinstance(color, list) else color
     return tuple([255 - c for c in adj_color])
@@ -95,7 +95,7 @@ def rgb_to_bgr(color):
         color (tuple): Color in ``(R, G, B)`` format.
 
     Returns:
-        Tuple[int, int, int]: Color in ``(B, R, G)`` order for OpenCV functions.
+        (Tuple[int, int, int]): Color in ``(B, R, G)`` order for OpenCV functions.
     """
     return color[::-1]
 
@@ -143,7 +143,19 @@ def ipython_display(obj: Any, clear: bool = False, display_id: Optional[str] = N
 
 
 class CornerPosition(Enum):
-    """Corner position options"""
+    """Enumeration of possible corner positions for text placement.
+
+    This enum defines the possible positions where text can be placed relative to
+    a reference point in an image. The AUTO option will automatically choose the
+    best corner based on the reference point's position.
+
+    Attributes:
+        AUTO (int): Automatically choose the best corner position.
+        TOP_LEFT (int): Place text at the top-left corner.
+        TOP_RIGHT (int): Place text at the top-right corner.
+        BOTTOM_LEFT (int): Place text at the bottom-left corner.
+        BOTTOM_RIGHT (int): Place text at the bottom-right corner.
+    """
 
     AUTO = 0
     TOP_LEFT = 1
@@ -187,7 +199,7 @@ def put_text(
         line_spacing (float, optional): Multiplier for line spacing. Defaults to 1.
 
     Returns:
-        np.ndarray: Image with text drawn on it.
+        Image with text drawn on it.
     """
 
     if not label:
@@ -322,8 +334,7 @@ def stack_images(
         font_color (tuple, optional): RGB color for labels. Defaults to white.
 
     Returns:
-        np.ndarray | PIL.Image.Image: Combined image with optional resizing and
-        labels.
+        Combined image with optional resizing and labels.
     """
     ret_type: Callable = np.array
 
@@ -423,15 +434,16 @@ class FPSMeter:
     """
 
     def __init__(self, avg_len: int = 100):
-        """Constructor
+        """Constructor.
 
-        avg_len - number of samples to average
+        Args:
+            avg_len (int): Number of samples to use for FPS calculation. Defaults to 100.
         """
         self._avg_len = avg_len
         self.reset()
 
     def reset(self):
-        """Reset accumulators"""
+        """Reset accumulators."""
         self._timestamp_ns = -1
         self._duration_ns = -1
         self._count = 0
@@ -439,7 +451,7 @@ class FPSMeter:
     def record(self) -> float:
         """Record timestamp and update average duration.
 
-        Returns current average FPS"""
+        Returns current average FPS."""
         t = time.time_ns()
         if self._timestamp_ns > 0:
             cur_dur_ns = t - self._timestamp_ns
@@ -451,7 +463,7 @@ class FPSMeter:
         return self.fps()
 
     def fps(self) -> float:
-        """Return current average FPS"""
+        """Return current average FPS."""
         return 1e9 / self._duration_ns if self._duration_ns > 0 else 0
 
 
@@ -476,12 +488,16 @@ class Display:
         w: Optional[int] = None,
         h: Optional[int] = None,
     ):
-        """Constructor
+        """Constructor.
 
-        capt - window title
-        show_fps - True to show FPS
-        show_embedded - True to show graph embedded into the notebook when possible
-        w, h - initial window width/hight in pixels; None for autoscale
+        Args:
+            capt (str): Window title. Defaults to "<image>".
+            show_fps (bool): Whether to show FPS counter. Defaults to True.
+            w (Optional[int]): Initial window width in pixels; None for autoscale. Defaults to None.
+            h (Optional[int]): Initial window height in pixels; None for autoscale. Defaults to None.
+
+        Raises:
+            Exception: If window title is empty.
         """
         self._fps = FPSMeter()
 
@@ -499,10 +515,10 @@ class Display:
         self._display_id: Optional[str] = None
 
     def _update_notebook_display(self, obj: Any):
-        """Update notebook display with given object
+        """Update notebook display with given object.
 
         Args:
-            obj - object to display
+            obj (Any): Object to display in the notebook.
         """
 
         import IPython.display
@@ -538,16 +554,19 @@ class Display:
 
     @property
     def window_name(self) -> str:
-        """
-        Returns window name
+        """Get the window name.
+
+        Returns:
+            Name of the display window.
         """
         return self._capt
 
     @staticmethod
     def _check_gui() -> bool:
-        """Check if graphical display is supported
+        """Check if graphical display is supported.
 
-        Returns False if not supported
+        Returns:
+            True if graphical display is supported, False otherwise.
         """
         import platform
 
@@ -557,7 +576,7 @@ class Display:
 
     @staticmethod
     def _display_fps(img: np.ndarray, fps: float):
-        """Helper method to display FPS"""
+        """Helper method to display FPS."""
         put_text(
             img,
             f"{fps:5.1f} FPS",
@@ -567,10 +586,13 @@ class Display:
         )
 
     def show(self, img: Any, waitkey_delay: int = 1):
-        """Show image or model result
+        """Show image or model result.
 
-        img - numpy array with valid OpenCV image, or PIL image, or model result object
-        waitkey_delay - delay in ms for waitKey() call; use 0 to show still images, use 1 for streaming video
+        Args:
+            img (Any): Image to display. Can be a numpy array with valid OpenCV image,
+                PIL image, or model result object.
+            waitkey_delay (int): Delay in ms for waitKey() call. Use 0 to show still images,
+                use 1 for streaming video. Defaults to 1.
         """
 
         # show image in notebook
@@ -666,24 +688,28 @@ class Display:
                 cv2.resizeWindow(self._capt, new_w, new_h)
 
     def show_image(self, img: Any):
-        """Show still image or model result
+        """Show still image or model result.
 
-        img - numpy array with valid OpenCV image, or PIL image, or model result object
+        Args:
+            img (Any): Image to display. Can be a numpy array with valid OpenCV image,
+                PIL image, or model result object.
         """
         self.show(img, 0)
 
 
 class Timer:
-    """Simple timer class"""
+    """Simple timer class."""
 
     def __init__(self):
         """Constructor. Records start time."""
         self._start_time = time.time_ns()
 
     def __call__(self) -> float:
-        """Call method.
+        """Get elapsed time since timer creation.
 
-        Returns time elapsed (in seconds, since object construction)."""
+        Returns:
+            Time elapsed in seconds since object construction.
+        """
         return (time.time_ns() - self._start_time) * 1e-9
 
 
@@ -708,10 +734,13 @@ class Progress:
         bar_len: int = 15,
         speed_units: str = "FPS",
     ):
-        """Constructor
-        last_step - last step
-        start_step - starting step
-        bar_len - progress bar length in symbols
+        """Constructor.
+
+        Args:
+            last_step (Optional[int]): Total number of steps (None for indeterminate). Defaults to None.
+            start_step (int): Starting step number. Defaults to 0.
+            bar_len (int): Progress bar length in symbols. Defaults to 15.
+            speed_units (str): Units to display for speed (e.g., "FPS", "items/s"). Defaults to "FPS".
         """
         self._display_id: Optional[str] = None
         self._len = bar_len
@@ -737,9 +766,11 @@ class Progress:
         self._update()
 
     def step(self, steps: int = 1, *, message: Optional[str] = None):
-        """Update progress by given number of steps
-        steps - number of steps to advance
-        message - optional message to display
+        """Update progress by given number of steps.
+
+        Args:
+            steps: Number of steps to advance.
+            message: Optional message to display.
         """
         assert (
             self._last_step is not None
@@ -763,7 +794,7 @@ class Progress:
 
     @property
     def step_range(self) -> Optional[tuple]:
-        """Get start-end step range (if defined)"""
+        """Get start-end step range (if defined)."""
         if self._last_step is not None:
             return (self._start_step, self._last_step)
         else:
@@ -796,7 +827,7 @@ class Progress:
         self._update()
 
     def _update(self):
-        """Update progress bar"""
+        """Update progress bar."""
         self._last_updated_percent = self._percent
         bars = int(self._percent / 100 * self._len)
         elapsed_s = time.time() - self._start_time
@@ -847,14 +878,13 @@ class Progress:
 
 
 class stdoutRedirector:
-    """Redirect stdout to another stream"""
+    """Redirect stdout to another stream."""
 
     def __init__(self, stream: Optional[str] = None):
-        """
-        Constructor
+        """Constructor.
 
         Args:
-            stream: output stream to redirect to; None to redirect to null device
+            stream (Optional[str]): Output stream to redirect to; None to redirect to null device. Defaults to None.
         """
         self._stdout = sys.stdout
         self._stream = stream
