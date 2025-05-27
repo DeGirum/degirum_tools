@@ -37,7 +37,7 @@ Integration Notes:
     - Handles video files in Jupyter notebooks
     - Provides consistent interface across different platforms
 
-Key Classes:F
+Key Classes:
     - `Display`: Main class for showing images and videos
     - `Progress`: Progress bar with speed and percentage display
     - `FPSMeter`: Frames per second measurement
@@ -188,12 +188,6 @@ def put_text(
 
     Returns:
         np.ndarray: Image with text drawn on it.
-
-    Example:
-        >>> img = np.zeros((100, 200, 3), dtype=np.uint8)
-        >>> img = put_text(img, "Hello\nWorld", (10, 10),
-        ...                font_color=(255, 255, 255),
-        ...                bg_color=(0, 0, 0))
     """
 
     if not label:
@@ -426,13 +420,6 @@ class FPSMeter:
 
     Attributes:
         avg_len (int): Number of samples to use for FPS calculation.
-
-    Example:
-        >>> meter = FPSMeter(avg_len=30)
-        >>> for frame in video:
-        ...     process_frame(frame)
-        ...     fps = meter.record()
-        ...     print(f"Current FPS: {fps:.1f}")
     """
 
     def __init__(self, avg_len: int = 100):
@@ -480,11 +467,6 @@ class Display:
         show_fps (bool): Whether to show FPS counter on displayed images.
         width (Optional[int]): Target width for displayed images.
         height (Optional[int]): Target height for displayed images.
-
-    Example:
-        >>> with Display("My Window") as display:
-        ...     display.show(my_image)
-        ...     display.show_image(another_image)
     """
 
     def __init__(
@@ -716,12 +698,6 @@ class Progress:
         start_step (int): Starting step number.
         bar_len (int): Length of the progress bar in characters.
         speed_units (str): Units to display for speed (e.g., "FPS", "items/s").
-
-    Example:
-        >>> progress = Progress(last_step=100)
-        >>> for i in range(100):
-        ...     process_item(i)
-        ...     progress.step(message=f"Processing item {i}")
     """
 
     def __init__(
