@@ -257,6 +257,8 @@ class VideoWriter:
     configurable dimensions, frame rate, and format. It supports both
     OpenCV and PIL image formats as input.
 
+    Use `open_video_writer()` to create a video writer instance with proper cleanup.
+
     Attributes:
         filename (str): Output video file path.
         width (int): Video width in pixels.
@@ -475,6 +477,10 @@ class ClipSaver:
     This class provides functionality to save video clips triggered by events,
     with configurable pre-trigger and post-trigger buffers. It maintains a
     circular buffer of frames and saves clips when triggers occur.
+
+    This class is primarily used by two other components in DeGirum Tools.
+    1. ClipSavingAnalyzer wraps ClipSaver and triggers clips from event names found in EventNotifier or EventDetector results.
+    2. EventNotifier can instantiate and use ClipSaver to record clips when a notification fires, optionally uploading those clips through NotificationServer.
 
     Attributes:
         clip_duration (int): Total length of output clips in frames.
