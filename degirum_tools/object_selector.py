@@ -223,7 +223,7 @@ class ObjectSelector(ResultAnalyzerBase):
                 # add new objects with metric value higher than threshold
                 self._selected_objects += [
                     ObjectSelector._SelectedObject(copy.deepcopy(det))
-                    for det in detections_and_metrics
+                    for det in tracked_detections.values()
                     if det[1] > self._metric_threshold
                 ]
 
