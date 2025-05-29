@@ -82,13 +82,12 @@ def test_object_selector():
             ],
             "res": [[{"bbox": big_box, "score": 0.5}, {"bbox": lil_box, "score": 1}]],
         },
-
         # two objects, custom metric (min score)
         {
             "params": {
                 "top_k": 2,
                 "selection_strategy": degirum_tools.ObjectSelectionStrategies.CUSTOM_METRIC,
-                "custom_metric": lambda det: 1.0 - det["score"],
+                "custom_metric": lambda det, result: 1.0 - det["score"],
                 "use_tracking": False,
             },
             "inp": [
@@ -100,7 +99,6 @@ def test_object_selector():
             ],
             "res": [[{"bbox": lil_box, "score": 0.2}, {"bbox": big_box, "score": 0.5}]],
         },
-
         # too many objects, largest area
         {
             "params": {
@@ -120,6 +118,28 @@ def test_object_selector():
                     {"bbox": big_box, "score": 0.5},
                     {"bbox": lil_box, "score": 1},
                     {"bbox": lil_box, "score": 0.2},
+                ]
+            ],
+        },
+        # many objects, metric threshold by score
+        {
+            "params": {
+                "top_k": 0,
+                "metric_threshold": 0.5,
+                "selection_strategy": degirum_tools.ObjectSelectionStrategies.HIGHEST_SCORE,
+                "use_tracking": False,
+            },
+            "inp": [
+                [
+                    {"bbox": lil_box, "score": 1},
+                    {"bbox": big_box, "score": 0.6},
+                    {"bbox": lil_box, "score": 0.2},
+                ]
+            ],
+            "res": [
+                [
+                    {"bbox": lil_box, "score": 1},
+                    {"bbox": big_box, "score": 0.6},
                 ]
             ],
         },
