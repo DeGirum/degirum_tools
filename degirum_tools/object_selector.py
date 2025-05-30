@@ -50,7 +50,7 @@ Configuration Options:
 import numpy as np, copy, cv2
 import degirum as dg
 from enum import Enum
-from typing import List, Optional, Callable, Dict, Any
+from typing import List, Optional, Callable, Dict, Any, Tuple
 from dataclasses import dataclass
 from .result_analyzer_base import ResultAnalyzerBase
 from .math_support import area
@@ -95,7 +95,7 @@ class ObjectSelector(ResultAnalyzerBase):
             counter (int): Frames since last seen before removal.
         """
 
-        detection: tuple  # detection result
+        detection: Tuple[Dict[str, Any], float]   # detection result
         counter: int = (
             0  # counter to keep track of how long the object has not been found in new results
         )
@@ -205,6 +205,7 @@ class ObjectSelector(ResultAnalyzerBase):
                 if matching_detection is not None:
                     # update bbox from new result
                     obj.detection = matching_detection
+                    obj.counter = 0
                 else:
                     # delete object if not found in new result for a while
                     obj.counter += 1

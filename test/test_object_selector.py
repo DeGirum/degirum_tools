@@ -215,7 +215,7 @@ def test_object_selector():
                 "top_k": 1,
                 "selection_strategy": degirum_tools.ObjectSelectionStrategies.LARGEST_AREA,
                 "use_tracking": True,
-                "tracking_timeout": 1,
+                "tracking_timeout": 2,
             },
             "inp": [
                 [
@@ -223,14 +223,45 @@ def test_object_selector():
                     {"bbox": big_box, "score": 0.5, "track_id": 1},
                 ],
                 [{"bbox": lil_box, "score": 0.7, "track_id": 0}],
+                [{"bbox": lil_box, "score": 0.9, "track_id": 0}],
                 [{"bbox": lil_box, "score": 1, "track_id": 0}],
+                [{"bbox": big_box, "score": 0.8, "track_id": 1}],
+                [{"bbox": big_box, "score": 0.8, "track_id": 1}],
                 [{"bbox": big_box, "score": 0.8, "track_id": 1}],
             ],
             "res": [
                 [{"bbox": big_box, "score": 0.5, "track_id": 1}],
                 [{"bbox": big_box, "score": 0.5, "track_id": 1}],
+                [{"bbox": big_box, "score": 0.5, "track_id": 1}],
                 [{"bbox": lil_box, "score": 1, "track_id": 0}],
                 [{"bbox": lil_box, "score": 1, "track_id": 0}],
+                [{"bbox": lil_box, "score": 1, "track_id": 0}],
+                [{"bbox": big_box, "score": 0.8, "track_id": 1}],
+            ],
+        },
+        # one object, which disappears and appears again and again
+        {
+            "params": {
+                "top_k": 1,
+                "selection_strategy": degirum_tools.ObjectSelectionStrategies.LARGEST_AREA,
+                "use_tracking": True,
+                "tracking_timeout": 2,
+            },
+            "inp": [
+                [{"bbox": big_box, "score": 0.5, "track_id": 1}],
+                [],
+                [{"bbox": big_box, "score": 0.8, "track_id": 1}],
+                [],
+                [{"bbox": big_box, "score": 1.0, "track_id": 1}],
+                [],
+            ],
+            "res": [
+                [{"bbox": big_box, "score": 0.5, "track_id": 1}],
+                [{"bbox": big_box, "score": 0.5, "track_id": 1}],
+                [{"bbox": big_box, "score": 0.8, "track_id": 1}],
+                [{"bbox": big_box, "score": 0.8, "track_id": 1}],
+                [{"bbox": big_box, "score": 1.0, "track_id": 1}],
+                [{"bbox": big_box, "score": 1.0, "track_id": 1}],
             ],
         },
         # two objects, highest score, metric threshold by score
