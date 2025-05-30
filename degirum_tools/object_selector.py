@@ -193,8 +193,9 @@ class ObjectSelector(ResultAnalyzerBase):
                 if "track_id" in det[0]
             }
 
-            # update existing selected objects
-            for obj in self._selected_objects:
+            # update existing selected objects (use shallow copy to manage deletion safely)
+            selected_objects = copy.copy(self._selected_objects)
+            for obj in selected_objects:
                 matching_detection = tracked_detections.get(
                     obj.detection[0]["track_id"], None
                 )
@@ -205,7 +206,8 @@ class ObjectSelector(ResultAnalyzerBase):
                     # delete object if not found in new result for a while
                     obj.counter += 1
                     if obj.counter > self._tracking_timeout:
-                        self._selected_objects.remove(obj)
+                        selected_objects.remove(obj)
+            self._selected_objects = selected_objects
 
             if self._top_k > 0:
                 if len(self._selected_objects) < self._top_k:
