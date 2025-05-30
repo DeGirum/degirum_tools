@@ -233,6 +233,22 @@ def test_object_selector():
                 [{"bbox": lil_box, "score": 1, "track_id": 0}],
             ],
         },
+        # two objects, highest score, metric threshold by score
+        {
+            "params": {
+                "top_k": 0,
+                "metric_threshold": 0.5,
+                "selection_strategy": degirum_tools.ObjectSelectionStrategies.HIGHEST_SCORE,
+                "use_tracking": True,
+            },
+            "inp": [
+                [
+                    {"bbox": lil_box, "score": 1, "track_id": 0},
+                    {"bbox": big_box, "score": 0.5, "track_id": 1},
+                ]
+            ],
+            "res": [[{"bbox": lil_box, "score": 1, "track_id": 0}]],
+        },
     ]
 
     for ci, case in enumerate(test_cases):
