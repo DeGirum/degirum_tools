@@ -249,6 +249,45 @@ def test_object_selector():
             ],
             "res": [[{"bbox": lil_box, "score": 1, "track_id": 0}]],
         },
+        # one object but two are requested
+        {
+            "params": {
+                "top_k": 2,
+                "selection_strategy": degirum_tools.ObjectSelectionStrategies.HIGHEST_SCORE,
+                "use_tracking": True,
+                "tracking_timeout": 1,
+            },
+            "inp": [
+                [{"bbox": lil_box, "score": 1, "track_id": 0}],
+                [{"bbox": lil_box, "score": 1, "track_id": 0}],
+                [{"bbox": lil_box, "score": 1, "track_id": 0}],
+            ],
+            "res": [
+                [{"bbox": lil_box, "score": 1, "track_id": 0}],
+                [{"bbox": lil_box, "score": 1, "track_id": 0}],
+                [{"bbox": lil_box, "score": 1, "track_id": 0}],
+            ],
+        },
+        # one persistent object with metric threshold
+        {
+            "params": {
+                "top_k": 0,
+                "metric_threshold": 0.5,
+                "selection_strategy": degirum_tools.ObjectSelectionStrategies.HIGHEST_SCORE,
+                "use_tracking": True,
+                "tracking_timeout": 1,
+            },
+            "inp": [
+                [{"bbox": lil_box, "score": 1, "track_id": 0}],
+                [{"bbox": lil_box, "score": 1, "track_id": 0}],
+                [{"bbox": lil_box, "score": 1, "track_id": 0}],
+            ],
+            "res": [
+                [{"bbox": lil_box, "score": 1, "track_id": 0}],
+                [{"bbox": lil_box, "score": 1, "track_id": 0}],
+                [{"bbox": lil_box, "score": 1, "track_id": 0}],
+            ],
+        },
     ]
 
     for ci, case in enumerate(test_cases):

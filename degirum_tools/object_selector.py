@@ -212,6 +212,10 @@ class ObjectSelector(ResultAnalyzerBase):
                         selected_objects.remove(obj)
             self._selected_objects = selected_objects
 
+            existing_track_ids = {
+                obj.detection[0]["track_id"] for obj in self._selected_objects
+            }
+
             if self._top_k > 0:
                 if len(self._selected_objects) < self._top_k:
                     # add new objects with highest metric value to have total of top_k objects
@@ -223,6 +227,7 @@ class ObjectSelector(ResultAnalyzerBase):
                         for det in sorted_detections[
                             : self._top_k - len(self._selected_objects)
                         ]
+                        if det[0]["track_id"] not in existing_track_ids
                     ]
             else:
                 # add new objects with metric value higher than threshold
@@ -230,6 +235,7 @@ class ObjectSelector(ResultAnalyzerBase):
                     ObjectSelector._SelectedObject(det)
                     for det in tracked_detections.values()
                     if det[1] > self._metric_threshold
+                    and det[0]["track_id"] not in existing_track_ids
                 ]
 
             result._inference_results = [
