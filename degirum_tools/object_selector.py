@@ -48,8 +48,9 @@ Configuration Options:
 """
 
 import numpy as np, copy, cv2
+import degirum as dg
 from enum import Enum
-from typing import List, Optional, Callable
+from typing import List, Optional, Callable, Dict, Any
 from dataclasses import dataclass
 from .result_analyzer_base import ResultAnalyzerBase
 from .math_support import area
@@ -105,7 +106,9 @@ class ObjectSelector(ResultAnalyzerBase):
         top_k: int = 1,
         metric_threshold: float = 0.0,
         selection_strategy: ObjectSelectionStrategies = ObjectSelectionStrategies.HIGHEST_SCORE,
-        custom_metric: Optional[Callable] = None,
+        custom_metric: Optional[
+            Callable[[Dict[str, Any], dg.postprocessor.InferenceResults], float]
+        ] = None,
         use_tracking: bool = True,
         tracking_timeout: int = 30,
         show_overlay: bool = True,
@@ -201,7 +204,7 @@ class ObjectSelector(ResultAnalyzerBase):
                 )
                 if matching_detection is not None:
                     # update bbox from new result
-                    obj.detection = copy.deepcopy(matching_detection)
+                    obj.detection = matching_detection
                 else:
                     # delete object if not found in new result for a while
                     obj.counter += 1
@@ -216,7 +219,7 @@ class ObjectSelector(ResultAnalyzerBase):
                         tracked_detections.values(), key=lambda x: x[1], reverse=True
                     )
                     self._selected_objects += [
-                        ObjectSelector._SelectedObject(copy.deepcopy(det))
+                        ObjectSelector._SelectedObject(det)
                         for det in sorted_detections[
                             : self._top_k - len(self._selected_objects)
                         ]
@@ -224,13 +227,13 @@ class ObjectSelector(ResultAnalyzerBase):
             else:
                 # add new objects with metric value higher than threshold
                 self._selected_objects += [
-                    ObjectSelector._SelectedObject(copy.deepcopy(det))
+                    ObjectSelector._SelectedObject(det)
                     for det in tracked_detections.values()
                     if det[1] > self._metric_threshold
                 ]
 
             result._inference_results = [
-                copy.deepcopy(obj.detection[0]) for obj in self._selected_objects
+                obj.detection[0] for obj in self._selected_objects
             ]
 
         else:
