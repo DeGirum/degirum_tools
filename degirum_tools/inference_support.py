@@ -15,7 +15,7 @@ from typing import Union, List, Optional
 from dataclasses import dataclass
 from .compound_models import CompoundModelBase
 from .video_support import (
-    open_video_stream,
+    open_video_stream, 
     get_video_stream_properties,
     video_source,
     open_video_writer, VideoCaptureGst
@@ -197,6 +197,7 @@ def attach_analyzers(
 def predict_stream(
     model: dg.model.Model,
     video_source_id: Union[int, str, Path, None],
+    source_type,
     *,
     fps: Optional[float] = None,
     analyzers: Union[ResultAnalyzerBase, List[ResultAnalyzerBase], None] = None,
@@ -221,8 +222,8 @@ def predict_stream(
     """
 
     analyzing_postprocessor = _create_analyzing_postprocessor_class(analyzers)
-
-    with open_video_stream(video_source_id) as stream:
+    print(f"passing source as {source_type}")
+    with open_video_stream(video_source_id,source_type=source_type) as stream:
         for res in model.predict_batch(video_source(stream, fps=fps)):
             if analyzers is not None:
                 yield analyzing_postprocessor(result=res)
