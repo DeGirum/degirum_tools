@@ -16,37 +16,108 @@ from .ui_support import Progress
 from typing import Union, Generator, Optional, Callable, Any, Tuple
 from urllib.parse import urlparse
 
-def _build_gstream_pipeline_string_for_local_file(video_source, width, height, fps=30):
-    def _get_framerate_str(fps_val):
-        if isinstance(fps_val, float):
-            if abs(fps_val - 29.97) < 0.01:
-                return "30000/1001"
-            elif abs(fps_val - 23.976) < 0.01:
-                return "24000/1001"
-            else:
-                numerator = int(fps_val * 1000)
-                return f"{numerator}/1000"
-        else:
-            return f"{int(fps_val)}/1"
+import platform
+import subprocess
+import os
+import cv2
 
-    print(f"video_source inside gstream pipeline builder is {video_source}")
+import platform
+import subprocess
+import os
+import cv2
 
-    if isinstance(video_source, int):
-        # webcam or RPi camera input pipeline
-        device = f"/dev/video{video_source}"
-        pipeline = (
-            f"v4l2src device={device} ! videoconvert ! videoscale ! "
-            f"video/x-raw,width={width},height={height},format=RGB ! appsink name=sink"
-        )
+def is_gst_available():
+    return "GStreamer" in cv2.getBuildInformation()
+
+def detect_platform():
+    info = {
+        "is_rpi": False,
+        "is_jetson": False,
+        "has_nvidia_gpu": False,
+        "has_intel_gpu": False,
+    }
+
+    try:
+        # RPi detection
+        with open("/proc/cpuinfo", "r") as f:
+            cpuinfo = f.read()
+        info["is_rpi"] = "Raspberry Pi" in cpuinfo
+
+        # Jetson detection
+        info["is_jetson"] = os.path.exists("/etc/nv_tegra_release")
+
+        # NVIDIA GPU detection
+        info["has_nvidia_gpu"] = subprocess.run(["which", "nvidia-smi"], capture_output=True).returncode == 0
+
+        # Intel GPU detection
+        lspci = subprocess.check_output("lspci", text=True)
+        info["has_intel_gpu"] = "Intel Corporation UHD" in lspci or "Intel Corporation Iris" in lspci
+
+    except Exception as e:
+        print("Platform detection error:", e)
+
+    return info
+
+def select_optimal_gst_plugin(platform_info, video_source):
+    if platform_info["is_jetson"]:
+        return f"nvarguscamerasrc sensor-id=/dev/video{video_source} ! nvvidconv ! video/x-raw,format=BGR"
+    elif platform_info["has_nvidia_gpu"]:
+        return f"v4l2src device=/dev/video{video_source} ! nvv4l2decoder ! nvvidconv ! video/x-raw,format=BGR"
+    elif platform_info["has_intel_gpu"]:
+        return f"v4l2src device=/dev/video{video_source} ! vaapipostproc ! video/x-raw,format=BGR"
+    elif platform_info["is_rpi"]:
+        return f"libcamerasrc camera-number=/dev/video{video_source} ! videoconvert ! video/x-raw,format=BGR"
     else:
-        # video file input pipeline
-        framerate_str = _get_framerate_str(fps)
-        pipeline = (
-            f"filesrc location={video_source} ! decodebin ! videoconvert ! videoscale ! "
-            f"video/x-raw,width={width},height={height},framerate={framerate_str},format=RGB ! appsink name=sink"
-        )
+        return f"v4l2src device=/dev/video{video_source} ! videoconvert ! video/x-raw,format=BGR"
+
+def build_gst_pipeline(video_source: str, width: int, height: int, fps: int):
+    if not is_gst_available():
+        return None
+
+    platform_info = detect_platform()
+    plugin_str = select_optimal_gst_plugin(platform_info, video_source)
+
+    pipeline = (
+        f"{plugin_str}, width={width}, height={height}, ! appsink name = sink"
+    )
+
+    #pipeline = "v4l2src device=/dev/video0 ! videoconvert ! videoscale ! video/x-raw, format=RGB, width=640, height=480 ! appsink name = sink"
+
 
     return pipeline
+
+
+# def _build_gstream_pipeline_string_for_local_file(video_source, width, height, fps=30):
+#     def _get_framerate_str(fps_val):
+#         if isinstance(fps_val, float):
+#             if abs(fps_val - 29.97) < 0.01:
+#                 return "30000/1001"
+#             elif abs(fps_val - 23.976) < 0.01:
+#                 return "24000/1001"
+#             else:
+#                 numerator = int(fps_val * 1000)
+#                 return f"{numerator}/1000"
+#         else:
+#             return f"{int(fps_val)}/1"
+
+#     print(f"video_source inside gstream pipeline builder is {video_source}")
+
+#     if isinstance(video_source, int):
+#         # webcam or RPi camera input pipeline
+#         device = f"/dev/video{video_source}"
+#         pipeline = (
+#             f"v4l2src device={device} ! videoconvert ! videoscale ! "
+#             f"video/x-raw,width={width},height={height},format=RGB ! appsink name=sink"
+#         )
+#     else:
+#         # video file input pipeline
+#         framerate_str = _get_framerate_str(fps)
+#         pipeline = (
+#             f"filesrc location={video_source} ! decodebin ! videoconvert ! videoscale ! "
+#             f"video/x-raw,width={width},height={height},framerate={framerate_str},format=RGB ! appsink name=sink"
+#         )
+
+#     return pipeline
 
 
 
@@ -220,11 +291,12 @@ def open_video_stream(
             )
         width = int(probe.get(cv2.CAP_PROP_FRAME_WIDTH)) 
         height = int(probe.get(cv2.CAP_PROP_FRAME_HEIGHT)) 
-        fps = probe.get(cv2.CAP_PROP_FPS) or 30.0
+        #fps = probe.get(cv2.CAP_PROP_FPS) or 30.0
+        fps = 30
         probe.release()
         print(f"\n\nDEBUG :Video Parameters fetched : '{video_source}' with {width}x{height} @ {fps:.2f} fps\n\n")
 
-        pipeline = _build_gstream_pipeline_string_for_local_file(video_source, width, height,fps)
+        pipeline = build_gst_pipeline(video_source, width, height,fps)
         print(f"\n\nDEBUG : Using GStreamer pipeline string is here: {pipeline}\n\n")
         stream = VideoCaptureGst(pipeline)
         print(f"\n\nDEBUG :GStreamer is applied: {stream}\n\n")
