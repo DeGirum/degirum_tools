@@ -10,9 +10,9 @@ from typing import Optional, List, Union
 from contextlib import ExitStack
 from .streams_base import Stream, StreamData, StreamMeta, Gizmo
 from .environment import get_test_mode
-from .video_support import open_video_stream, open_video_writer
+from .video_support import open_video_stream, open_video_writer, VideoStreamer
 from .ui_support import Display
-from .image_tools import crop_image, resize_image, image_size, to_opencv
+from .image_tools import crop_image, resize_image, image_size, ImageType
 from .result_analyzer_base import image_overlay_substitute, clone_result
 from .crop_extent import CropExtentOptions, extend_bbox
 from .notifier import EventNotifier
@@ -20,12 +20,12 @@ from .event_detector import EventDetector
 from .environment import get_token
 
 # predefined meta tags
-tag_video = "dgt_video"            # tag for video source data
-tag_resize = "dgt_resize"          # tag for resizer result
-tag_inference = "dgt_inference"    # tag for inference result
+tag_video = "dgt_video"  # tag for video source data
+tag_resize = "dgt_resize"  # tag for resizer result
+tag_inference = "dgt_inference"  # tag for inference result
 tag_preprocess = "dgt_preprocess"  # tag for preprocessor result
-tag_crop = "dgt_crop"              # tag for cropping result
-tag_analyzer = "dgt_analyzer"      # tag for analyzer result
+tag_crop = "dgt_crop"  # tag for cropping result
+tag_analyzer = "dgt_analyzer"  # tag for analyzer result
 
 
 class VideoSourceGizmo(Gizmo):
@@ -35,12 +35,12 @@ class VideoSourceGizmo(Gizmo):
     """
 
     # meta keys for video frame information
-    key_frame_width = "frame_width"    # frame width
+    key_frame_width = "frame_width"  # frame width
     key_frame_height = "frame_height"  # frame height
-    key_fps = "fps"                    # stream frame rate
-    key_frame_count = "frame_count"    # total frame count (if known)
-    key_frame_id = "frame_id"          # frame index (sequence number)
-    key_timestamp = "timestamp"        # frame timestamp
+    key_fps = "fps"  # stream frame rate
+    key_frame_count = "frame_count"  # total frame count (if known)
+    key_frame_id = "frame_id"  # frame index (sequence number)
+    key_timestamp = "timestamp"  # frame timestamp
 
     def __init__(self, video_source=None, *, stop_composition_on_end: bool = False):
         """Constructor.
@@ -191,7 +191,7 @@ class VideoDisplayGizmo(Gizmo):
 
 
 class VideoSaverGizmo(Gizmo):
-    """OpenCV-based video saving gizmo.
+    """Video saving gizmo.
 
     Writes incoming frames to an output video file.
     """
@@ -221,13 +221,15 @@ class VideoSaverGizmo(Gizmo):
 
         Reads frames from the input stream and writes them to the output file until the stream is exhausted or aborted.
         """
-        def get_img(data: StreamData) -> np.ndarray:
+
+        def get_img(data: StreamData) -> ImageType:
             frame = data.data
             if self._show_ai_overlay:
                 inference_meta = data.meta.find_last(tag_inference)
                 if inference_meta:
                     frame = inference_meta.image_overlay
-            return to_opencv(frame)
+            return frame
+
         img = get_img(self.get_input(0).get())
         w, h = image_size(img)
         with open_video_writer(self._filename, w, h) as writer:
@@ -239,6 +241,64 @@ class VideoSaverGizmo(Gizmo):
                 writer.write(get_img(data))
 
 
+class VideoStreamerGizmo(Gizmo):
+    """Video streaming gizmo.
+
+    Streams incoming frames to RTSP stream using ffmpeg.
+    `MediaServer` must be running to accept the stream.
+    """
+
+    def __init__(
+        self,
+        rtsp_url: str,
+        *,
+        fps: float = 30,
+        show_ai_overlay: bool = False,
+        stream_depth: int = 10,
+        allow_drop: bool = False,
+    ):
+        """Constructor.
+
+        Args:
+            rtsp_url (str): RTSP URL to stream to (e.g., 'rtsp://user:password@hostname:port/stream').
+                            Typically you use `MediaServer` class to start media server and
+                            then use its RTSP URL like `rtsp://localhost:8554/mystream`
+            fps (float, optional): Frames per second for the stream. Defaults to 30.
+            show_ai_overlay (bool, optional): If True, overlay AI inference results on frames before saving (when available). Defaults to False.
+            stream_depth (int, optional): Depth of the input frame queue. Defaults to 10.
+            allow_drop (bool, optional): If True, allow dropping frames if the input queue is full. Defaults to False.
+        """
+        super().__init__([(stream_depth, allow_drop)])
+        self._rtsp_url = rtsp_url
+        self._fps = fps
+        self._show_ai_overlay = show_ai_overlay
+
+    def run(self):
+        """Run the video saving loop.
+
+        Reads frames from the input stream and writes them to the output file until the stream is exhausted or aborted.
+        """
+
+        def get_img(data: StreamData) -> ImageType:
+            frame = data.data
+            if self._show_ai_overlay:
+                inference_meta = data.meta.find_last(tag_inference)
+                if inference_meta:
+                    frame = inference_meta.image_overlay
+            return frame
+
+        img = get_img(self.get_input(0).get())
+        w, h = image_size(img)
+        pix_fmt = "bgr24" if isinstance(img, np.ndarray) else "rgb24"
+        with VideoStreamer(self._rtsp_url, w, h, fps=self._fps, pix_fmt=pix_fmt) as streamer:
+            self.result_cnt += 1
+            streamer.write(img)
+            for data in self.get_input(0):
+                if self._abort:
+                    break
+                streamer.write(get_img(data))
+
+
 class ResizingGizmo(Gizmo):
     """OpenCV-based image resizing/padding gizmo.
 
@@ -246,9 +306,9 @@ class ResizingGizmo(Gizmo):
     """
 
     # meta keys for output image parameters
-    key_frame_width = "frame_width"      # frame width after resize
-    key_frame_height = "frame_height"    # frame height after resize
-    key_pad_method = "pad_method"        # padding method used
+    key_frame_width = "frame_width"  # frame width after resize
+    key_frame_height = "frame_height"  # frame height after resize
+    key_pad_method = "pad_method"  # padding method used
     key_resize_method = "resize_method"  # resampling method used
 
     def __init__(
@@ -361,6 +421,7 @@ class AiGizmoBase(Gizmo):
 
         Internally feeds data from the input stream(s) into the model and yields results, invoking `on_result` for each inference result.
         """
+
         def source():
             has_data = True
             while has_data:
@@ -445,9 +506,9 @@ class AiObjectDetectionCroppingGizmo(Gizmo):
 
     # meta keys for crop result information
     key_original_result = "original_result"  # original detection result object
-    key_cropped_result = "cropped_result"    # detection result entry for the crop
-    key_cropped_index = "cropped_index"      # index of the object in original results
-    key_is_last_crop = "is_last_crop"        # flag indicating last crop in frame
+    key_cropped_result = "cropped_result"  # detection result entry for the crop
+    key_cropped_index = "cropped_index"  # index of the object in original results
+    key_is_last_crop = "is_last_crop"  # flag indicating last crop in frame
 
     def __init__(
         self,
@@ -689,7 +750,9 @@ class CropCombiningGizmo(Gizmo):
                     combined_meta = None  # reset for next frame
                     break
 
-    def _adjust_results(self, orig_result, bbox_idx: int, cropped_results: list) -> list:
+    def _adjust_results(
+        self, orig_result, bbox_idx: int, cropped_results: list
+    ) -> list:
         """Adjust inference results from a crop to the original image's coordinate space.
 
         This converts the coordinates (e.g., bounding boxes, landmarks) of inference results obtained on a cropped image back to the coordinate system of the original image.
@@ -728,6 +791,7 @@ class CropCombiningGizmo(Gizmo):
         Returns:
             (dg.postprocessor.InferenceResults): A cloned inference result with a deep-copied results list.
         """
+
         def _overlay_extra_results(res):
             """Produce an image overlay including all extra results."""
             overlay_image = result._orig_image_overlay_extra_results
@@ -847,7 +911,6 @@ class AiPreprocessGizmo(Gizmo):
         stream_depth: int = 10,
         allow_drop: bool = False,
     ):
-
         """Constructor.
 
         Args:
@@ -959,13 +1022,13 @@ class SinkGizmo(Gizmo):
 
     This gizmo does not send data further down the pipeline. Instead, it stores all incoming results so they can be retrieved (for example, by iterating over the gizmo's output in the main thread).
     """
+
     def __init__(
         self,
         *,
         stream_depth: int = 10,
         allow_drop: bool = False,
     ):
-
         """Constructor.
 
         Args:

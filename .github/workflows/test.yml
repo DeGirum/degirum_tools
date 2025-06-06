@@ -7,6 +7,7 @@ on:
     branches: [main]
     types: [opened, edited, reopen, synchronize, ready_for_review]
   workflow_dispatch:
+
 jobs:
   lint:
     name: Linters/Type Checkers
@@ -29,6 +30,7 @@ jobs:
         run: python3 -m flake8 .
       - name: Run mypy
         run: python3 -m mypy
+
   test:
     name: Unit Tests
     strategy:
@@ -49,6 +51,7 @@ jobs:
           pip install -e '.[testing,notifications]'
           sudo apt update
           sudo apt install ffmpeg
+          test/install-mediamtx.sh
       - name: Run pytest (with coverage)
         run: python3 -m coverage run -m pytest -s -v test/
         env:
