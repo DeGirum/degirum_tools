@@ -10,7 +10,7 @@
 
 def test_video_streamer():
     """
-    Test for EventNotifier analyzer
+    Test for VideoStreamerGizmo gizmo and MediaServer class
     """
 
     import degirum_tools

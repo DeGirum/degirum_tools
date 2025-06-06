@@ -242,9 +242,9 @@ class VideoSaverGizmo(Gizmo):
 
 
 class VideoStreamerGizmo(Gizmo):
-    """OpenCV-based video saving gizmo.
+    """Video streaming gizmo.
 
-    Streams incoming frames to RTSP stream.
+    Streams incoming frames to RTSP stream using ffmpeg.
     `MediaServer` must be running to accept the stream.
     """
 
