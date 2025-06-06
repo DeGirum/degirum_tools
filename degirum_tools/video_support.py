@@ -803,7 +803,7 @@ class VideoStreamer:
         width: int,
         height: int,
         *,
-        fps: int = 30,
+        fps: float = 30.0,
         pix_fmt="bgr24",
         verbose: bool = False,
     ):
@@ -815,7 +815,7 @@ class VideoStreamer:
                             then use its RTSP URL like `rtsp://localhost:8554/mystream`
             width (int): Width of the video frames in pixels.
             height (int): Height of the video frames in pixels.
-            fps (int, optional): Frames per second for the stream. Defaults to 30.
+            fps (float, optional): Frames per second for the stream. Defaults to 30.
             pix_fmt (str, optional): Pixel format for the input frames. Defaults to 'bgr24'. Can be 'rgb24'.
             verbose (bool, optional): If True, shows FFmpeg output in the console. Defaults to False.
         """

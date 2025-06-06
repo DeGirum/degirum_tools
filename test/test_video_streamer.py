@@ -13,8 +13,6 @@ def test_video_streamer():
     Test for EventNotifier analyzer
     """
 
-    return
-
     import degirum_tools
     import numpy as np
     import time
@@ -48,7 +46,8 @@ def test_video_streamer():
                 assert np.all(data.data[:, :, 2] > 250)
                 if cnt >= 10:  # Limit to 10 frames for the test
                     break
-            self.composition.stop()
+            if self.composition:
+                self.composition.stop()
 
     url = "rtsp://localhost:8554/mystream"
     src = TestSourceGizmo()

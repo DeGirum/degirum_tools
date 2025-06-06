@@ -252,7 +252,7 @@ class VideoStreamerGizmo(Gizmo):
         self,
         rtsp_url: str,
         *,
-        fps: int = 30,
+        fps: float = 30,
         show_ai_overlay: bool = False,
         stream_depth: int = 10,
         allow_drop: bool = False,
@@ -263,7 +263,7 @@ class VideoStreamerGizmo(Gizmo):
             rtsp_url (str): RTSP URL to stream to (e.g., 'rtsp://user:password@hostname:port/stream').
                             Typically you use `MediaServer` class to start media server and
                             then use its RTSP URL like `rtsp://localhost:8554/mystream`
-            fps (int, optional): Frames per second for the stream. Defaults to 30.
+            fps (float, optional): Frames per second for the stream. Defaults to 30.
             show_ai_overlay (bool, optional): If True, overlay AI inference results on frames before saving (when available). Defaults to False.
             stream_depth (int, optional): Depth of the input frame queue. Defaults to 10.
             allow_drop (bool, optional): If True, allow dropping frames if the input queue is full. Defaults to False.
