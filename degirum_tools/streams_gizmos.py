@@ -792,7 +792,7 @@ class CropCombiningGizmo(Gizmo):
             (dg.postprocessor.InferenceResults): A cloned inference result with a deep-copied results list.
         """
 
-        def _overlay_extra_results(res):
+        def _overlay_extra_results(result):
             """Produce an image overlay including all extra results."""
             overlay_image = result._orig_image_overlay_extra_results
             for res in result._inference_results:
