@@ -475,6 +475,61 @@ def video2jpegs(
         return fi
 
 
+def detect_rtsp_cameras(subnet_cidr, *, timeout_s=0.5, port=554, max_workers=16):
+    """Scan given subnet for RTSP cameras by probing given port with OPTIONS request.
+    Args:
+        subnet_cidr (str): Subnet in CIDR notation (e.g., '192.168.0.0/24').
+        timeout_s (float): Timeout for each connection attempt in seconds.
+        port (int): Port to probe for RTSP cameras (default is 554).
+        max_workers (int): Maximum number of concurrent threads for scanning (default is 16).
+    Returns:
+        dict: Dictionary with IP addresses as keys and properties as values.
+              Properties include 'require_auth' indicating if authentication is required.
+    """
+
+    import ipaddress, socket
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def send_rtsp_options(ip, timeout_s, port):
+        """Send RTSP OPTIONS request and check for valid response."""
+        try:
+            with socket.create_connection((ip, port), timeout=timeout_s) as sock:
+                sock.settimeout(timeout_s)
+                request = (
+                    f"OPTIONS rtsp://{ip}/ RTSP/1.0\r\n"
+                    f"CSeq: 1\r\n"
+                    f"User-Agent: PythonRTSPScanner\r\n"
+                    f"\r\n"
+                )
+                sock.sendall(request.encode("utf-8"))
+                response = sock.recv(4096).decode("utf-8", errors="ignore")
+                if response.startswith("RTSP/1.0"):
+                    props = {}
+                    props["require_auth"] = (
+                        "401 Unauthorized" in response or "WWW-Authenticate" in response
+                    )
+                    return ip, props
+
+        except (socket.timeout, socket.error):
+            pass
+        return None
+
+    network = ipaddress.ip_network(subnet_cidr, strict=False)
+    ips = [str(ip) for ip in network.hosts()]
+    results = {}
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(send_rtsp_options, ip, timeout_s, port): ip for ip in ips
+        }
+        for future in as_completed(futures):
+            result = future.result()
+            if result:
+                ip, info = result
+                results[ip] = info
+    return results
+
+
 class ClipSaver:
     """Video clip saver with pre/post trigger buffering.
 

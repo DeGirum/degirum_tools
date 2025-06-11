@@ -49,7 +49,9 @@ def test_video_streamer():
             if self.composition:
                 self.composition.stop()
 
-    url = "rtsp://localhost:8554/mystream"
+    localhost = "127.0.0.1"
+    port = 8554
+    url = f"rtsp://{localhost}:{port}/mystream"
     src = TestSourceGizmo()
     dst = streams.VideoStreamerGizmo(url, fps=fps)
     rcv = streams.VideoSourceGizmo(url)
@@ -62,6 +64,11 @@ def test_video_streamer():
         src_composition.start(wait=False)
 
         time.sleep(1)  # Allow some time for the stream to start
+
+        # test detect_rtsp_cameras()
+        detected = degirum_tools.detect_rtsp_cameras(f"{localhost}/32", port=port)
+        assert len(detected) == 1 and localhost in detected, "RTSP camera detection failed"
+        assert detected[localhost].get("require_auth") is False, "RTSP server should not require authentication"
 
         # receive and check frames from RTSP server
         rcv_composition = streams.Composition(rcv >> chk)
