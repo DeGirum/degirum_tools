@@ -756,17 +756,71 @@ def test_event_detector():
             ],
             "res": [{"MyEvent"}],
         },
+        # ----------------------------------------------------------------
+        # Tests for Custom metric
+        # ----------------------------------------------------------------
+        {
+            "case": "Custom metric: no metric - expect to fail",
+            "params": """
+                Trigger: MyEvent
+                when: Custom
+                is equal to: 1
+                during: [1, frame]
+            """,
+        },
+        {
+            "case": "Custom metric: simple case with no event",
+            "params": """
+                Trigger: MyEvent
+                when: Custom
+                is equal to: 1
+                during: [1, frame]
+            """,
+            "custom_metric": lambda result, params: 0,
+            "inp": [{"results": []}],
+            "res": [set()],
+        },
+        {
+            "case": "Custom metric: simple case with event",
+            "params": """
+                Trigger: MyEvent
+                when: Custom
+                is equal to: 1
+                during: [1, frame]
+            """,
+            "custom_metric": lambda result, params: 1,
+            "inp": [{"results": []}],
+            "res": [{"MyEvent"}],
+        },
+        {
+            "case": "Custom metric: custom params",
+            "params": """
+                Trigger: MyEvent
+                when: Custom
+                with:
+                    some_param: 42
+                is equal to: 42
+                during: [1, frame]
+            """,
+            "custom_metric": lambda result, params: params.get("some_param", 0),
+            "inp": [{"results": []}],
+            "res": [{"MyEvent"}],
+        },
     ]
 
     for ci, case in enumerate(test_cases):
         if "res" not in case:
             # expected to fail
             with pytest.raises(Exception):
-                event_detector = degirum_tools.EventDetector(case["params"])
+                event_detector = degirum_tools.EventDetector(
+                    case["params"], custom_metric=case.get("custom_metric")
+                )
             continue
 
         try:
-            event_detector = degirum_tools.EventDetector(case["params"])
+            event_detector = degirum_tools.EventDetector(
+                case["params"], custom_metric=case.get("custom_metric")
+            )
         except Exception as e:
             raise Exception(
                 f"Case `{case['case']}` failed: {e}\nConfig: {case['params']}"

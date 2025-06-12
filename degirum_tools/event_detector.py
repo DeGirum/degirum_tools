@@ -54,7 +54,7 @@ from .result_analyzer_base import ResultAnalyzerBase
 from .ui_support import put_text, color_complement, deduce_text_color, CornerPosition
 from .math_support import AnchorPoint, get_image_anchor_point
 from collections import deque
-from typing import Union, Optional
+from typing import Union, Optional, Callable
 
 #
 # Schema for event definition
@@ -120,7 +120,7 @@ properties:
         description: The name of the metric to evaluate
     {Key_With}:
         type: object
-        additionalProperties: false
+        additionalProperties: true
         properties:
             {Key_Classes}:
                 type: array
@@ -397,6 +397,7 @@ class EventDetector(ResultAnalyzerBase):
         self,
         event_description: Union[str, dict],
         *,
+        custom_metric: Optional[Callable] = None,
         show_overlay: bool = True,
         annotation_color: Optional[tuple] = None,
         annotation_font_scale: Optional[float] = None,
@@ -424,7 +425,7 @@ class EventDetector(ResultAnalyzerBase):
                 description: The name of event to raise
             when:
                 type: string
-                enum: [ZoneCount, LineCount, ObjectCount]
+                enum: [ZoneCount, LineCount, ObjectCount, Custom]
                 description: The name of the metric to evaluate
             with:
                 type: object
@@ -509,6 +510,7 @@ class EventDetector(ResultAnalyzerBase):
 
         Args:
             event_description (Union[str, dict]): YAML string or dictionary defining the event conditions (must match the schema above).
+            custom_metric (Callable, optional): Custom metric function. Must be provided, if `when` key in `event_description` is set to "Custom". The function accepts inference result and parameters dict of "with" clause and returns a numeric value.
             show_overlay (bool, optional): Whether to draw a label on the frame when the event fires. Defaults to True.
             annotation_color (tuple, optional): RGB color for the label background. If None, a contrasting color is auto-chosen. Defaults to None.
             annotation_font_scale (float, optional): Font scale for the overlay text. If None, uses a default scale. Defaults to None.
@@ -535,6 +537,15 @@ class EventDetector(ResultAnalyzerBase):
         self._event_desc = event_desc
         self._event_name = event_desc[Key_Trigger]
         self._metric_name = event_desc[Key_When]
+
+        self._custom_metric: Optional[Callable] = None
+        if self._metric_name == Metric_Custom:
+            if custom_metric is None or not callable(custom_metric):
+                raise ValueError(
+                    "Custom metric function must be provided when 'when' is set to 'Custom'"
+                )
+            self._custom_metric = custom_metric
+
         self._metric_params = event_desc.get(Key_With)
         self._duration = event_desc[Key_During][0]
         duration_unit = event_desc[Key_During][1]
@@ -595,7 +606,12 @@ class EventDetector(ResultAnalyzerBase):
         """
 
         # evaluate metric and compare with threshold
-        metric_value = globals()[self._metric_name](result, self._metric_params)
+
+        if self._custom_metric is not None:
+            metric_value = self._custom_metric(result, self._metric_params)
+        else:
+            metric_value = globals()[self._metric_name](result, self._metric_params)
+
         condition_met = EventDetector.comparators[self._op](
             metric_value, self._threshold
         )
