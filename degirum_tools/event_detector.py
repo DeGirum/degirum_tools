@@ -97,7 +97,7 @@ Direction_Bottom = "bottom"
 Metric_ZoneCount = "ZoneCount"
 Metric_LineCount = "LineCount"
 Metric_ObjectCount = "ObjectCount"
-Metric_Custom = "Custom"
+Metric_Custom = "CustomMetric"
 
 # aggregate functions
 Aggregate_Sum = "sum"
@@ -425,7 +425,7 @@ class EventDetector(ResultAnalyzerBase):
                 description: The name of event to raise
             when:
                 type: string
-                enum: [ZoneCount, LineCount, ObjectCount, Custom]
+                enum: [ZoneCount, LineCount, ObjectCount, CustomMetric]
                 description: The name of the metric to evaluate
             with:
                 type: object
@@ -510,7 +510,7 @@ class EventDetector(ResultAnalyzerBase):
 
         Args:
             event_description (Union[str, dict]): YAML string or dictionary defining the event conditions (must match the schema above).
-            custom_metric (Callable, optional): Custom metric function. Must be provided, if `when` key in `event_description` is set to "Custom". The function accepts inference result and parameters dict of "with" clause and returns a numeric value.
+            custom_metric (Callable, optional): Custom metric function. Must be provided, if `when` key in `event_description` is set to "CustomMetric". The function accepts inference result and parameters dict of "with" clause and returns a numeric value.
             show_overlay (bool, optional): Whether to draw a label on the frame when the event fires. Defaults to True.
             annotation_color (tuple, optional): RGB color for the label background. If None, a contrasting color is auto-chosen. Defaults to None.
             annotation_font_scale (float, optional): Font scale for the overlay text. If None, uses a default scale. Defaults to None.
@@ -542,7 +542,7 @@ class EventDetector(ResultAnalyzerBase):
         if self._metric_name == Metric_Custom:
             if custom_metric is None or not callable(custom_metric):
                 raise ValueError(
-                    "Custom metric function must be provided when 'when' is set to 'Custom'"
+                    "Custom metric function must be provided when 'when' is set to 'CustomMetric'"
                 )
             self._custom_metric = custom_metric
 

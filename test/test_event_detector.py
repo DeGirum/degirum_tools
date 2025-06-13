@@ -763,7 +763,7 @@ def test_event_detector():
             "case": "Custom metric: no metric - expect to fail",
             "params": """
                 Trigger: MyEvent
-                when: Custom
+                when: CustomMetric
                 is equal to: 1
                 during: [1, frame]
             """,
@@ -772,7 +772,7 @@ def test_event_detector():
             "case": "Custom metric: simple case with no event",
             "params": """
                 Trigger: MyEvent
-                when: Custom
+                when: CustomMetric
                 is equal to: 1
                 during: [1, frame]
             """,
@@ -784,7 +784,7 @@ def test_event_detector():
             "case": "Custom metric: simple case with event",
             "params": """
                 Trigger: MyEvent
-                when: Custom
+                when: CustomMetric
                 is equal to: 1
                 during: [1, frame]
             """,
@@ -796,7 +796,7 @@ def test_event_detector():
             "case": "Custom metric: custom params",
             "params": """
                 Trigger: MyEvent
-                when: Custom
+                when: CustomMetric
                 with:
                     some_param: 42
                 is equal to: 42
