@@ -252,7 +252,7 @@ class VideoStreamerGizmo(Gizmo):
         self,
         rtsp_url: str,
         *,
-        fps: float = 30,
+        fps: float = 0,
         show_ai_overlay: bool = False,
         stream_depth: int = 10,
         allow_drop: bool = False,
@@ -263,7 +263,7 @@ class VideoStreamerGizmo(Gizmo):
             rtsp_url (str): RTSP URL to stream to (e.g., 'rtsp://user:password@hostname:port/stream').
                             Typically you use `MediaServer` class to start media server and
                             then use its RTSP URL like `rtsp://localhost:8554/mystream`
-            fps (float, optional): Frames per second for the stream. Defaults to 30.
+            fps (float, optional): Frames per second for the stream. Defaults to 0, meaning to deduce from upstream video source.
             show_ai_overlay (bool, optional): If True, overlay AI inference results on frames before saving (when available). Defaults to False.
             stream_depth (int, optional): Depth of the input frame queue. Defaults to 10.
             allow_drop (bool, optional): If True, allow dropping frames if the input queue is full. Defaults to False.
@@ -287,10 +287,18 @@ class VideoStreamerGizmo(Gizmo):
                     frame = inference_meta.image_overlay
             return frame
 
-        img = get_img(self.get_input(0).get())
+        data0 = self.get_input(0).get()
+        img = get_img(data0)
         w, h = image_size(img)
+        if self._fps == 0:  # deduce FPS
+            video_meta = data0.meta.find_last(tag_video)
+            if video_meta:
+                self._fps = video_meta.get(VideoSourceGizmo.key_fps, 30.0)
+
         pix_fmt = "bgr24" if isinstance(img, np.ndarray) else "rgb24"
-        with VideoStreamer(self._rtsp_url, w, h, fps=self._fps, pix_fmt=pix_fmt) as streamer:
+        with VideoStreamer(
+            self._rtsp_url, w, h, fps=self._fps, pix_fmt=pix_fmt
+        ) as streamer:
             self.result_cnt += 1
             streamer.write(img)
             for data in self.get_input(0):
