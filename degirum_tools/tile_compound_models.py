@@ -29,8 +29,35 @@ class _TileInfo:
 
 
 class TileExtractorPseudoModel(ModelLike):
-    """
-    Pseudo model class which extracts tiles from given image according to rows/columns.
+    """Extracts a grid of (optionally-overlapping) image tiles.
+
+    The class behaves like a DeGirum **pseudo-model**: instead of running
+    inference it produces *synthetic* detection results whose bounding boxes
+    correspond to tile coordinates. These results are then consumed by a
+    second, real model in a two-stage compound pipeline.
+
+    Args:
+        cols (int): Number of columns in the tile grid.
+        rows (int): Number of rows in the tile grid.
+        overlap_percent (float): Desired overlap between neighbouring tiles,
+            expressed as a fraction in ``[0, 1]``.
+        model2 (dg.model.Model): The downstream model that will receive each
+            tile.
+        global_tile (bool, optional): If *True*, emit an additional tile that
+            represents the entire image (label ``"GLOBAL"``).  Mutually
+            exclusive with ``tile_mask`` and ``motion_detect``.  Defaults to
+            ``False``.
+        tile_mask (list[int] | None, optional): Indices of tiles (0-based,
+            row-major) to **keep**.  Tiles not listed are skipped.  Ignored
+            when ``global_tile`` is *True*.
+        motion_detect (MotionDetectOptions | None, optional): Enable
+            per-tile motion filtering. Tiles in which less than
+            ``threshold`` x area pixels changed during the last
+            ``look_back`` frames are suppressed. Ignored when
+            ``global_tile`` is *True*.
+
+    Raises:
+        AssertionError: If mutually-exclusive arguments are supplied.
     """
 
     def __init__(
@@ -398,11 +425,33 @@ class _EdgeMixin:
 
 
 class TileModel(CroppingAndDetectingCompoundModel):
-    """
-    Compound model class which performs tiling. It takes a tile extractor pseudo model as the first
-    model and a detection type model as the second model.
-    It returns the combined results of the **second** model where bbox coordinates are translated
-    to original image coordinates.
+    """Tiling wrapper that runs detection on every tile.
+
+    This compound model wires a :class:`TileExtractorPseudoModel` (*model 1*)
+    to a normal detection model (*model 2*). Each tile is cropped, passed to
+    *model 2*, and the resulting boxes are translated back to the original
+    image coordinates. Optionally, detections from *model 1* can be merged or
+    deduplicated via NMS.
+
+    Args:
+        model1 (TileExtractorPseudoModel): The tile generator.
+        model2 (dg.model.Model): A detection model compatible with ``model1``'s
+            image backend.
+        crop_extent (float, optional): Extra context (percent of box size) to
+            include around every tile before passing it to *model 2*.
+        crop_extent_option (CropExtentOptions, optional): How the extra context
+            is applied (see :pydata:`CropExtentOptions`).
+        add_model1_results (bool, optional): If *True*, detections produced by
+            *model 1* are appended to the final result.
+        nms_options (NmsOptions | None, optional): Non-maximum suppression
+            settings performed on the merged result.
+
+    Attributes:
+        output_postprocess_type (str): Mirrors ``model2.output_postprocess_type``
+            so downstream tooling recognises this as a detection model.
+
+    Raises:
+        Exception: If the two models use different image back-ends.
     """
 
     # Subclass to maintain compatibility with the ObjectDetectionEvaluator, specific to pseudo-model case.
@@ -452,15 +501,31 @@ class TileModel(CroppingAndDetectingCompoundModel):
 
 
 class LocalGlobalTileModel(TileModel):
-    """
-    Compound model class which performs tiling with local (fine grained) and global (course grained) images.
-    It takes a tile extractor pseudo model as the first model and a detection type model as the second model.
-    It returns the combined results of the **second** model where bbox coordinates are translated
-    to the original image coordinates. Objects are retained depending on a large object threshold, if the
-    object's area size is greater than this threshold, it will only be taken from the global tile, if smaller
-    it will be only taken from local tiles.
+    """Runs a fine-/coarse tiling strategy with size-based result fusion.
 
-    The tile extractor pseudo model must be set to generate a global tile.
+    Two kinds of tiles are produced:
+
+    * **Local** -- the regular grid (fine resolution)
+    * **Global** -- a single full-frame tile
+
+    After detection:
+
+    * Large objects (area >= ``large_object_threshold`` x image_area) are kept
+      **only** from the global tile.
+    * Small objects are kept **only** from the local tiles.
+
+    Args:
+        model1 (TileExtractorPseudoModel): Must be configured with
+            ``global_tile=True``.
+        model2 (dg.model.Model): Detection model run on each tile.
+        large_object_threshold (float, optional): Area ratio separating "large"
+            from "small" objects. Defaults to ``0.01``.
+        **crop_* / add_model1_results / nms_options**: Forwarded to
+            :class:`TileModel`.
+
+    Note:
+        Unlike :class:`BoxFusionLocalGlobalTileModel`, no edge fusion is
+        applied; objects that overlap tile borders may be duplicated.
     """
 
     def __init__(
@@ -567,12 +632,22 @@ class LocalGlobalTileModel(TileModel):
 
 
 class BoxFusionTileModel(_EdgeMixin, TileModel):
-    """
-    Compound model class which performs tiling with fusion of boxes detected on the edges/overlaps.
-    It takes a tile extractor pseudo model as the first model and a detection type model as the second model.
-    It returns the combined results of the **second** model where bbox coordinates are translated
-    to the original image coordinates. Objects detected on the edges/overlaps (determined by the edge threshold)
-    of tiles are fused based on if they overlap and if one of the 1D-IoUs exceeds the fusion threshold.
+    """TileModel with edge/overlap-aware bounding-box fusion.
+
+    After *model 2* has produced detections for every tile, boxes whose centres
+    fall within the user-defined **edge band** are compared with neighbours.
+    If the 1-D IoU in *either* axis exceeds ``fusion_threshold`` the boxes are
+    merged (weighted-box fusion).
+
+    Args:
+        model1 (TileExtractorPseudoModel): Tile generator.
+        model2 (dg.model.Model): Detection model.
+        edge_threshold (float, optional): Size of the edge band expressed as a
+            fraction of tile width/height. Defaults to ``0.02``.
+        fusion_threshold (float, optional): 1-D IoU needed to fuse two edge
+            boxes. Defaults to ``0.8``.
+        **crop_* / add_model1_results / nms_options**: Forwarded to
+            :class:`TileModel`.
     """
 
     def __init__(
@@ -767,17 +842,22 @@ class BoxFusionTileModel(_EdgeMixin, TileModel):
 
 
 class BoxFusionLocalGlobalTileModel(BoxFusionTileModel):
-    """
-    Compound model class which performs tiling with local (fine grained) and global (course grained) images and
-    fusion of boxes detected on the edges/overlaps. It takes a tile extractor pseudo model as the first model
-    and a detection type model as the second model. It returns the combined results of the **second** model
-    where bbox coordinates are translated to the original image coordinates. Objects are first retained depending
-    on a large object threshold, if the object's area size is greater than this threshold, it will only be taken
-    from the global tile, if smaller it will be only taken from local tiles. After passing the local/global filter,
-    objects detected on the edges/overlaps (determined by the edge threshold) of tiles are fused based on if they
-    overlap and if one of the 1D-IoUs exceeds the fusion threshold.
+    """Local-/global-tiling plus edge fusion.
 
-    The tile extractor pseudo model must be set to generate a global tile.
+    Combines the size-based filtering of :class:`LocalGlobalTileModel` with the
+    edge-aware fusion of :class:`BoxFusionTileModel`.
+
+    Args:
+        model1 (TileExtractorPseudoModel): Must output a global tile.
+        model2 (dg.model.Model): Detection model.
+        large_object_threshold (float, optional): Area ratio that classifies a
+            detection as "large". Defaults to ``0.01``.
+        edge_threshold (float, optional): Width of the edge band as a fraction
+            of tile dimensions. Defaults to ``0.02``.
+        fusion_threshold (float, optional): 1-D IoU used by the fusion logic.
+            Defaults to ``0.8``.
+        **crop_* / add_model1_results / nms_options**: Forwarded to
+            :class:`BoxFusionTileModel`.
     """
 
     def __init__(
