@@ -82,6 +82,23 @@ def test_object_selector():
             ],
             "res": [[{"bbox": big_box, "score": 0.5}, {"bbox": lil_box, "score": 1}]],
         },
+        # two objects, custom metric (min score)
+        {
+            "params": {
+                "top_k": 2,
+                "selection_strategy": degirum_tools.ObjectSelectionStrategies.CUSTOM_METRIC,
+                "custom_metric": lambda det, result: 1.0 - det["score"],
+                "use_tracking": False,
+            },
+            "inp": [
+                [
+                    {"bbox": lil_box, "score": 1},
+                    {"bbox": big_box, "score": 0.5},
+                    {"bbox": lil_box, "score": 0.2},
+                ]
+            ],
+            "res": [[{"bbox": lil_box, "score": 0.2}, {"bbox": big_box, "score": 0.5}]],
+        },
         # too many objects, largest area
         {
             "params": {
@@ -101,6 +118,28 @@ def test_object_selector():
                     {"bbox": big_box, "score": 0.5},
                     {"bbox": lil_box, "score": 1},
                     {"bbox": lil_box, "score": 0.2},
+                ]
+            ],
+        },
+        # many objects, metric threshold by score
+        {
+            "params": {
+                "top_k": 0,
+                "metric_threshold": 0.5,
+                "selection_strategy": degirum_tools.ObjectSelectionStrategies.HIGHEST_SCORE,
+                "use_tracking": False,
+            },
+            "inp": [
+                [
+                    {"bbox": lil_box, "score": 1},
+                    {"bbox": big_box, "score": 0.6},
+                    {"bbox": lil_box, "score": 0.2},
+                ]
+            ],
+            "res": [
+                [
+                    {"bbox": lil_box, "score": 1},
+                    {"bbox": big_box, "score": 0.6},
                 ]
             ],
         },
@@ -176,7 +215,7 @@ def test_object_selector():
                 "top_k": 1,
                 "selection_strategy": degirum_tools.ObjectSelectionStrategies.LARGEST_AREA,
                 "use_tracking": True,
-                "tracking_timeout": 1,
+                "tracking_timeout": 2,
             },
             "inp": [
                 [
@@ -184,12 +223,98 @@ def test_object_selector():
                     {"bbox": big_box, "score": 0.5, "track_id": 1},
                 ],
                 [{"bbox": lil_box, "score": 0.7, "track_id": 0}],
+                [{"bbox": lil_box, "score": 0.9, "track_id": 0}],
                 [{"bbox": lil_box, "score": 1, "track_id": 0}],
+                [{"bbox": big_box, "score": 0.8, "track_id": 1}],
+                [{"bbox": big_box, "score": 0.8, "track_id": 1}],
                 [{"bbox": big_box, "score": 0.8, "track_id": 1}],
             ],
             "res": [
                 [{"bbox": big_box, "score": 0.5, "track_id": 1}],
                 [{"bbox": big_box, "score": 0.5, "track_id": 1}],
+                [{"bbox": big_box, "score": 0.5, "track_id": 1}],
+                [{"bbox": lil_box, "score": 1, "track_id": 0}],
+                [{"bbox": lil_box, "score": 1, "track_id": 0}],
+                [{"bbox": lil_box, "score": 1, "track_id": 0}],
+                [{"bbox": big_box, "score": 0.8, "track_id": 1}],
+            ],
+        },
+        # one object, which disappears and appears again and again
+        {
+            "params": {
+                "top_k": 1,
+                "selection_strategy": degirum_tools.ObjectSelectionStrategies.LARGEST_AREA,
+                "use_tracking": True,
+                "tracking_timeout": 2,
+            },
+            "inp": [
+                [{"bbox": big_box, "score": 0.5, "track_id": 1}],
+                [],
+                [{"bbox": big_box, "score": 0.8, "track_id": 1}],
+                [],
+                [{"bbox": big_box, "score": 1.0, "track_id": 1}],
+                [],
+            ],
+            "res": [
+                [{"bbox": big_box, "score": 0.5, "track_id": 1}],
+                [{"bbox": big_box, "score": 0.5, "track_id": 1}],
+                [{"bbox": big_box, "score": 0.8, "track_id": 1}],
+                [{"bbox": big_box, "score": 0.8, "track_id": 1}],
+                [{"bbox": big_box, "score": 1.0, "track_id": 1}],
+                [{"bbox": big_box, "score": 1.0, "track_id": 1}],
+            ],
+        },
+        # two objects, highest score, metric threshold by score
+        {
+            "params": {
+                "top_k": 0,
+                "metric_threshold": 0.5,
+                "selection_strategy": degirum_tools.ObjectSelectionStrategies.HIGHEST_SCORE,
+                "use_tracking": True,
+            },
+            "inp": [
+                [
+                    {"bbox": lil_box, "score": 1, "track_id": 0},
+                    {"bbox": big_box, "score": 0.5, "track_id": 1},
+                ]
+            ],
+            "res": [[{"bbox": lil_box, "score": 1, "track_id": 0}]],
+        },
+        # one object but two are requested
+        {
+            "params": {
+                "top_k": 2,
+                "selection_strategy": degirum_tools.ObjectSelectionStrategies.HIGHEST_SCORE,
+                "use_tracking": True,
+                "tracking_timeout": 1,
+            },
+            "inp": [
+                [{"bbox": lil_box, "score": 1, "track_id": 0}],
+                [{"bbox": lil_box, "score": 1, "track_id": 0}],
+                [{"bbox": lil_box, "score": 1, "track_id": 0}],
+            ],
+            "res": [
+                [{"bbox": lil_box, "score": 1, "track_id": 0}],
+                [{"bbox": lil_box, "score": 1, "track_id": 0}],
+                [{"bbox": lil_box, "score": 1, "track_id": 0}],
+            ],
+        },
+        # one persistent object with metric threshold
+        {
+            "params": {
+                "top_k": 0,
+                "metric_threshold": 0.5,
+                "selection_strategy": degirum_tools.ObjectSelectionStrategies.HIGHEST_SCORE,
+                "use_tracking": True,
+                "tracking_timeout": 1,
+            },
+            "inp": [
+                [{"bbox": lil_box, "score": 1, "track_id": 0}],
+                [{"bbox": lil_box, "score": 1, "track_id": 0}],
+                [{"bbox": lil_box, "score": 1, "track_id": 0}],
+            ],
+            "res": [
+                [{"bbox": lil_box, "score": 1, "track_id": 0}],
                 [{"bbox": lil_box, "score": 1, "track_id": 0}],
                 [{"bbox": lil_box, "score": 1, "track_id": 0}],
             ],

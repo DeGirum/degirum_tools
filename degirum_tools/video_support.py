@@ -48,7 +48,11 @@ Configuration Options:
     - Output file naming and paths
 """
 
+import platform
+import shutil
+import subprocess
 import time, os, threading, cv2, urllib, copy, json, uuid
+import ffmpeg
 import numpy as np
 from collections import deque
 from contextlib import contextmanager
@@ -712,3 +716,174 @@ class ClipSaver:
                 thread.join()
                 nthreads += 1
         return nthreads
+
+
+class MediaServer:
+    """Manages the MediaMTX media server as a subprocess.
+
+    Starts MediaMTX using a provided config file path. If no config path is given,
+    it runs from the MediaMTX binary's directory.
+
+    MediaMTX binary must be installed and available in the system path.
+    Refer to https://github.com/bluenviron/mediamtx for installation instructions.
+    """
+
+    def __init__(self, *, config_path: Optional[str] = None, verbose: bool = False):
+        """Initializes and starts the server.
+
+        Args:
+            config_path: Path to an existing MediaMTX YAML config file.
+                         If not provided, runs with config file from binary directory.
+            verbose: If True, shows media server output in the console.
+        """
+        self._verbose: bool = verbose
+        self._process: Optional[subprocess.Popen] = None
+        self._config_path: Optional[str] = config_path
+        self._binary: str = (
+            "mediamtx.exe" if platform.system() == "Windows" else "mediamtx"
+        )
+
+        binary_path = shutil.which(self._binary)
+        if not binary_path:
+            raise FileNotFoundError(
+                f"Cannot find {self._binary} in PATH. MediaMTX binary must be installed and available in the system path."
+            )
+
+        # Determine working directory
+        self._working_dir: str = os.path.dirname(
+            os.path.abspath(config_path if config_path else binary_path)
+        )
+        self._start()
+
+    def _start(self):
+        """Starts the media server subprocess."""
+        cmd = [self._binary]
+        if self._config_path:
+            cmd.append(self._config_path)
+
+        stdout = None if self._verbose else subprocess.DEVNULL
+        stderr = None if self._verbose else subprocess.DEVNULL
+
+        self._process = subprocess.Popen(
+            cmd, cwd=self._working_dir, stdout=stdout, stderr=stderr
+        )
+
+    def stop(self):
+        """Stops the media server process."""
+        if self._process and self._process.poll() is None:
+            self._process.terminate()
+            try:
+                self._process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self._process.kill()
+        self._process = None
+
+    def __del__(self):
+        """Destructor to ensure the media server is stopped."""
+        self.stop()
+
+    def __enter__(self):
+        """Enables use with context manager."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Stops server when context exits."""
+        self.stop()
+
+
+class VideoStreamer:
+    """Streams video frames to an RTSP server using FFmpeg.
+    This class uses FFmpeg to stream video frames to an RTSP server.
+    FFmpeg must be installed and available in the system path.
+    """
+
+    def __init__(
+        self,
+        rtsp_url: str,
+        width: int,
+        height: int,
+        *,
+        fps: float = 30.0,
+        pix_fmt="bgr24",
+        verbose: bool = False,
+    ):
+        """Initializes the video streamer.
+
+        Args:
+            rtsp_url (str): RTSP URL to stream to (e.g., 'rtsp://user:password@hostname:port/stream').
+                            Typically you use `MediaServer` class to start media server and
+                            then use its RTSP URL like `rtsp://localhost:8554/mystream`
+            width (int): Width of the video frames in pixels.
+            height (int): Height of the video frames in pixels.
+            fps (float, optional): Frames per second for the stream. Defaults to 30.
+            pix_fmt (str, optional): Pixel format for the input frames. Defaults to 'bgr24'. Can be 'rgb24'.
+            verbose (bool, optional): If True, shows FFmpeg output in the console. Defaults to False.
+        """
+        self._width = width
+        self._height = height
+
+        self._process = (
+            ffmpeg.input(
+                "pipe:0",
+                format="rawvideo",
+                pix_fmt="bgr24",
+                s=f"{width}x{height}",
+                framerate=fps,
+            )
+            .output(
+                rtsp_url,
+                format="rtsp",
+                pix_fmt="yuv420p",
+                vcodec="libx264",
+                preset="ultrafast",
+                tune="zerolatency",
+                rtsp_transport="tcp",
+                fflags="nobuffer",
+                max_delay=0,
+            )
+            .global_args("-loglevel", "info" if verbose else "quiet")
+            .run_async(pipe_stdin=True, quiet=not verbose)
+        )
+
+    def write(self, img: ImageType):
+        """Writes a frame to the RTSP stream.
+        Args:
+            img (ImageType): Frame to write. Can be:
+                - OpenCV image (np.ndarray)
+                - PIL Image
+
+            Pixel format must match the one specified in the constructor (default is 'bgr24').
+        """
+
+        im_sz = image_size(img)
+
+        if (self._width, self._height) != im_sz:
+            img = resize_image(img, self._width, self._height)
+
+        try:
+            self._process.stdin.write(img.tobytes())
+        except (BrokenPipeError, IOError):
+            self.stop()
+
+    def stop(self):
+        """Stops the streamer process."""
+        if self._process:
+            if self._process.stdin:
+                try:
+                    self._process.stdin.close()
+                except Exception:
+                    pass
+            self._process.wait()
+            self._process = None
+
+    def __del__(self):
+        """Destructor to ensure the streamer is stopped."""
+        self.stop()
+
+    def __enter__(self):
+        """Enables use with context manager."""
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        """Stops streamer when context exits."""
+        self.stop()
