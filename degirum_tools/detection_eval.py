@@ -151,7 +151,7 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
         """
         keypoints: List[float] = []
         for ldmks in keypoints_res:
-            kypts = ldmks["landmark"]
+            kypts = ldmks["landmark"][:2]
             kypts_score = ldmks["score"]
             keypoints.extend(float(x) for x in kypts)
             keypoints.append(kypts_score)
