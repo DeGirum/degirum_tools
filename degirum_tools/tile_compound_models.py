@@ -121,8 +121,9 @@ class TileExtractorPseudoModel(ModelLike):
         Args:
             cols (int): Number of columns to divide the image into.
             rows (int): Number of rows to divide the image into.
+            overlap_percent (float): Desired overlap between neighbouring tiles.
             model2 (dg.model.Model): Model which will be used as a second step of the compound model pipeline.
-            global_tile (bool): Indicates whether the global (whole) image should also be sent to model2.
+            global_tile (bool, optional): Indicates whether the global (whole) image should also be sent to model2.
             tile_mask (list[int] | None, optional): Optional list of indices to keep during tile generation.
                 Tile indices are counted starting from the top row to the bottom row, left to right.
             motion_detect (MotionDetectOptions | None, optional): Motion detection options.
@@ -255,7 +256,7 @@ class TileExtractorPseudoModel(ModelLike):
         Perform whole inference lifecycle for all objects in given iterator object (for example, `list`).
 
         Args:
-            data (iterator): Inference input data iterator object such as list or generator function.
+            data (Iterable): Inference input data iterator object such as list or generator function.
                 Each element returned by this iterator should be compatible to that regular PySDK model
                 accepts.
 
