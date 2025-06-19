@@ -5,7 +5,7 @@ import degirum_tools
 # gst_pipeline = "filesrc location=Traffic.mp4 ! decodebin ! videoconvert ! video/x-raw,format=RGB ! appsink name=sink"
 # gst_pipeline= "v4l2src device=/dev/video0 ! videoconvert ! videoscale ! video/x-raw,width=960,height=540 ! appsink name=sink"
 # gst_pipeline="v4l2src device=/dev/video0 ! videoconvert ! videoscale ! video/x-raw,width=640,height=640,format=RGB ! appsink name=sink"
-gst_pipeline=0
+gst_pipeline='rtsp://admin:admin123@192.168.0.194:554'
 source_type="gstream"
 
 #         f"framerate={int(fps)}/1 ! videoconvert ! appsink name=sink"

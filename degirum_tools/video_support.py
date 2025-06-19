@@ -25,66 +25,130 @@ import platform
 import subprocess
 import os
 import cv2
+import pyudev
 
-def is_gst_available():
-    return "GStreamer" in cv2.getBuildInformation()
-
-def detect_platform():
-    info = {
-        "is_rpi": False,
-        "is_jetson": False,
-        "has_nvidia_gpu": False,
-        "has_intel_gpu": False,
-    }
-
+def detect_platform() -> str:
     try:
-        # RPi detection
-        with open("/proc/cpuinfo", "r") as f:
-            cpuinfo = f.read()
-        info["is_rpi"] = "Raspberry Pi" in cpuinfo
+        model = Path("/proc/device-tree/model").read_bytes().rstrip(b"\0\n").decode()
+    except (FileNotFoundError, OSError):
+        model = ""
+    cpuinfo = Path("/proc/cpuinfo").read_text(errors="ignore")
 
-        # Jetson detection
-        info["is_jetson"] = os.path.exists("/etc/nv_tegra_release")
+    if "Raspberry Pi" in model:
+        print("Rpi device")
+        return "raspberrypi"
+    if "Jetson" in model or "NVIDIA" in model:
+        print("Nvidia device")
+        return "jetson"
+    if "GenuineIntel" in cpuinfo:
+        print("Intel device")
+        return "intel"
+    return "unknown"
 
-        # NVIDIA GPU detection
-        info["has_nvidia_gpu"] = subprocess.run(["which", "nvidia-smi"], capture_output=True).returncode == 0
+# ------------------ Camera Type Detection ------------------
 
-        # Intel GPU detection
-        lspci = subprocess.check_output("lspci", text=True)
-        info["has_intel_gpu"] = "Intel Corporation UHD" in lspci or "Intel Corporation Iris" in lspci
+# ------------------------------------------------------------------
+# 1) Camera-type detector
+# ------------------------------------------------------------------
+def detect_camera_type(dev_node: str) -> str:
+    """
+    Return either:
+        • 'csi'  – Raspberry-Pi / Jetson MIPI-CSI sensor
+        • 'usb'  – everything else (integrated laptop webcam **or** external USB)
 
-    except Exception as e:
-        print("Platform detection error:", e)
-
-    return info
-
-def select_optimal_gst_plugin(platform_info, video_source):
-    if platform_info["is_jetson"]:
-        return f"nvarguscamerasrc sensor-id=/dev/video{video_source} ! nvvidconv ! video/x-raw,format=BGR"
-    elif platform_info["has_nvidia_gpu"]:
-        return f"v4l2src device=/dev/video{video_source} ! nvv4l2decoder ! nvvidconv ! video/x-raw,format=BGR"
-    elif platform_info["has_intel_gpu"]:
-        return f"v4l2src device=/dev/video{video_source} ! vaapipostproc ! video/x-raw,format=BGR"
-    elif platform_info["is_rpi"]:
-        return f"libcamerasrc camera-number=/dev/video{video_source} ! videoconvert ! video/x-raw,format=BGR"
-    else:
-        return f"v4l2src device=/dev/video{video_source} ! videoconvert ! video/x-raw,format=BGR"
-
-def build_gst_pipeline(video_source: str, width: int, height: int, fps: int):
-    if not is_gst_available():
-        return None
-
-    platform_info = detect_platform()
-    plugin_str = select_optimal_gst_plugin(platform_info, video_source)
-
-    pipeline = (
-        f"{plugin_str}, width={width}, height={height}, ! appsink name = sink"
-    )
-
-    #pipeline = "v4l2src device=/dev/video0 ! videoconvert ! videoscale ! video/x-raw, format=RGB, width=640, height=480 ! appsink name = sink"
+    We still keep CSI separate because its source element is `libcamerasrc`
+    instead of `v4l2src`.
+    """
+    try:
+        import pyudev
+        context = pyudev.Context()
+        for dev in context.list_devices(subsystem='video4linux'):
+            if dev.device_node == dev_node:
+                path = dev.device_path.lower()
+                return "csi" if ("csi" in path or "unicam" in path) else "usb"
+    except Exception:
+        # graceful fallback to plain /sys
+        try:
+            link = os.readlink(f"/sys/class/video4linux/{Path(dev_node).name}").lower()
+            return "csi" if ("csi" in link or "unicam" in link) else "usb"
+        except Exception:
+            pass
+    return "usb"  # default: treat as generic UVC/USB cam
 
 
-    return pipeline
+# ------------------------------------------------------------------
+# 2) GStreamer-pipeline builder
+# ------------------------------------------------------------------
+def build_gst_pipeline(source: str,
+                       width: int  = 960,
+                       height: int = 540,
+                       fps: int    = 30) -> str:
+    """
+    Return a **Python-friendly** GST string ready for cv2.VideoCapture(),
+    with element order compatible with DeGirum models.
+
+    Order for *file*:  filesrc → decodebin → videoconvert → videoscale → caps → appsink
+    Order for *camera*: v4l2src/libcamerasrc → videoscale → videoconvert → caps → appsink
+    The final caps always include RGB + explicit width / height (+ framerate for files).
+    """
+
+    # ------------- File source ------------------------------------------------
+    if isinstance(source, str) and source.lower().endswith(".mp4"):
+        return (
+            f'filesrc location="{source}" ! decodebin ! '
+            f'videoconvert ! videoscale ! '
+            f'video/x-raw,width={width},height={height},format=RGB ! '
+            f'appsink name=sink'
+        )
+        #return "filesrc location=Traffic.mp4 ! decodebin ! videoconvert ! video/x-raw, width=960, height=540, format=RGB ! appsink name=sink"
+
+    #--------------RTSP source---------------------------------------------------
+    if isinstance(source, str) and source.strip().lower().startswith("rtsp://"):
+        # Safe, dynamic pipeline for RTSP with decodebin
+        return (
+            f"rtspsrc location={source} latency=0 ! "
+            f"decodebin ! videoconvert ! videoscale ! "
+            f"video/x-raw,width={width},height={height},format=BGR ! appsink name=sink"
+        )
+
+    # ------------- Camera source ---------------------------------------------
+    if str(source).isdigit():
+        cam_index = int(source)
+        dev_node  = f"/dev/video{cam_index}"
+        if not os.path.exists(dev_node):
+            raise FileNotFoundError(f"{dev_node} not found")
+
+        platform  = detect_platform()
+        cam_type  = detect_camera_type(dev_node)          # 'usb' or 'csi'
+        caps_tail = (f'video/x-raw,width={width},height={height},format=RGB'
+                     + (f',framerate={fps}/1' if fps else ''))
+
+        # —— Platform-specific recipes (same argument order everywhere) ————
+        if platform == "raspberrypi" and cam_type == "csi":
+            # Modern libcamera stack
+            return (
+                f'libcamerasrc ! videoscale ! videoconvert ! {caps_tail} ! '
+                f'appsink name=sink'
+            )
+
+        if platform == "jetson":
+            # Decode MJPEG (common UVC mode) → convert (NVMM → system) → RGB caps
+            return (
+                f'v4l2src device={dev_node} io-mode=2 ! '
+                f'image/jpeg,width={width},height={height},framerate={fps}/1 ! '
+                f'jpegdec ! nvvidconv ! videoscale ! videoconvert ! '
+                f'{caps_tail} ! appsink name=sink'
+            )
+
+        # Default for Intel, AMD, Pi-USB, etc.
+        return (
+            f'v4l2src device={dev_node} ! videoscale ! videoconvert ! '
+            f'{caps_tail} ! appsink name=sink'
+        )
+
+    # -------------------------------------------------------------------------
+    raise ValueError("source must be a camera index (0,1,…) or a .mp4 file path")
+
 
 
 # def _build_gstream_pipeline_string_for_local_file(video_source, width, height, fps=30):
