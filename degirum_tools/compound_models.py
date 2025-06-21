@@ -743,7 +743,7 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
         4. Combines the results of the second model from all cropped regions, mapping coords back to the original image.
 
     Optionally, you can add model1 detections to the final result and/or apply NMS.
-    
+
     When model1 results are added, each detection from model2 will have a `crop_index` field, indicating which bounding box from model1 it corresponds to.
 
     Restriction:
