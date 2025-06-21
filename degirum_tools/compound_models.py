@@ -370,7 +370,9 @@ class CompoundModelBase(ModelLike):
                 # 2. Process all results available so far from model2
                 no_results = True
                 while result2 := next(model2_iter):
-                    if (transformed_result := self.transform_result2(result2)) is not None:
+                    if (
+                        transformed_result := self.transform_result2(result2)
+                    ) is not None:
                         yield result_apply_final_steps(transformed_result)
                         no_results = False
 
@@ -428,7 +430,9 @@ class CompoundModelBase(ModelLike):
     def _custom_postprocessor(self, val: type):
         raise Exception("Custom postprocessor is not supported for compound models")
 
-    def attach_analyzers(self, analyzers: Union[ResultAnalyzerBase, List[ResultAnalyzerBase], None]):
+    def attach_analyzers(
+        self, analyzers: Union[ResultAnalyzerBase, List[ResultAnalyzerBase], None]
+    ):
         """
         Attach analyzers to a model.
 
@@ -739,10 +743,11 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
         4. Combines the results of the second model from all cropped regions, mapping coords back to the original image.
 
     Optionally, you can add model1 detections to the final result and/or apply NMS.
+    
+    When model1 results are added, each detection from model2 will have a `crop_index` field, indicating which bounding box from model1 it corresponds to.
 
     Restriction:
-        First model should be object detection or pseudo-detection model like `RegionExtractionPseudoModel`,
-    second model should be object detection.
+        First model should be object detection or pseudo-detection model like `RegionExtractionPseudoModel`, second model should be object detection.
     """
 
     def __init__(
@@ -769,6 +774,7 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
                 Method of applying extended crop to the input image for model2.
             add_model1_results (bool):
                 If True, merges model1 detections into the final combined result.
+                Each detection from model2 will have a `crop_index` field, indicating which bounding box from model1 it corresponds to.
             nms_options (Optional[NmsOptions]):
                 If provided, applies non-maximum suppression (NMS) to the combined result.
         """
@@ -793,12 +799,12 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
                 The final combined detection results for the previous frame, or None if no data.
         """
         if self._current_result is not None and self._current_result1 is not None:
-            if self._add_model1_results:
-                ret = clone_result(self._current_result1)
-                ret._inference_results.extend(self._current_result)
-            else:
-                ret = copy.copy(self._current_result1)
-                ret._inference_results = self._current_result
+            # preserve original result1
+            result1 = self._current_result1._inference_results
+
+            # we create final result based on the model1 result
+            ret = copy.copy(self._current_result1)
+            ret._inference_results = self._current_result
 
             if self._nms_options is not None:
                 nms(
@@ -807,6 +813,11 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
                     use_iou=self._nms_options.use_iou,
                     box_select=self._nms_options.box_select,
                 )
+
+            if self._add_model1_results:
+                # prepend model1 results
+                ret._inference_results = result1 + ret._inference_results
+
             return ret
         return None
 
@@ -840,6 +851,9 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
                         m["landmark"][0] += x
                         m["landmark"][1] += y
 
+                if self._add_model1_results:
+                    r["crop_index"] = idx  # mark which bbox this result belongs to
+
         ret = None
         if result1 is self._current_result1:
             # Frame continues: append second model results to the combined result
@@ -848,7 +862,7 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
         else:
             # New frame comes: return combined result of previous frame
             ret = self._finalize_current_result()
-            self._current_result = copy.deepcopy(result2._inference_results)
+            self._current_result = result2._inference_results
             self._current_result1 = result1
 
         return ret
