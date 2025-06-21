@@ -226,13 +226,22 @@ class VideoCaptureGst:
         caps = sample.get_caps()
         width = caps.get_structure(0).get_value("width")
         height = caps.get_structure(0).get_value("height")
-        print(width, height)
+        
+        # DEBUG: Print frame size from appsink
+        print(f"[APPSINK] Frame captured: {width}x{height}, Buffer size: {buf.get_size()} bytes")
+        
         success, mapinfo = buf.map(Gst.MapFlags.READ)
         if not success:
+            print(f"[APPSINK] ERROR: Failed to map buffer")
             return False, None
 
         try:
             frame: np.ndarray = np.ndarray((height, width, 3), buffer=mapinfo.data, dtype=np.uint8)
+            
+            # DEBUG: Print numpy array details
+            print(f"[APPSINK] Numpy frame created: shape={frame.shape}, dtype={frame.dtype}, size={frame.nbytes} bytes")
+            print(f"[APPSINK] Frame data range: min={frame.min()}, max={frame.max()}, mean={frame.mean():.2f}")
+            
             return True, frame
         finally:
             buf.unmap(mapinfo)
@@ -402,6 +411,9 @@ def video_source(
     # report errors only for camera streams
     report_error = False if env.get_test_mode() or is_file else True
 
+    # DEBUG: Initialize frame counter
+    frame_counter = 0
+
     if fps:
         # Decimate if file
         if is_file:
@@ -429,25 +441,35 @@ def video_source(
                 )
             else:
                 break
+                
+        # DEBUG: Print frame details before yielding
+        frame_counter += 1
+        print(f"[VIDEO_SOURCE] Frame #{frame_counter}: shape={frame.shape}, dtype={frame.dtype}")
+        
         if fps:
             if is_file:
                 frame_id += 1
 
                 if frame_id % video_fps in drop_indices:
+                    print(f"[VIDEO_SOURCE] Frame #{frame_counter} dropped due to FPS decimation")
                     continue
 
+                print(f"[VIDEO_SOURCE] Yielding frame #{frame_counter} to model")
                 yield frame
             else:
                 curr_time = time.time()
                 elapsed_time = curr_time - prev_time
 
                 if elapsed_time < minimum_elapsed_time:
+                    print(f"[VIDEO_SOURCE] Frame #{frame_counter} dropped due to FPS throttling")
                     continue
 
                 prev_time = curr_time - (elapsed_time - minimum_elapsed_time)
 
+                print(f"[VIDEO_SOURCE] Yielding frame #{frame_counter} to model")
                 yield frame
         else:
+            print(f"[VIDEO_SOURCE] Yielding frame #{frame_counter} to model")
             yield frame
 
 def get_video_stream_properties(video_source: Union[int, str, Path, None, cv2.VideoCapture, VideoCaptureGst]) -> tuple:

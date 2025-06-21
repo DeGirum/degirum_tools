@@ -201,6 +201,7 @@ def predict_stream(
     *,
     fps: Optional[float] = None,
     analyzers: Union[ResultAnalyzerBase, List[ResultAnalyzerBase], None] = None,
+    robust_rtsp: bool = False,
 ):
     """Run a model on a video stream
 
@@ -211,9 +212,11 @@ def predict_stream(
             - IP camera URL in the format "rtsp://<user>:<password>@<ip or hostname>",
             - local path or URL to mp4 video file,
             - YouTube video URL
+        source_type - backend type ("auto", "opencv", "gstream")
         fps - optional fps cap. If greater than the actual FPS, it will do nothing.
            If less than the current fps, it will decimate frames accordingly.
         analyzers - optional analyzer or list of analyzers to be applied to model inference results
+        robust_rtsp - if True, use more robust RTSP pipeline with error handling for problematic streams
 
     Returns:
         generator object yielding model prediction results.
@@ -222,12 +225,24 @@ def predict_stream(
     """
 
     analyzing_postprocessor = _create_analyzing_postprocessor_class(analyzers)
-    print(f"passing source as {source_type}")
-    with open_video_stream(video_source_id,source_type=source_type) as stream:
+    print(f"[PREDICT_STREAM] Starting prediction with source_type={source_type}, robust_rtsp={robust_rtsp}")
+    
+    with open_video_stream(video_source_id, source_type=source_type, robust_rtsp=robust_rtsp) as stream:
+        print(f"[PREDICT_STREAM] Video stream opened successfully")
+        
+        # DEBUG: Initialize result counter
+        result_counter = 0
+        
+        print(f"[PREDICT_STREAM] Starting model.predict_batch() with video_source generator")
         for res in model.predict_batch(video_source(stream, fps=fps)):
+            result_counter += 1
+            print(f"[PREDICT_STREAM] Model result #{result_counter} received")
+            
             if analyzers is not None:
+                print(f"[PREDICT_STREAM] Applying analyzers to result #{result_counter}")
                 yield analyzing_postprocessor(result=res)
             else:
+                print(f"[PREDICT_STREAM] Yielding result #{result_counter} without analyzers")
                 yield res
 
 
