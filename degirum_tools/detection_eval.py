@@ -46,6 +46,7 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
             "DetectionYolo",
             "DetectionYoloV8",
             "DetectionYoloV10",
+            "DetectionYoloHailo",
             "PoseDetectionYoloV8",
             "SegmentationYoloV8",
         ]:
