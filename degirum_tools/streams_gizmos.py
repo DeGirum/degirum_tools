@@ -392,6 +392,7 @@ class AiGizmoBase(Gizmo):
         self,
         model: Union[dg.model.Model, str],
         *,
+        non_blocking_batch_predict_timeout_s: float = 0.01,
         stream_depth: int = 10,
         allow_drop: bool = False,
         inp_cnt: int = 1,
@@ -401,12 +402,18 @@ class AiGizmoBase(Gizmo):
 
         Args:
             model (dg.model.Model or str): A DeGirum model object or model name string to load. If a string is provided, the model will be loaded via `degirum.load_model()` using the given kwargs.
+            non_blocking_batch_predict_timeout_s (float): Input queue get timeout for non-blocking batch prediction mode. Defaults to 0.001 seconds.
             stream_depth (int): Depth of the input stream queue. Defaults to 10.
             allow_drop (bool): If True, allow dropping frames on input overflow. Defaults to False.
             inp_cnt (int): Number of input streams (for models requiring multiple inputs). Defaults to 1.
             **kwargs (any): Additional parameters to pass to `degirum.load_model()` when loading the model (if model is given as a name).
         """
         super().__init__([(stream_depth, allow_drop)] * inp_cnt)
+
+        self._non_blocking_batch_predict_timeout_s = (
+            non_blocking_batch_predict_timeout_s
+        )
+
         if isinstance(model, str):
             # Load the model by name, adding a token if not provided
             if "token" not in kwargs:
@@ -430,12 +437,23 @@ class AiGizmoBase(Gizmo):
         Internally feeds data from the input stream(s) into the model and yields results, invoking `on_result` for each inference result.
         """
 
+        block = not self.model.non_blocking_batch_predict
+        timeout_s = None if block else self._non_blocking_batch_predict_timeout_s
+
         def source():
             has_data = True
             while has_data:
                 # Get data from all inputs
                 for inp in self.get_inputs():
-                    d = inp.get()
+                    if block:
+                        d = inp.get()
+                    else:
+                        try:
+                            d = inp.get(timeout=timeout_s)
+                        except queue.Empty:
+                            yield None
+                            continue
+
                     if d == Stream._poison:
                         has_data = False
                         break
@@ -444,6 +462,9 @@ class AiGizmoBase(Gizmo):
                     break
 
         for result in self.model.predict_batch(source()):
+            if result is None:  # skip empty results (in non-blocking mode)
+                continue
+
             meta = result.info
             # If input was preprocessed bytes, attempt to attach original image for better visualization
             if isinstance(result._input_image, bytes):
