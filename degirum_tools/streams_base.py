@@ -257,6 +257,63 @@ class Stream(queue.Queue):
         self.put(self._poison)
 
 
+class Watchdog:
+    """Monitors activity rate and timing using tick events and a filtered TPS estimate.
+
+    Tracks the frequency of `tick()` calls and the time since the last one. The `check()` method
+    evaluates whether the activity is recent enough and meets a minimum TPS (ticks per second) threshold,
+    using a single-pole low-pass filter to smooth TPS estimation.
+    """
+
+    def __init__(self, time_limit: float, tps_threshold: float, smoothing: float = 0.9):
+        """Initializes the Watchdog.
+
+        Args:
+            time_limit (float): Maximum allowed time (in seconds) since the last tick.
+            tps_threshold (float): Minimum required filtered ticks per second.
+            smoothing (float): Smoothing factor for the low-pass filter (0 < smoothing < 1).
+        """
+
+        self.tps = 0.0  # current TPS
+
+        self._time_limit = time_limit
+        self._tps_threshold = tps_threshold
+        self._smoothing = smoothing
+        self._last_tick: Optional[float] = None
+        self._lock = threading.Lock()
+
+    def tick(self):
+        """Records the current timestamp and updates the filtered TPS estimate.
+
+        Should be called regularly to track system activity. Uses the time between ticks to calculate
+        instantaneous TPS and applies a low-pass filter to smooth the estimate.
+        """
+
+        with self._lock:
+            now = time.time()
+            if self._last_tick is not None:
+                dt = now - self._last_tick
+                if dt > 0:
+                    instant_tps = 1.0 / dt
+                    self.tps = (
+                        self._smoothing * self.tps + (1 - self._smoothing) * instant_tps
+                    )
+            self._last_tick = now
+
+    def check(self) -> bool:
+        """Checks whether the watchdog is within the allowed timing and TPS threshold.
+
+        Returns:
+            bool: True if the last tick occurred within `time_limit` seconds and
+                  the filtered TPS is at least `tps_threshold`. False otherwise.
+        """
+        with self._lock:
+            if self._last_tick is None:
+                return True  # No ticks yet, consider it active
+            age = time.time() - self._last_tick
+            return age <= self._time_limit and self.tps >= self._tps_threshold
+
+
 class Gizmo(ABC):
     """Base class for all gizmos (streaming pipeline processing blocks).
 
@@ -337,6 +394,8 @@ class Gizmo(ABC):
         self._output_refs: List[Stream] = []
         self._connected_gizmos: set = set()
         self._abort = False
+
+        # public attributes
         self.composition: Optional[Composition] = None
         self.error: Optional[DegirumException] = None
         self.name = self.__class__.__name__
@@ -344,6 +403,7 @@ class Gizmo(ABC):
         self.start_time_s = time.time()  # gizmo start time
         self.elapsed_s = 0
         self.fps = 0  # achieved FPS rate
+        self.watchdog: Optional[Watchdog] = None  # optional watchdog
 
     def get_tags(self) -> List[str]:
         """Get the list of meta tags for this gizmo.
@@ -448,6 +508,9 @@ class Gizmo(ABC):
         """
         if data != Stream._poison:
             self.result_cnt += 1
+            if self.watchdog is not None:
+                self.watchdog.tick()
+
         for out in self._output_refs:
             if data == Stream._poison or data is None:
                 out.close()
