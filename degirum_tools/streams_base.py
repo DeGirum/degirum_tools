@@ -278,7 +278,7 @@ class Watchdog:
         self._tps_threshold = tps_threshold
         self._smoothing = smoothing
         self._last_tick: Optional[float] = None
-        self._average_tick = -1
+        self._average_tick = -1.0
         self._lock = threading.Lock()
 
     def tick(self):
