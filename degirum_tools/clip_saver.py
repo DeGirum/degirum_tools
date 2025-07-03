@@ -82,7 +82,7 @@ class ClipSavingAnalyzer(ResultAnalyzerBase):
 
         Args:
             clip_duration (int): Total length of the output clip in frames (pre-buffer + post-buffer).
-            triggers (Set[str]): Names that fire the recorder when found in either [`EventDetector`](event_detector.md#key_events_detected) or [`EventNotifier`](event_notifier.md#key_notifications).
+            triggers (Set[str]): Names that fire the recorder when found in either [`EventDetector`](event_detector.md#key_events_detected) or [`EventNotifier`](notifier.md#key_notifications).
             file_prefix (str): Path and filename prefix for generated files (frame number & extension are appended automatically).
             pre_trigger_delay (int, optional): Frames to include before the trigger. Defaults to 0.
             embed_ai_annotations (bool, optional): If True, use `InferenceResults.image_overlay` so bounding boxes/labels
