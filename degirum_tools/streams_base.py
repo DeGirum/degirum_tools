@@ -10,7 +10,7 @@
 
 import threading, queue, copy, time
 from abc import ABC, abstractmethod
-from typing import Optional, Any, List, Dict, Union, Iterator
+from typing import Optional, Any, List, Dict, Union, Iterator, Tuple
 from .environment import get_test_mode
 from degirum.exceptions import DegirumException
 
@@ -274,12 +274,11 @@ class Watchdog:
             smoothing (float): Smoothing factor for the low-pass filter (0 < smoothing < 1).
         """
 
-        self.tps = 0.0  # current TPS
-
         self._time_limit = time_limit
         self._tps_threshold = tps_threshold
         self._smoothing = smoothing
         self._last_tick: Optional[float] = None
+        self._average_tick = -1
         self._lock = threading.Lock()
 
     def tick(self):
@@ -293,25 +292,31 @@ class Watchdog:
             now = time.time()
             if self._last_tick is not None:
                 dt = now - self._last_tick
-                if dt > 0:
-                    instant_tps = 1.0 / dt
-                    self.tps = (
-                        self._smoothing * self.tps + (1 - self._smoothing) * instant_tps
+                self._average_tick = (
+                    dt
+                    if self._average_tick < 0
+                    else (
+                        self._smoothing * self._average_tick
+                        + (1 - self._smoothing) * dt
                     )
+                )
             self._last_tick = now
 
-    def check(self) -> bool:
+    def check(self) -> Tuple[bool, float]:
         """Checks whether the watchdog is within the allowed timing and TPS threshold.
 
         Returns:
-            bool: True if the last tick occurred within `time_limit` seconds and
-                  the filtered TPS is at least `tps_threshold`. False otherwise.
+            Tuple[bool, float]: A tuple containing:
+                - bool: True if the watchdog is active (recent enough and meets TPS threshold), False otherwise.
+                - float: The current TPS value.
+
         """
         with self._lock:
             if self._last_tick is None:
-                return True  # No ticks yet, consider it active
+                return True, 0  # No ticks yet, consider it active
             age = time.time() - self._last_tick
-            return age <= self._time_limit and self.tps >= self._tps_threshold
+            tps = 1 / self._average_tick if self._average_tick > 0 else 0
+            return age <= self._time_limit and tps >= self._tps_threshold, tps
 
 
 class Gizmo(ABC):
