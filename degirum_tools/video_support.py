@@ -910,6 +910,9 @@ class VideoStreamer:
             Pixel format must match the one specified in the constructor (default is 'bgr24').
         """
 
+        if not self._process:
+            return
+
         im_sz = image_size(img)
 
         if (self._width, self._height) != im_sz:

@@ -383,6 +383,9 @@ class NotificationServer:
                         queue_is_active = False
                 except queue.Empty:
                     job = None
+                except KeyboardInterrupt:
+                    queue_is_active = False
+                    job = None
 
                 if job is not None:
                     pending_jobs[job.id] = job
