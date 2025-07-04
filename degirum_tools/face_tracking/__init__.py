@@ -17,8 +17,9 @@ from ..math_support import AnchorPoint, compute_kmeans
 from ..notifier import EventNotifier, notification_config_console
 from ..object_tracker import ObjectTracker
 from ..object_storage_support import ObjectStorage, ObjectStorageConfig
-from ..streams_base import Composition, Watchdog
-from ..streams_gizmos import (
+from ..streams import (
+    Composition,
+    Watchdog,
     AiAnalyzerGizmo,
     AiSimpleGizmo,
     VideoDisplayGizmo,

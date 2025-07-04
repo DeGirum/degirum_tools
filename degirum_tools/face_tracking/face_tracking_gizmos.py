@@ -15,8 +15,7 @@ from typing import List, Dict, Any, Optional, ClassVar
 from dataclasses import dataclass, asdict, field
 
 from ..result_analyzer_base import clone_result
-from ..streams_base import Gizmo, StreamData
-from ..streams_gizmos import VideoSourceGizmo, tag_inference, tag_video
+from ..streams import Gizmo, StreamData, VideoSourceGizmo, tag_inference, tag_video
 from ..zone_count import ZoneCounter
 
 from .reid_database import ReID_Database

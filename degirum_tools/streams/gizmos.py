@@ -1,23 +1,28 @@
-# streams_gizmos.py: streaming toolkit: gizmos implementation
-# Copyright DeGirum Corporation 2024
+#
+# streams.gizmos.py: streaming toolkit: gizmos implementation
+#
+# Copyright DeGirum Corporation 2025
 # All rights reserved
+#
 # Implements various gizmos for streaming pipelines
+#
 
 import queue, copy, time, cv2, numpy as np
 import degirum as dg
 from abc import abstractmethod
 from typing import Optional, List, Union
 from contextlib import ExitStack
-from .streams_base import Stream, StreamData, StreamMeta, Gizmo
-from .environment import get_test_mode
-from .video_support import open_video_stream, open_video_writer, VideoStreamer
-from .ui_support import Display
-from .image_tools import crop_image, resize_image, image_size, ImageType
-from .result_analyzer_base import image_overlay_substitute, clone_result
-from .crop_extent import CropExtentOptions, extend_bbox
-from .notifier import EventNotifier
-from .event_detector import EventDetector
-from .environment import get_token
+
+from .base import Stream, StreamData, StreamMeta, Gizmo
+
+from ..crop_extent import CropExtentOptions, extend_bbox
+from ..environment import get_test_mode, get_token
+from ..event_detector import EventDetector
+from ..image_tools import crop_image, resize_image, image_size, ImageType
+from ..notifier import EventNotifier
+from ..result_analyzer_base import image_overlay_substitute, clone_result
+from ..ui_support import Display
+from ..video_support import open_video_stream, open_video_writer, VideoStreamer
 
 # predefined meta tags
 tag_video = "dgt_video"  # tag for video source data

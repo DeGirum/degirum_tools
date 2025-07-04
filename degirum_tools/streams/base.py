@@ -1,17 +1,21 @@
-# streams_base.py: streaming toolkit: base classes
-# Copyright DeGirum Corporation 2024
+#
+# streams.base.py: streaming toolkit: base classes
+#
+# Copyright DeGirum Corporation 2025
 # All rights reserved
+#
 # Implements base classes for streaming toolkit:
 #  - StreamMeta class is used to pass metainfo objects between gizmos.
 #  - StreamData class is used to pass data and metainfo objects between gizmos.
 #  - Stream class is a queue-based iterable class with optional item drop.
 #  - Gizmo class is a base class for all gizmos: streaming pipeline processing blocks.
 #  - Composition class is a class that holds and animates multiple connected gizmos.
+#
 
 import threading, queue, copy, time
 from abc import ABC, abstractmethod
 from typing import Optional, Any, List, Dict, Union, Iterator, Tuple
-from .environment import get_test_mode
+from ..environment import get_test_mode
 from degirum.exceptions import DegirumException
 
 

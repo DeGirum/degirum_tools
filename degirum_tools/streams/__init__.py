@@ -1,8 +1,12 @@
-# streams.py: streaming toolkit
-# Copyright DeGirum Corporation 2024
+#
+# Sreaming toolkit
+#
+# Copyright DeGirum Corporation 2025
 # All rights reserved
+#
 # Implements streaming toolkit for multi-threaded processing.
 # Please refer to `dgstreams_demo.ipynb` PySDKExamples notebook for examples of toolkit usage.
+#
 
 """
 Streaming Toolkit Overview
@@ -118,11 +122,11 @@ For practical code examples, see the `dgstreams_demo.ipynb` notebook in the PySD
 
 import yaml
 from typing import Union, Optional, Dict
-from .streams_base import Gizmo, Composition
+from .base import Gizmo, Composition
 
 # API reexport
-from .streams_base import *  # noqa
-from .streams_gizmos import *  # noqa
+from .base import *  # noqa
+from .gizmos import *  # noqa
 from degirum_tools import *  # noqa
 
 # schema YAML
