@@ -575,6 +575,7 @@ class Composition:
                 If a Gizmo is provided, all gizmos connected to it (including itself) are added.
                 If an iterator of gizmos is provided, all those gizmos (and their connected gizmos) are added.
         """
+        self._lock = threading.Lock()
         self._threads: List[threading.Thread] = []
 
         # collect all connected gizmos
@@ -704,22 +705,24 @@ class Composition:
 
         This sets each gizmo's abort flag, clears all remaining items from their input queues, and sends poison pills to unblock any waiting gets. This method does not wait for threads to finish; call `wait()` to join threads.
         """
-        # signal abort to all gizmos
-        for gizmo in self._gizmos:
-            gizmo.abort()
 
-        # empty all streams to speed up completion
-        for gizmo in self._gizmos:
-            for i in gizmo._inputs:
-                while not i.empty():
-                    try:
-                        i.get_nowait()
-                    except queue.Empty:
-                        break
+        with self._lock:
+            # signal abort to all gizmos
+            for gizmo in self._gizmos:
+                gizmo.abort()
 
-        # send poison pills from all gizmos to unblock gets()
-        for gizmo in self._gizmos:
-            gizmo.send_result(Stream._poison)
+            # empty all streams to speed up completion
+            for gizmo in self._gizmos:
+                for i in gizmo._inputs:
+                    while not i.empty():
+                        try:
+                            i.get_nowait()
+                        except queue.Empty:
+                            break
+
+            # send poison pills from all gizmos to unblock gets()
+            for gizmo in self._gizmos:
+                gizmo.send_result(Stream._poison)
 
     def wait(self):
         """Wait for all gizmo threads in the composition to finish.

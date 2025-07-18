@@ -47,17 +47,25 @@ class VideoSourceGizmo(Gizmo):
     key_frame_id = "frame_id"  # frame index (sequence number)
     key_timestamp = "timestamp"  # frame timestamp
 
-    def __init__(self, video_source=None, *, stop_composition_on_end: bool = False):
+    def __init__(
+        self,
+        video_source=None,
+        *,
+        stop_composition_on_end: bool = False,
+        retry_on_error: bool = False,
+    ):
         """Constructor.
 
         Args:
             video_source (int or str, optional): A cv2.VideoCapture-compatible video source
                 (device index as int, or file path/URL as str). Defaults to None.
             stop_composition_on_end (bool): If True, stop the [Composition](streams_base.md#composition) when the video source is over. Defaults to False.
+            retry_on_error (bool): If True, retry opening the video source on error after some time. Defaults to False.
         """
         super().__init__()
         self._video_source = video_source
         self._stop_composition_on_end = stop_composition_on_end and not get_test_mode()
+        self._retry_on_error = retry_on_error
 
     def get_tags(self) -> List[str]:
         """Get list of tags assigned to this gizmo.
@@ -72,28 +80,40 @@ class VideoSourceGizmo(Gizmo):
 
         Continuously reads frames from the video source and sends each frame (with metadata) downstream until the source is exhausted or abort is signaled.
         """
-        with open_video_stream(self._video_source) as src:
-            meta = {
-                self.key_frame_width: int(src.get(cv2.CAP_PROP_FRAME_WIDTH)),
-                self.key_frame_height: int(src.get(cv2.CAP_PROP_FRAME_HEIGHT)),
-                self.key_fps: src.get(cv2.CAP_PROP_FPS),
-                self.key_frame_count: int(src.get(cv2.CAP_PROP_FRAME_COUNT)),
-            }
+
+        def run():
+            with open_video_stream(self._video_source) as src:
+                meta = {
+                    self.key_frame_width: int(src.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                    self.key_frame_height: int(src.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+                    self.key_fps: src.get(cv2.CAP_PROP_FPS),
+                    self.key_frame_count: int(src.get(cv2.CAP_PROP_FRAME_COUNT)),
+                }
+                while not self._abort:
+                    ret, data = src.read()
+                    if not ret:
+                        break
+                    else:
+                        meta2 = copy.copy(meta)
+                        meta2[self.key_frame_id] = self.result_cnt
+                        meta2[self.key_timestamp] = time.time()
+                        self.send_result(
+                            StreamData(data, StreamMeta(meta2, self.get_tags()))
+                        )
+                if self._stop_composition_on_end:
+                    # Stop composition if video source is over (to halt other sources still running).
+                    if self.composition is not None and not self._abort:
+                        self.composition.stop()
+
+        if self._retry_on_error:
             while not self._abort:
-                ret, data = src.read()
-                if not ret:
+                try:
+                    run()
                     break
-                else:
-                    meta2 = copy.copy(meta)
-                    meta2[self.key_frame_id] = self.result_cnt
-                    meta2[self.key_timestamp] = time.time()
-                    self.send_result(
-                        StreamData(data, StreamMeta(meta2, self.get_tags()))
-                    )
-            if self._stop_composition_on_end:
-                # Stop composition if video source is over (to halt other sources still running).
-                if self.composition is not None and not self._abort:
-                    self.composition.stop()
+                except Exception:
+                    time.sleep(0.5)  # wait before retrying
+        else:
+            run()
 
 
 class VideoDisplayGizmo(Gizmo):
