@@ -99,9 +99,8 @@ def test_compound_model_cropping(
             assert dr["score"] != cr["score"]
             assert dr["category_id"] != cr["category_id"]
 
-    tiler = degirum_tools.RegionExtractionPseudoModel(
-        [[0, 0, 640, 720], [640, 0, 1280, 720]], detection_model
-    )
+    tiles = [[0, 0, 640, 720], [640, 0, 1280, 720]]
+    tiler = degirum_tools.RegionExtractionPseudoModel(tiles, detection_model)
     model2 = degirum_tools.CroppingAndDetectingCompoundModel(tiler, detection_model)
 
     with degirum_tools.open_video_stream(short_video) as stream:
@@ -113,3 +112,33 @@ def test_compound_model_cropping(
     for d, c in zip(detection_results, compound_results2):
         assert len(d.results) <= len(c.results)
         assert all(cr["label"] == "Car" for cr in c.results)
+        assert all("crop_index" not in cr for cr in c.results)
+
+    model2a = degirum_tools.CroppingAndDetectingCompoundModel(
+        tiler, detection_model, add_model1_results=True
+    )
+
+    with degirum_tools.open_video_stream(short_video) as stream:
+        compound_results2a = list(
+            model2a.predict_batch(degirum_tools.video_source(stream))
+        )
+
+    def is_rect_inside(inner, outer):
+        """
+        Returns True if the rectangle 'inner' is fully inside rectangle 'outer'.
+        Rectangles are [x1, y1, x2, y2].
+        """
+        return (
+            inner[0] >= outer[0]
+            and inner[1] >= outer[1]
+            and inner[2] <= outer[2]
+            and inner[3] <= outer[3]
+        )
+
+    for d, c in zip(detection_results, compound_results2a):
+        assert all("crop_index" in cr for cr in c.results if cr["label"] == "Car")
+        assert all(
+            is_rect_inside(cr["bbox"], c.results[cr["crop_index"]]["bbox"])
+            for cr in c.results
+            if cr["label"] == "Car"
+        )
