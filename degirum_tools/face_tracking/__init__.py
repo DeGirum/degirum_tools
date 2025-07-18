@@ -228,7 +228,7 @@ class FaceTracking:
             #
 
             # video source gizmo
-            source = VideoSourceGizmo(input_video_local_path)
+            source = VideoSourceGizmo(input_video_local_path, retry_on_error=True)
 
             # face detector AI gizmo
             face_detect = AiSimpleGizmo(face_detect_model)
