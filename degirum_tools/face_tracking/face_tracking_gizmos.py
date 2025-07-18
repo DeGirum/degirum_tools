@@ -33,15 +33,20 @@ class FaceStatus:
     last_reid_frame: int = -1  # last frame number on which reID was performed
     next_reid_frame: int = -1  # next frame number on which reID should be performed
     confirmed_count: int = 0  # number of times the face was confirmed
+    is_confirmed: bool = False  # whether the face status is confirmed
     embeddings: list = field(default_factory=list)  # list of embeddings for the face
 
-    unknown_class: ClassVar[str] = "UNKNOWN"  # class name for unknown faces
+    # default labels
+    lbl_not_tracked: ClassVar[str] = "not tracked"
+    lbl_identifying: ClassVar[str] = "identifying"
+    lbl_confirming: ClassVar[str] = "confirming"
+    lbl_unknown: ClassVar[str] = "UNKNOWN"
 
     def __str__(self):
         return (
             str(self.attributes)
             if self.attributes is not None
-            else FaceStatus.unknown_class
+            else FaceStatus.lbl_unknown
         )
 
     def to_dict(self):
@@ -127,10 +132,6 @@ tag_face_search = "face_search"  # tag for face search meta
 class ObjectAnnotateGizmo(Gizmo):
     """Object annotating gizmo"""
 
-    lbl_not_tracked = "not tracked"
-    lbl_identifying = "identifying"
-    lbl_confirming = "confirming"
-
     def get_tags(self) -> List[str]:
         """Get list of tags assigned to this gizmo"""
         return [self.name, tag_obj_annotate, tag_inference]
@@ -139,7 +140,6 @@ class ObjectAnnotateGizmo(Gizmo):
         self,
         object_map: ObjectMap,
         *,
-        credence_count: int = 1,
         label_map: dict = {},
         stream_depth: int = 10,
         allow_drop: bool = False,
@@ -149,24 +149,21 @@ class ObjectAnnotateGizmo(Gizmo):
 
         Args:
             object_map (ObjectMap): The map of object IDs to attributes.
-            credence_count (int): Number of times the face is recognized before confirming it.
-            label_map (dict): Map of special labels to their display names. Recognized keys: "not tracked", "identifying", "confirming".
+            label_map (dict): Map of special labels (FaceStatus.lbl_*) to their display names.
             stream_depth (int): Depth of the stream.
             allow_drop (bool): Whether to allow dropping frames.
         """
         super().__init__([(stream_depth, allow_drop)])
         self._object_map = object_map
-        self._credence_count = credence_count
         self._label_map = label_map
         self._label_map.setdefault(
-            ObjectAnnotateGizmo.lbl_not_tracked, ObjectAnnotateGizmo.lbl_not_tracked
+            FaceStatus.lbl_not_tracked, FaceStatus.lbl_not_tracked
         )
         self._label_map.setdefault(
-            ObjectAnnotateGizmo.lbl_identifying, ObjectAnnotateGizmo.lbl_identifying
+            FaceStatus.lbl_identifying, FaceStatus.lbl_identifying
         )
-        self._label_map.setdefault(
-            ObjectAnnotateGizmo.lbl_confirming, ObjectAnnotateGizmo.lbl_confirming
-        )
+        self._label_map.setdefault(FaceStatus.lbl_confirming, FaceStatus.lbl_confirming)
+        self._label_map.setdefault(FaceStatus.lbl_unknown, FaceStatus.lbl_unknown)
 
     def run(self):
         """Run gizmo"""
@@ -186,25 +183,23 @@ class ObjectAnnotateGizmo(Gizmo):
             for r in clone.results:
                 track_id = r.get("track_id")
                 if track_id is None:
-                    r["label"] = self._label_map[ObjectAnnotateGizmo.lbl_not_tracked]
+                    r["label"] = self._label_map[FaceStatus.lbl_not_tracked]
                 else:
                     obj_status = self._object_map.get(track_id)
                     if obj_status is None:
-                        r["label"] = self._label_map[
-                            ObjectAnnotateGizmo.lbl_identifying
-                        ]
+                        r["label"] = self._label_map[FaceStatus.lbl_identifying]
                     else:
-                        if obj_status.confirmed_count < self._credence_count:
-                            r["label"] = self._label_map[
-                                ObjectAnnotateGizmo.lbl_confirming
-                            ]
-                        elif obj_status.attributes is not None:
-                            r["attributes"] = obj_status.attributes
-                            r["label"] = str(obj_status)
+                        if obj_status.is_confirmed:
+                            if obj_status.attributes is None:
+                                # unknown face
+                                r["label"] = self._label_map[FaceStatus.lbl_unknown]
+                            else:
+                                # known face
+                                r["attributes"] = obj_status.attributes
+                                r["label"] = str(obj_status)
                         else:
-                            # unknown face
-                            r["label"] = FaceStatus.unknown_class
-                            self._object_map.set_alert()
+                            # face is not confirmed yet
+                            r["label"] = self._label_map[FaceStatus.lbl_confirming]
 
             new_meta = data.meta.clone()
             new_meta.append(clone, self.get_tags())
@@ -314,8 +309,7 @@ class FaceExtractGizmo(Gizmo):
                             attributes=None,
                             track_id=track_id,
                             last_reid_frame=frame_id,
-                            next_reid_frame=frame_id
-                            + self._reid_expiration_frames // 4,
+                            next_reid_frame=frame_id + 1,
                         )
                     else:
                         if frame_id < face_status.next_reid_frame:
@@ -405,6 +399,7 @@ class FaceSearchGizmo(Gizmo):
         face_reid_map: ObjectMap,
         db: ReID_Database,
         *,
+        credence_count: int,
         stream_depth: int = 10,
         allow_drop: bool = False,
         accumulate_embeddings: bool = False,
@@ -415,6 +410,7 @@ class FaceSearchGizmo(Gizmo):
         Args:
             face_reid_map (ObjectMap): The map of face IDs to face attributes.
             db (ReID_Database): vector database object
+            credence_count (int): Number of times the face is recognized before confirming it.
             stream_depth (int): Depth of the stream.
             allow_drop (bool): Whether to allow dropping frames.
             accumulate_embeddings (bool): Whether to accumulate embeddings in the face map.
@@ -422,6 +418,7 @@ class FaceSearchGizmo(Gizmo):
         super().__init__([(stream_depth, allow_drop)])
         self._face_reid_map = face_reid_map
         self._db = db
+        self._credence_count = credence_count
         self._accumulate_embeddings = accumulate_embeddings
 
     def get_tags(self) -> List[str]:
@@ -477,10 +474,17 @@ class FaceSearchGizmo(Gizmo):
                 if face.db_id == db_id:
                     face.confirmed_count += 1
                 else:
-                    face.confirmed_count = 0
-                face.attributes = attributes
-                face.db_id = db_id
-                self._face_reid_map.put(track_id, face)
+                    face.confirmed_count = 1
+                    # reset frame counter when the face changes status for quick reconfirming
+                    face.next_reid_frame = face.last_reid_frame + 1
 
+                face.attributes = attributes
+                face.is_confirmed = face.confirmed_count >= self._credence_count
+                face.db_id = db_id
                 if self._accumulate_embeddings:
                     face.embeddings.append(embedding)
+
+                self._face_reid_map.put(track_id, face)
+
+                if face.is_confirmed and face.attributes is None:
+                    self._face_reid_map.set_alert(True)

@@ -249,7 +249,7 @@ class FaceTracking:
 
             # face reID search gizmo
             face_search = FaceSearchGizmo(
-                face_map, self._open_db(), accumulate_embeddings=True
+                face_map, self._open_db(), credence_count=1, accumulate_embeddings=True
             )
 
             # object annotator gizmo
@@ -284,6 +284,7 @@ class FaceTracking:
         zone,
         clip_duration=100,
         reid_expiration_frames=10,
+        credence_count=4,
         local_display=True,
         stream_name="Face Tracking",
     ) -> Tuple[Composition, Watchdog]:
@@ -295,6 +296,7 @@ class FaceTracking:
             zone (list): Zone coordinates for in-zone counting.
             clip_duration (int): Duration of the clip in frames for saving clips.
             reid_expiration_frames (int): Number of frames after which the face reID needs to be repeated.
+            credence_count (int): Number of frames to consider a face as known.
             local_display (bool): Whether to display the video locally or by RTSP stream.
             stream_name (str): Window title for local display or URL path for RTSP streaming.
 
@@ -353,7 +355,7 @@ class FaceTracking:
         face_detect = AiSimpleGizmo(face_detect_model)
 
         # object annotator gizmo
-        face_annotate = ObjectAnnotateGizmo(face_map, credence_count=3)
+        face_annotate = ObjectAnnotateGizmo(face_map)
 
         # gizmo to execute a chain of analyzers which count unknown faces and generate events and alerts
         alerts = AiAnalyzerGizmo(
@@ -376,7 +378,9 @@ class FaceTracking:
         face_reid = AiSimpleGizmo(face_reid_model)
 
         # face reID search gizmo
-        face_search = FaceSearchGizmo(face_map, self._open_db())
+        face_search = FaceSearchGizmo(
+            face_map, self._open_db(), credence_count=credence_count
+        )
 
         # display gizmo
         display: Union[VideoDisplayGizmo, VideoStreamerGizmo] = (
