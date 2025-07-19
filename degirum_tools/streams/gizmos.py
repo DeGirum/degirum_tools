@@ -92,6 +92,10 @@ class VideoSourceGizmo(Gizmo):
                 while not self._abort:
                     ret, data = src.read()
                     if not ret:
+                        if self._retry_on_error:
+                            raise Exception(
+                                f"Video source {self._video_source} ended or failed."
+                            )
                         break
                     else:
                         meta2 = copy.copy(meta)
@@ -110,7 +114,7 @@ class VideoSourceGizmo(Gizmo):
                 try:
                     run()
                     break
-                except Exception:
+                except Exception as e:
                     time.sleep(0.5)  # wait before retrying
         else:
             run()
