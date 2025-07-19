@@ -46,6 +46,15 @@ Configuration Options:
     - `storage_config`: Storage configuration for clip saving (supports local and cloud storage)
     - `show_overlay`: Enable/disable visual annotations
 
+Message Formatting:
+    - Use Python format strings in the `message` parameter to include dynamic content (e.g., `{time}` for the time the notification was sent)
+    - Use markdown formatting for rich text notifications (e.g. `**bold**`, `*italic*`, `[link](url)`)
+    - Supported placeholders include:
+        - `{result}`: The inference result
+        - `{time}`: The time the notification was sent
+        - `{url}`: The URL of the uploaded file
+        - `{filename}`: The name of the uploaded file
+
 Example:
     For local storage configuration:
     ```python
@@ -291,6 +300,7 @@ class NotificationServer:
         notifier = configure_notifications()
 
         param_key_url = "url"  # key to access the file URL in the job results
+        param_key_filename = "filename"  # key to access the file name in the job results
 
         #
         # Run file upload job
@@ -318,7 +328,10 @@ class NotificationServer:
                 job.error = e
 
             job.is_done = True
-            return {param_key_url: url} if url else None
+            ret = {param_key_filename: filename}
+            if url:
+                ret[param_key_url] = url
+            return ret
 
         #
         # Run notification job

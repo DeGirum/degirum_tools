@@ -286,7 +286,7 @@ class FaceTracking:
         reid_expiration_frames=10,
         credence_count=4,
         notification_config=notification_config_console,
-        notification_message="{time}: Unknown person detected (saved video: {url})",
+        notification_message="{time}: Unknown person detected. Saved video: [{filename}]({url})",
         local_display=True,
         stream_name="Face Tracking",
     ) -> Tuple[Composition, Watchdog]:
@@ -346,6 +346,7 @@ class FaceTracking:
             clip_pre_trigger_delay=clip_duration // 2,
             clip_embed_ai_annotations=False,
             storage_config=self._clip_storage_config,
+            show_overlay=False,
         )
 
         #
