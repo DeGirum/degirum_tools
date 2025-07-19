@@ -285,6 +285,8 @@ class FaceTracking:
         clip_duration=100,
         reid_expiration_frames=10,
         credence_count=4,
+        notification_config=notification_config_console,
+        notification_message="{time}: Unknown person detected (saved video: {url})",
         local_display=True,
         stream_name="Face Tracking",
     ) -> Tuple[Composition, Watchdog]:
@@ -297,6 +299,8 @@ class FaceTracking:
             clip_duration (int): Duration of the clip in frames for saving clips.
             reid_expiration_frames (int): Number of frames after which the face reID needs to be repeated.
             credence_count (int): Number of frames to consider a face as known.
+            notification_config (str): Apprise configuration string for notifications.
+            notification_message (str): Message template for notifications.
             local_display (bool): Whether to display the video locally or by RTSP stream.
             stream_name (str): Window title for local display or URL path for RTSP streaming.
 
@@ -335,8 +339,8 @@ class FaceTracking:
         unknown_face_notifier = EventNotifier(
             "Unknown person detected",
             unknown_face_event_name,
-            message="{time}: Unknown person detected",
-            notification_config=notification_config_console,
+            message=notification_message,
+            notification_config=notification_config,
             clip_save=True,
             clip_duration=clip_duration,
             clip_pre_trigger_delay=clip_duration // 2,
