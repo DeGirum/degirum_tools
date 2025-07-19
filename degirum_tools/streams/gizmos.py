@@ -114,7 +114,7 @@ class VideoSourceGizmo(Gizmo):
                 try:
                     run()
                     break
-                except Exception as e:
+                except Exception:
                     time.sleep(0.5)  # wait before retrying
         else:
             run()
