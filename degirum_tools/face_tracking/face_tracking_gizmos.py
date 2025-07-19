@@ -34,6 +34,7 @@ class FaceStatus:
     next_reid_frame: int = -1  # next frame number on which reID should be performed
     confirmed_count: int = 0  # number of times the face was confirmed
     is_confirmed: bool = False  # whether the face status is confirmed
+    is_alerted: bool = False  # whether the alert was triggered for this face
     embeddings: list = field(default_factory=list)  # list of embeddings for the face
 
     # default labels
@@ -330,6 +331,9 @@ class FaceExtractGizmo(Gizmo):
 
                 keypoints = [np.array(lm["landmark"]) for lm in landmarks]
 
+                if not self.face_is_frontal(keypoints):
+                    continue  # skip if the face is not frontal
+
                 crop_img = FaceExtractGizmo.face_align_and_crop(
                     data.data, keypoints, self._image_size
                 )
@@ -354,7 +358,34 @@ class FaceExtractGizmo(Gizmo):
                 )
 
     @staticmethod
-    def face_align_and_crop(img: np.ndarray, landmarks: list, image_size) -> np.ndarray:
+    def face_is_frontal(landmarks: list) -> bool:
+        """
+        Check if the face is frontal based on the landmarks.
+        Args:
+            landmarks (List[np.ndarray]): List of 5 keypoints (landmarks) as (x, y) coordinates in the following order:
+                [left eye, right eye, nose, left mouth, right mouth].
+
+        Returns:
+            bool: True if the face is frontal, False otherwise.
+        """
+
+        assert len(landmarks) == 5
+        quad = np.array(
+            [
+                landmarks[0],  # left eye
+                landmarks[1],  # right eye
+                landmarks[4],  # right mouth
+                landmarks[3],  # left mouth
+            ],
+            dtype=np.float32,
+        )
+        nose = landmarks[2]
+        return cv2.pointPolygonTest(quad, tuple(nose), measureDist=False) > 0
+
+    @staticmethod
+    def face_align_and_crop(
+        img: np.ndarray, landmarks: list, image_size: int
+    ) -> np.ndarray:
         """
         Align and crop the face from the image based on the given landmarks.
 
@@ -484,7 +515,9 @@ class FaceSearchGizmo(Gizmo):
                 if self._accumulate_embeddings:
                     face.embeddings.append(embedding)
 
-                self._face_reid_map.put(track_id, face)
+                if face.is_confirmed and not face.is_alerted:
+                    if face.attributes is None:
+                        self._face_reid_map.set_alert(True)
+                    face.is_alerted = True
 
-                if face.is_confirmed and face.attributes is None:
-                    self._face_reid_map.set_alert(True)
+                self._face_reid_map.put(track_id, face)
