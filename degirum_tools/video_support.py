@@ -860,6 +860,7 @@ class VideoStreamer:
         *,
         fps: float = 30.0,
         pix_fmt="bgr24",
+        gop_size: int = 50,
         verbose: bool = False,
     ):
         """Initializes the video streamer.
@@ -872,6 +873,7 @@ class VideoStreamer:
             height (int): Height of the video frames in pixels.
             fps (float, optional): Frames per second for the stream. Defaults to 30.
             pix_fmt (str, optional): Pixel format for the input frames. Defaults to 'bgr24'. Can be 'rgb24'.
+            gop_size (int, optional): GOP size for the video stream. Defaults to 50.
             verbose (bool, optional): If True, shows FFmpeg output in the console. Defaults to False.
         """
         self._width = width
@@ -895,6 +897,7 @@ class VideoStreamer:
                 rtsp_transport="tcp",
                 fflags="nobuffer",
                 max_delay=0,
+                g=gop_size,
             )
             .global_args("-loglevel", "info" if verbose else "quiet")
             .run_async(pipe_stdin=True, quiet=not verbose)
