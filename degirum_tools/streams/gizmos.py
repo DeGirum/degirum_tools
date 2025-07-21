@@ -11,6 +11,7 @@ import queue, copy, time, cv2, numpy as np
 import degirum as dg
 from abc import abstractmethod
 from typing import Optional, List, Union
+from collections import deque
 from contextlib import ExitStack
 
 from .base import Stream, StreamData, StreamMeta, Gizmo
@@ -316,6 +317,117 @@ class VideoStreamerGizmo(Gizmo):
                     frame = inference_meta.image_overlay
             return frame
 
+        input_q = self.get_input(0)
+        data0 = input_q.get()
+        if data0 == Stream._poison:
+            return
+        last_data = data0
+        img = get_img(data0)
+        w, h = image_size(img)
+
+        if self._fps <= 0:  # deduce FPS
+            default_fps = 30.0  # default FPS if not specified
+            video_meta = data0.meta.find_last(tag_video)
+            if video_meta:
+                self._fps = video_meta.get(VideoSourceGizmo.key_fps, default_fps)
+            else:
+                self._fps = default_fps
+        frame_interval_s = 1.0 / self._fps
+        read_timeout_s = 0.5 * frame_interval_s
+        fps_threshold = 0.8 * self._fps
+        alpha = 0.05  # IIR smoothing factor
+        avg_duration_s = 1.0 / self._fps  # initialize with target FPS
+
+        with VideoStreamer(
+            self._rtsp_url,
+            w,
+            h,
+            fps=self._fps,
+            pix_fmt="bgr24" if isinstance(img, np.ndarray) else "rgb24",
+        ) as streamer:
+
+            self.result_cnt += 1
+            streamer.write(img)
+            prev_time_s = time.time()
+
+            def send_frame(data: StreamData):
+                nonlocal avg_duration_s, prev_time_s, last_data
+
+                streamer.write(get_img(data))
+                self.result_cnt += 1
+                last_data = data
+                now = time.time()
+                avg_duration_s = (
+                    alpha * (now - prev_time_s) + (1 - alpha) * avg_duration_s
+                )
+                prev_time_s = now
+
+            while not self._abort:
+                # try to read a real frame from the input queue
+                try:
+                    data = input_q.get(timeout=read_timeout_s)
+                    if data == Stream._poison:
+                        break
+                    send_frame(data)
+                except queue.Empty:
+                    pass  # no new frame, possibly starvation
+
+                # if FPS is too low, send fake frames to catch up
+                fps_est = 1.0 / (
+                    alpha * (time.time() - prev_time_s) + (1 - alpha) * avg_duration_s
+                )
+                if fps_est < fps_threshold:
+                    send_frame(last_data)
+                    while 1.0 / avg_duration_s < fps_threshold:
+                        send_frame(last_data)
+
+
+class VideoStreamerGizmoOld(Gizmo):
+    """Video streaming gizmo.
+
+    Streams incoming frames to RTSP stream using ffmpeg.
+    `MediaServer` must be running to accept the stream.
+    """
+
+    def __init__(
+        self,
+        rtsp_url: str,
+        *,
+        fps: float = 0,
+        show_ai_overlay: bool = False,
+        stream_depth: int = 10,
+        allow_drop: bool = False,
+    ):
+        """Constructor.
+
+        Args:
+            rtsp_url (str): RTSP URL to stream to (e.g., 'rtsp://user:password@hostname:port/stream').
+                            Typically you use `MediaServer` class to start media server and
+                            then use its RTSP URL like `rtsp://localhost:8554/mystream`
+            fps (float, optional): Frames per second for the stream. Defaults to 0, meaning to deduce from upstream video source.
+            show_ai_overlay (bool, optional): If True, overlay AI inference results on frames before saving (when available). Defaults to False.
+            stream_depth (int, optional): Depth of the input frame queue. Defaults to 10.
+            allow_drop (bool, optional): If True, allow dropping frames if the input queue is full. Defaults to False.
+        """
+        super().__init__([(stream_depth, allow_drop)])
+        self._rtsp_url = rtsp_url
+        self._fps = fps
+        self._show_ai_overlay = show_ai_overlay
+
+    def run(self):
+        """Run the video saving loop.
+
+        Reads frames from the input stream and writes them to the output file until the stream is exhausted or aborted.
+        """
+
+        def get_img(data: StreamData) -> ImageType:
+            frame = data.data
+            if self._show_ai_overlay:
+                inference_meta = data.meta.find_last(tag_inference)
+                if inference_meta:
+                    frame = inference_meta.image_overlay
+            return frame
+
         data0 = self.get_input(0).get()
         img = get_img(data0)
         w, h = image_size(img)
@@ -334,8 +446,6 @@ class VideoStreamerGizmo(Gizmo):
                 if self._abort:
                     break
                 streamer.write(get_img(data))
-
-
 class ResizingGizmo(Gizmo):
     """OpenCV-based image resizing/padding gizmo.
 
