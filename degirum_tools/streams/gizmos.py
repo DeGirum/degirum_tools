@@ -11,7 +11,6 @@ import queue, copy, time, cv2, numpy as np
 import degirum as dg
 from abc import abstractmethod
 from typing import Optional, List, Union
-from collections import deque
 from contextlib import ExitStack
 
 from .base import Stream, StreamData, StreamMeta, Gizmo
@@ -446,6 +445,8 @@ class VideoStreamerGizmoOld(Gizmo):
                 if self._abort:
                     break
                 streamer.write(get_img(data))
+
+
 class ResizingGizmo(Gizmo):
     """OpenCV-based image resizing/padding gizmo.
 
