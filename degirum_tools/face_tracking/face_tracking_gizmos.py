@@ -331,8 +331,10 @@ class FaceExtractGizmo(Gizmo):
 
                 keypoints = [np.array(lm["landmark"]) for lm in landmarks]
 
-                if not self.face_is_frontal(keypoints):
-                    continue  # skip if the face is not frontal
+                if not self.face_is_frontal(keypoints) or self.face_is_shifted(
+                    r["bbox"], keypoints
+                ):
+                    continue  # skip if the face is not frontal or is shifted
 
                 crop_img = FaceExtractGizmo.face_align_and_crop(
                     data.data, keypoints, self._image_size
@@ -381,6 +383,29 @@ class FaceExtractGizmo(Gizmo):
         )
         nose = landmarks[2]
         return cv2.pointPolygonTest(quad, tuple(nose), measureDist=False) > 0
+
+    @staticmethod
+    def face_is_shifted(bbox: list, landmarks: list) -> bool:
+        """
+        Check if the face is shifted based on the landmarks.
+
+        Args:
+            bbox (list): Bounding box of the face as [x1, y1, x2, y2].
+            landmarks (List[np.ndarray]): List of keypoints (landmarks) as (x, y) coordinates
+
+        Returns:
+            bool: True if the face is shifted to the corner of bbox, False otherwise.
+        """
+
+        assert len(bbox) == 4
+        xc, yc = (bbox[0] + bbox[2]) * 0.5, (bbox[1] + bbox[3]) * 0.5
+
+        return (
+            all(x < xc for x, y in landmarks)
+            or all(x >= xc for x, y in landmarks)
+            or all(y < yc for x, y in landmarks)
+            or all(y >= yc for x, y in landmarks)
+        )
 
     @staticmethod
     def face_align_and_crop(
