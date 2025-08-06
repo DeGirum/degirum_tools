@@ -10,7 +10,6 @@ import tempfile
 import degirum as dg
 from typing import Optional, Tuple, Union
 
-from ..environment import get_token
 from ..event_detector import EventDetector
 from ..inference_support import attach_analyzers
 from ..math_support import AnchorPoint, compute_kmeans
