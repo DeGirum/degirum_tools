@@ -13,6 +13,7 @@ import threading
 import copy
 from typing import List, Dict, Any, Optional, ClassVar
 from dataclasses import dataclass, asdict, field
+from enum import Enum
 
 from ..result_analyzer_base import clone_result
 from ..streams import Gizmo, StreamData, VideoSourceGizmo, tag_inference, tag_video
@@ -447,6 +448,15 @@ class FaceExtractGizmo(Gizmo):
         return aligned_img
 
 
+class AlertMode(Enum):
+    """Alert mode for face search gizmo"""
+
+    NONE = 0  # no alert
+    ON_UNKNOWNS = 1  # set alert on unknown faces
+    ON_KNOWNS = 2  # set alert on known faces
+    ON_ALL = 3  # set alert on all detected faces
+
+
 class FaceSearchGizmo(Gizmo):
     """Face reID search gizmo"""
 
@@ -459,6 +469,8 @@ class FaceSearchGizmo(Gizmo):
         stream_depth: int = 10,
         allow_drop: bool = False,
         accumulate_embeddings: bool = False,
+        alert_mode: AlertMode = AlertMode.ON_UNKNOWNS,
+        alert_once: bool = True,
     ):
         """
         Constructor.
@@ -470,12 +482,16 @@ class FaceSearchGizmo(Gizmo):
             stream_depth (int): Depth of the stream.
             allow_drop (bool): Whether to allow dropping frames.
             accumulate_embeddings (bool): Whether to accumulate embeddings in the face map.
+            alert_mode (AlertMode): Mode of alerting for the face search.
+            alert_once (bool): Whether to trigger the alert only once for the given face.
         """
         super().__init__([(stream_depth, allow_drop)])
         self._face_reid_map = face_reid_map
         self._db = db
         self._credence_count = credence_count
         self._accumulate_embeddings = accumulate_embeddings
+        self._alert_mode = alert_mode
+        self._alert_once = alert_once
 
     def get_tags(self) -> List[str]:
         """Get list of tags assigned to this gizmo"""
@@ -534,15 +550,31 @@ class FaceSearchGizmo(Gizmo):
                     # reset frame counter when the face changes status for quick reconfirming
                     face.next_reid_frame = face.last_reid_frame + 1
 
-                face.attributes = attributes
                 face.is_confirmed = face.confirmed_count >= self._credence_count
+                if face.attributes != attributes and not self._alert_once:
+                    face.is_alerted = False  # reset alert if attributes changed
+                face.attributes = attributes
                 face.db_id = db_id
                 if self._accumulate_embeddings:
                     face.embeddings.append(embedding)
 
-                if face.is_confirmed and not face.is_alerted:
-                    if face.attributes is None:
+                if face.is_confirmed:
+                    if (
+                        (
+                            self._alert_mode == AlertMode.ON_UNKNOWNS
+                            and attributes is None
+                            and not face.is_alerted
+                        )
+                        or (
+                            self._alert_mode == AlertMode.ON_KNOWNS
+                            and attributes is not None
+                            and not face.is_alerted
+                        )
+                        or (
+                            self._alert_mode == AlertMode.ON_ALL and not face.is_alerted
+                        )
+                    ):
                         self._face_reid_map.set_alert(True)
-                    face.is_alerted = True
+                        face.is_alerted = True
 
                 self._face_reid_map.put(track_id, face)

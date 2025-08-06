@@ -34,6 +34,7 @@ from .face_tracking_gizmos import (
     FaceSearchGizmo,
     FaceExtractGizmo,
     ObjectAnnotateGizmo,
+    AlertMode,
 )
 from .reid_database import ReID_Database
 
@@ -97,7 +98,7 @@ class FaceTracking:
         zoo = dg.connect(
             self._hw_location,
             self._model_zoo_url,
-            get_token() if self._token is None else self._token,
+            self._token,
         )
         face_detect_model = zoo.load_model(self._face_detector_model_name)
         if self._face_detector_model_devices:
@@ -285,6 +286,8 @@ class FaceTracking:
         clip_duration=100,
         reid_expiration_frames=10,
         credence_count=4,
+        alert_mode: AlertMode = AlertMode.ON_UNKNOWNS,
+        alert_once: bool = True,
         notification_config=notification_config_console,
         notification_message="{time}: Unknown person detected. Saved video: [{filename}]({url})",
         local_display=True,
@@ -384,7 +387,11 @@ class FaceTracking:
 
         # face reID search gizmo
         face_search = FaceSearchGizmo(
-            face_map, self._open_db(), credence_count=credence_count
+            face_map,
+            self._open_db(),
+            credence_count=credence_count,
+            alert_mode=alert_mode,
+            alert_once=alert_once,
         )
 
         # display gizmo
