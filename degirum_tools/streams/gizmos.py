@@ -81,43 +81,45 @@ class VideoSourceGizmo(Gizmo):
         Continuously reads frames from the video source and sends each frame (with metadata) downstream until the source is exhausted or abort is signaled.
         """
 
-        def run():
-            with open_video_stream(self._video_source) as src:
-                meta = {
-                    self.key_frame_width: int(src.get(cv2.CAP_PROP_FRAME_WIDTH)),
-                    self.key_frame_height: int(src.get(cv2.CAP_PROP_FRAME_HEIGHT)),
-                    self.key_fps: src.get(cv2.CAP_PROP_FPS),
-                    self.key_frame_count: int(src.get(cv2.CAP_PROP_FRAME_COUNT)),
-                }
-                while not self._abort:
-                    ret, data = src.read()
-                    if not ret:
-                        if self._retry_on_error:
-                            raise Exception(
-                                f"Video source {self._video_source} ended or failed."
+        meta: Optional[dict] = None
+        while True:
+            try:
+                with open_video_stream(self._video_source) as src:
+                    meta = {
+                        self.key_frame_width: int(src.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                        self.key_frame_height: int(src.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+                        self.key_fps: src.get(cv2.CAP_PROP_FPS),
+                        self.key_frame_count: int(src.get(cv2.CAP_PROP_FRAME_COUNT)),
+                    }
+                    while not self._abort:
+                        ret, data = src.read()
+                        if not ret:
+                            if self._retry_on_error:
+                                raise Exception(
+                                    f"Video source {self._video_source} ended or failed."
+                                )
+                            break
+                        else:
+                            meta2 = copy.copy(meta)
+                            meta2[self.key_frame_id] = self.result_cnt
+                            meta2[self.key_timestamp] = time.time()
+                            self.send_result(
+                                StreamData(data, StreamMeta(meta2, self.get_tags()))
                             )
-                        break
-                    else:
-                        meta2 = copy.copy(meta)
-                        meta2[self.key_frame_id] = self.result_cnt
-                        meta2[self.key_timestamp] = time.time()
-                        self.send_result(
-                            StreamData(data, StreamMeta(meta2, self.get_tags()))
-                        )
-                if self._stop_composition_on_end:
-                    # Stop composition if video source is over (to halt other sources still running).
-                    if self.composition is not None and not self._abort:
-                        self.composition.stop()
 
-        if self._retry_on_error:
-            while not self._abort:
-                try:
-                    run()
-                    break
-                except Exception:
-                    time.sleep(0.5)  # wait before retrying
-        else:
-            run()
+            except Exception:
+                if not self._retry_on_error or meta is None:
+                    # if not retrying or no metadata (first attempt), abort the run
+                    raise
+
+            if self._abort or not self._retry_on_error:
+                # if not retrying, break the loop after one run
+                break
+
+        if self._stop_composition_on_end:
+            # Stop composition if video source is over (to halt other sources still running).
+            if self.composition is not None and not self._abort:
+                self.composition.stop()
 
 
 class VideoDisplayGizmo(Gizmo):
