@@ -1,5 +1,5 @@
 #
-# Sreaming toolkit
+# Streaming toolkit
 #
 # Copyright DeGirum Corporation 2025
 # All rights reserved

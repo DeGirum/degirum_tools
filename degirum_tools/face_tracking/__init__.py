@@ -141,6 +141,7 @@ class FaceTracking:
 
         ret: dict = {}
         storage = ObjectStorage(self._clip_storage_config)
+        storage.ensure_bucket_exists()
         for f in storage.list_bucket_contents():
             if f.object_name.endswith(".mp4"):
                 if FaceTracking.annotated_video_suffix not in f.object_name:
@@ -201,6 +202,7 @@ class FaceTracking:
 
             # define the storage and paths
             storage = ObjectStorage(self._clip_storage_config)
+            storage.ensure_bucket_exists()
             dirname = os.path.dirname(clip.object_name)
             filename = os.path.basename(clip.object_name)
             file_stem, file_ext = os.path.splitext(filename)
@@ -356,7 +358,7 @@ class FaceTracking:
         #
 
         # video source gizmo
-        source = VideoSourceGizmo(video_source)
+        source = VideoSourceGizmo(video_source, retry_on_error=True)
 
         # face detector AI gizmo
         face_detect = AiSimpleGizmo(face_detect_model)
