@@ -107,8 +107,15 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
                 if self.show_progress:
                     progress.step()
                 image_id = sorted_img_id_list[image_number]
+
+                image = predictions._input_image
+                image_shape = (
+                    getattr(image, "shape", None)
+                    or (getattr(image, "height", None), getattr(image, "width", None))
+                )[:2]
+
                 ObjectDetectionModelEvaluator._save_results_coco_json(
-                    predictions.results, jdict, image_id, self.classmap
+                    predictions.results, jdict, image_id, image_shape, self.classmap
                 )
 
         # save the predictions to a json file
@@ -166,21 +173,48 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
         return rle
 
     @staticmethod
-    def _process_segmentation(segmentation_res: List[dict]) -> List[float]:
+    def _process_segmentation(
+        segmentation_res: List[dict], image_shape: List[int]
+    ) -> List[float]:
         """
         Convert PySDK segmentation results format to pycocotools segmentation format
 
         Args:
             segmentation_res: The segmentation results dictionary output from PySDK.
+            image_shape: The dimensions of the image for the given segmentation results, as a tuple (height, width)
 
         Returns:
-            segmentation: The segmentation results in pycocotools format.
+            The segmentation results in pycocotools format.
         """
-        return ObjectDetectionModelEvaluator._run_length_encode(segmentation_res)
+        mask = np.zeros(image_shape, dtype=np.uint8)
+        x_min = segmentation_res["x_min"]
+        y_min = segmentation_res["y_min"]
+        data = segmentation_res["data"]
+        data_shape = data.shape
+        mask[y_min : y_min + data_shape[0], x_min : x_min + data_shape[1]] = data
+        return ObjectDetectionModelEvaluator._run_length_encode(mask)
 
     @staticmethod
-    def _save_results_coco_json(results, jdict, image_id, class_map=None):
-        """Serialize YOLO predictions to COCO json format."""
+    def _save_results_coco_json(
+        results: List[dict],
+        jdict: List[dict],
+        image_id: int,
+        image_shape: tuple,
+        class_map: dict = None,
+    ):
+        """
+        Serialize YOLO predictions to COCO json format.
+
+        Args:
+            results (List[dict]): PySDK results list.
+            jdict (List[dict]): List for saving prediction dictionaries.
+            image_id (int): ID of processed image.
+            image_shape (tuple): Shape of processed image as a tuple (height, width).
+            class_map (dict): Dictionary mapping model output class ID to dataset class ID.
+
+        Returns:
+            maximum category ID present among provided results
+        """
         max_category_id = 0
         for result in results:
             box = xyxy2xywh(np.asarray(result["bbox"]).reshape(1, 4) * 1.0)  # xywh
@@ -206,7 +240,9 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
             # segmentation model addition
             if "mask" in result:
                 detected_elem["segmentation"] = (
-                    ObjectDetectionModelEvaluator._process_segmentation(result["mask"])
+                    ObjectDetectionModelEvaluator._process_segmentation(
+                        result["mask"], image_shape
+                    )
                 )
 
             jdict.append(detected_elem)
