@@ -198,7 +198,7 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
     def _save_results_coco_json(
         results: List[dict],
         jdict: List[dict],
-        image_id: int,
+        image_id: str,
         image_shape: tuple,
         class_map: Optional[dict] = None,
     ):
@@ -208,7 +208,7 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
         Args:
             results (List[dict]): PySDK results list.
             jdict (List[dict]): List for saving prediction dictionaries.
-            image_id (int): ID of processed image.
+            image_id (str): ID of processed image.
             image_shape (tuple): Shape of processed image as a tuple (height, width).
             class_map (dict): Dictionary mapping model output class ID to dataset class ID.
 
