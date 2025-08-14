@@ -113,6 +113,12 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
                     getattr(image, "shape", None)
                     or (getattr(image, "height", None), getattr(image, "width", None))
                 )[:2]
+                if (
+                    image_shape is None
+                    or len(image_shape) > 1
+                    and any([s is None for s in image_shape])
+                ):
+                    raise Exception("Cannot retrieve image shape.")
 
                 ObjectDetectionModelEvaluator._save_results_coco_json(
                     predictions.results, jdict, image_id, image_shape, self.classmap
