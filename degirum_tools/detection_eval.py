@@ -174,7 +174,7 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
 
     @staticmethod
     def _process_segmentation(
-        segmentation_res: List[dict], image_shape: List[int]
+        segmentation_res: dict, image_shape: tuple[int]
     ) -> List[float]:
         """
         Convert PySDK segmentation results format to pycocotools segmentation format
@@ -200,7 +200,7 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
         jdict: List[dict],
         image_id: int,
         image_shape: tuple,
-        class_map: dict = None,
+        class_map: Optional[dict] = None,
     ):
         """
         Serialize YOLO predictions to COCO json format.
