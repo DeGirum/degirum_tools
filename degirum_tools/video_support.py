@@ -64,15 +64,16 @@ from .image_tools import ImageType, image_size, resize_image, to_opencv
 from typing import Union, Generator, Optional, Callable, Any, List, Dict, Tuple
 
 
-@contextmanager
-def open_video_stream(
+def create_video_stream(
     video_source: Union[int, str, Path, None] = None, max_yt_quality: int = 0
-) -> Generator[cv2.VideoCapture, None, None]:
-    """Open a video stream from various sources.
+) -> cv2.VideoCapture:
+    """Create a video stream from various sources.
 
-    This function provides a context manager for opening video streams from different
+    This function creates and returns video stream object working from different
     sources, including local cameras, IP cameras, video files, and YouTube videos.
     The stream is automatically closed when the context is exited.
+    Use `open_video_stream()` to create a context manager for this function for
+    automatic cleanup.
 
     Args:
         video_source (Union[int, str, Path, None], optional): Video source specification:
@@ -85,7 +86,7 @@ def open_video_stream(
         max_yt_quality (int, optional): Maximum video quality for YouTube videos in
             pixels (height). If 0, use best quality. Defaults to 0.
 
-    Yields:
+    Returns:
         cv2.VideoCapture: OpenCV video capture object.
 
     Raises:
@@ -153,7 +154,39 @@ def open_video_stream(
     stream = cv2.VideoCapture(video_source)  # type: ignore[arg-type]
     if not stream.isOpened():
         raise Exception(f"Error opening '{video_source}' video stream")
+    return stream
 
+
+@contextmanager
+def open_video_stream(
+    video_source: Union[int, str, Path, None] = None, max_yt_quality: int = 0
+) -> Generator[cv2.VideoCapture, None, None]:
+    """Open a video stream from various sources.
+
+    This function provides a context manager for opening video streams from different
+    sources, including local cameras, IP cameras, video files, and YouTube videos.
+    The stream is automatically closed when the context is exited.
+    Internally it calls `create_video_stream` to create the stream.
+
+    Args:
+        video_source (Union[int, str, Path, None], optional): Video source specification:
+            - int: 0-based index for local cameras
+            - str: IP camera URL (rtsp://user:password@hostname)
+            - str: Local video file path
+            - str: URL to mp4 video file
+            - str: YouTube video URL
+            - None: Use environment variable or default camera
+        max_yt_quality (int, optional): Maximum video quality for YouTube videos in
+            pixels (height). If 0, use best quality. Defaults to 0.
+
+    Yields:
+        cv2.VideoCapture: OpenCV video capture object.
+
+    Raises:
+        Exception: If the video stream cannot be opened.
+
+    """
+    stream = create_video_stream(video_source, max_yt_quality)
     try:
         yield stream
     finally:

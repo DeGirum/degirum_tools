@@ -21,6 +21,7 @@ from ..streams import (
     Watchdog,
     AiAnalyzerGizmo,
     AiSimpleGizmo,
+    FPSStabilizingGizmo,
     VideoDisplayGizmo,
     VideoSaverGizmo,
     VideoSourceGizmo,
@@ -324,8 +325,21 @@ class FaceTracking:
         face_map = ObjectMap()  # object map for face attributes
 
         #
-        # create analyzers
+        # define gizmos
         #
+
+        # video source gizmo
+        source = VideoSourceGizmo(video_source, retry_on_error=True)
+        _, _, fps = source.get_video_properties()
+
+        # gizmo to keep FPS (to deal with camera disconnects)
+        fps_stabilizer = FPSStabilizingGizmo()
+
+        # face detector AI gizmo
+        face_detect = AiSimpleGizmo(face_detect_model)
+
+        # object annotator gizmo
+        face_annotate = ObjectAnnotateGizmo(face_map)
 
         # "unknown face in zone" event detector
         unknown_face_event_name = "unknown_face"  # name of the event to be generated
@@ -340,6 +354,7 @@ class FaceTracking:
             show_overlay=False,
         )
 
+        # notifier for unknown face events
         unknown_face_notifier = EventNotifier(
             "Unknown person detected",
             unknown_face_event_name,
@@ -349,22 +364,10 @@ class FaceTracking:
             clip_duration=clip_duration,
             clip_pre_trigger_delay=clip_duration // 2,
             clip_embed_ai_annotations=False,
+            clip_target_fps=fps,
             storage_config=self._clip_storage_config,
             show_overlay=False,
         )
-
-        #
-        # define gizmos
-        #
-
-        # video source gizmo
-        source = VideoSourceGizmo(video_source, retry_on_error=True)
-
-        # face detector AI gizmo
-        face_detect = AiSimpleGizmo(face_detect_model)
-
-        # object annotator gizmo
-        face_annotate = ObjectAnnotateGizmo(face_map)
 
         # gizmo to execute a chain of analyzers which count unknown faces and generate events and alerts
         alerts = AiAnalyzerGizmo(
@@ -412,7 +415,12 @@ class FaceTracking:
         # define pipeline and run it
         #
         composition = Composition(
-            source >> face_detect >> face_annotate >> alerts >> display,
+            source
+            >> fps_stabilizer
+            >> face_detect
+            >> face_annotate
+            >> alerts
+            >> display,
             face_detect >> face_extract >> face_reid >> face_search,
         )
         composition.start(wait=False)

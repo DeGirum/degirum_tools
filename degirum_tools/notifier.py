@@ -299,8 +299,8 @@ class NotificationServer:
         storage = configure_file_uploads()
         notifier = configure_notifications()
 
-        param_key_url = "url"  # key to access the file URL in the job results
-        param_key_filename = "filename"  # key to access the file name in the job results
+        param_key_url = "url"  # key to access the file URL in job results
+        param_key_filename = "filename"  # key to access the file name in job results
 
         #
         # Run file upload job
@@ -594,9 +594,10 @@ class EventNotifier(ResultAnalyzerBase):
         if (isinstance(notification_config, str) and notification_config) or clip_save:
             self.notification_server = NotificationServer(
                 notification_config,
-                self._name,
-                notification_tags,
-                self._storage_cfg if clip_save else None,
+                notification_title=self._name,
+                notification_tags=notification_tags,
+                storage_cfg=self._storage_cfg if clip_save else None,
+                pending_timeout_s=2 * clip_duration / clip_target_fps,
             )
 
     def analyze(self, result):
