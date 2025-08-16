@@ -62,9 +62,6 @@ setup(
         "notifications": ["apprise", "minio"],
         # annotation tool
         "annotator": ["tk"],
-        # lanceDB support
-        "lancedb": ["lancedb"],
-
     },
     include_package_data=True,
 )
