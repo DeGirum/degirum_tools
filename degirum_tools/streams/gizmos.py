@@ -1,23 +1,33 @@
-# streams_gizmos.py: streaming toolkit: gizmos implementation
-# Copyright DeGirum Corporation 2024
+#
+# streams.gizmos.py: streaming toolkit: gizmos implementation
+#
+# Copyright DeGirum Corporation 2025
 # All rights reserved
+#
 # Implements various gizmos for streaming pipelines
+#
 
 import queue, copy, time, cv2, numpy as np
 import degirum as dg
 from abc import abstractmethod
 from typing import Optional, List, Union
 from contextlib import ExitStack
-from .streams_base import Stream, StreamData, StreamMeta, Gizmo
-from .environment import get_test_mode
-from .video_support import open_video_stream, open_video_writer, VideoStreamer
-from .ui_support import Display
-from .image_tools import crop_image, resize_image, image_size, ImageType
-from .result_analyzer_base import image_overlay_substitute, clone_result
-from .crop_extent import CropExtentOptions, extend_bbox
-from .notifier import EventNotifier
-from .event_detector import EventDetector
-from .environment import get_token
+
+from .base import Stream, StreamData, StreamMeta, Gizmo
+
+from ..crop_extent import CropExtentOptions, extend_bbox
+from ..environment import get_test_mode, get_token
+from ..event_detector import EventDetector
+from ..image_tools import crop_image, resize_image, image_size, ImageType
+from ..notifier import EventNotifier
+from ..result_analyzer_base import image_overlay_substitute, clone_result
+from ..ui_support import Display
+from ..video_support import (
+    create_video_stream,
+    get_video_stream_properties,
+    open_video_writer,
+    VideoStreamer,
+)
 
 # predefined meta tags
 tag_video = "dgt_video"  # tag for video source data
@@ -42,17 +52,45 @@ class VideoSourceGizmo(Gizmo):
     key_frame_id = "frame_id"  # frame index (sequence number)
     key_timestamp = "timestamp"  # frame timestamp
 
-    def __init__(self, video_source=None, *, stop_composition_on_end: bool = False):
+    def __init__(
+        self,
+        video_source=None,
+        *,
+        stop_composition_on_end: bool = False,
+        retry_on_error: bool = False,
+    ):
         """Constructor.
 
         Args:
             video_source (int or str, optional): A cv2.VideoCapture-compatible video source
                 (device index as int, or file path/URL as str). Defaults to None.
             stop_composition_on_end (bool): If True, stop the [Composition](streams_base.md#composition) when the video source is over. Defaults to False.
+            retry_on_error (bool): If True, retry opening the video source on error after some time. Defaults to False.
         """
         super().__init__()
         self._video_source = video_source
         self._stop_composition_on_end = stop_composition_on_end and not get_test_mode()
+        self._retry_on_error = retry_on_error
+        self._stream: Optional[cv2.VideoCapture] = None
+
+    def get_video_properties(self) -> tuple:
+        self._open_video_source()
+        return get_video_stream_properties(self._stream)
+
+    def _open_video_source(self):
+        """Open the video source if it is not opened."""
+        if self._stream is None:
+            self._stream = create_video_stream(self._video_source)
+
+    def _close_video_source(self):
+        """Open the video source if it is not opened."""
+        if self._stream is not None:
+            self._stream.release()
+            self._stream = None
+
+    def __del__(self):
+        """Destructor to ensure video source is released."""
+        self._close_video_source()
 
     def get_tags(self) -> List[str]:
         """Get list of tags assigned to this gizmo.
@@ -67,28 +105,52 @@ class VideoSourceGizmo(Gizmo):
 
         Continuously reads frames from the video source and sends each frame (with metadata) downstream until the source is exhausted or abort is signaled.
         """
-        with open_video_stream(self._video_source) as src:
-            meta = {
-                self.key_frame_width: int(src.get(cv2.CAP_PROP_FRAME_WIDTH)),
-                self.key_frame_height: int(src.get(cv2.CAP_PROP_FRAME_HEIGHT)),
-                self.key_fps: src.get(cv2.CAP_PROP_FPS),
-                self.key_frame_count: int(src.get(cv2.CAP_PROP_FRAME_COUNT)),
-            }
-            while not self._abort:
-                ret, data = src.read()
-                if not ret:
+
+        try:
+            self._open_video_source()
+            meta: Optional[dict] = None
+            while True:
+                try:
+                    src = self._stream
+                    assert src is not None, "Video source is not opened"
+                    meta = {
+                        self.key_frame_width: int(src.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                        self.key_frame_height: int(src.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+                        self.key_fps: src.get(cv2.CAP_PROP_FPS),
+                        self.key_frame_count: int(src.get(cv2.CAP_PROP_FRAME_COUNT)),
+                    }
+                    while not self._abort:
+                        ret, data = src.read()
+                        if not ret:
+                            if self._retry_on_error:
+                                raise Exception(
+                                    f"Video source {self._video_source} ended or failed."
+                                )
+                            break
+                        else:
+                            meta2 = copy.copy(meta)
+                            meta2[self.key_frame_id] = self.result_cnt
+                            meta2[self.key_timestamp] = time.time()
+                            self.send_result(
+                                StreamData(data, StreamMeta(meta2, self.get_tags()))
+                            )
+
+                except Exception:
+                    if not self._retry_on_error or meta is None:
+                        # if not retrying or no metadata (first attempt), abort the run
+                        raise
+
+                if self._abort or not self._retry_on_error:
+                    # if not retrying, break the loop after one run
                     break
-                else:
-                    meta2 = copy.copy(meta)
-                    meta2[self.key_frame_id] = self.result_cnt
-                    meta2[self.key_timestamp] = time.time()
-                    self.send_result(
-                        StreamData(data, StreamMeta(meta2, self.get_tags()))
-                    )
+
             if self._stop_composition_on_end:
                 # Stop composition if video source is over (to halt other sources still running).
                 if self.composition is not None and not self._abort:
                     self.composition.stop()
+
+        finally:
+            self._close_video_source()
 
 
 class VideoDisplayGizmo(Gizmo):
@@ -252,7 +314,7 @@ class VideoStreamerGizmo(Gizmo):
         self,
         rtsp_url: str,
         *,
-        fps: float = 30,
+        fps: float = 0,
         show_ai_overlay: bool = False,
         stream_depth: int = 10,
         allow_drop: bool = False,
@@ -263,7 +325,7 @@ class VideoStreamerGizmo(Gizmo):
             rtsp_url (str): RTSP URL to stream to (e.g., 'rtsp://user:password@hostname:port/stream').
                             Typically you use `MediaServer` class to start media server and
                             then use its RTSP URL like `rtsp://localhost:8554/mystream`
-            fps (float, optional): Frames per second for the stream. Defaults to 30.
+            fps (float, optional): Frames per second for the stream. Defaults to 0, meaning to deduce from upstream video source.
             show_ai_overlay (bool, optional): If True, overlay AI inference results on frames before saving (when available). Defaults to False.
             stream_depth (int, optional): Depth of the input frame queue. Defaults to 10.
             allow_drop (bool, optional): If True, allow dropping frames if the input queue is full. Defaults to False.
@@ -287,16 +349,69 @@ class VideoStreamerGizmo(Gizmo):
                     frame = inference_meta.image_overlay
             return frame
 
-        img = get_img(self.get_input(0).get())
+        input_q = self.get_input(0)
+        data0 = input_q.get()
+        if data0 == Stream._poison:
+            return
+        last_data = data0
+        img = get_img(data0)
         w, h = image_size(img)
-        pix_fmt = "bgr24" if isinstance(img, np.ndarray) else "rgb24"
-        with VideoStreamer(self._rtsp_url, w, h, fps=self._fps, pix_fmt=pix_fmt) as streamer:
+
+        if self._fps <= 0:  # deduce FPS
+            default_fps = 30.0  # default FPS if not specified
+            video_meta = data0.meta.find_last(tag_video)
+            if video_meta:
+                self._fps = video_meta.get(VideoSourceGizmo.key_fps, default_fps)
+            else:
+                self._fps = default_fps
+        frame_interval_s = 1.0 / self._fps
+        read_timeout_s = 0.5 * frame_interval_s
+        fps_threshold = 0.8 * self._fps
+        alpha = 0.05  # IIR smoothing factor
+        avg_duration_s = 1.0 / self._fps  # initialize with target FPS
+
+        with VideoStreamer(
+            self._rtsp_url,
+            w,
+            h,
+            fps=self._fps,
+            pix_fmt="bgr24" if isinstance(img, np.ndarray) else "rgb24",
+        ) as streamer:
+
             self.result_cnt += 1
             streamer.write(img)
-            for data in self.get_input(0):
-                if self._abort:
-                    break
+            prev_time_s = time.time()
+
+            def send_frame(data: StreamData):
+                nonlocal avg_duration_s, prev_time_s, last_data
+
                 streamer.write(get_img(data))
+                self.result_cnt += 1
+                last_data = data
+                now = time.time()
+                avg_duration_s = (
+                    alpha * (now - prev_time_s) + (1 - alpha) * avg_duration_s
+                )
+                prev_time_s = now
+
+            while not self._abort:
+                # try to read a real frame from the input queue
+                try:
+                    data = input_q.get(timeout=read_timeout_s)
+                    if data == Stream._poison:
+                        break
+                    send_frame(data)
+                except queue.Empty:
+                    pass  # no new frame, possibly starvation
+
+                # if FPS is too low, send fake frames to catch up
+                fps_est = 1.0 / (
+                    alpha * (time.time() - prev_time_s) + (1 - alpha) * avg_duration_s
+                )
+                if fps_est < fps_threshold:
+                    send_frame(last_data)
+                    while 1.0 / avg_duration_s < fps_threshold:
+                        send_frame(last_data)
 
 
 class ResizingGizmo(Gizmo):
@@ -384,6 +499,7 @@ class AiGizmoBase(Gizmo):
         self,
         model: Union[dg.model.Model, str],
         *,
+        non_blocking_batch_predict_timeout_s: float = 0.01,
         stream_depth: int = 10,
         allow_drop: bool = False,
         inp_cnt: int = 1,
@@ -393,12 +509,18 @@ class AiGizmoBase(Gizmo):
 
         Args:
             model (dg.model.Model or str): A DeGirum model object or model name string to load. If a string is provided, the model will be loaded via `degirum.load_model()` using the given kwargs.
+            non_blocking_batch_predict_timeout_s (float): Input queue get timeout for non-blocking batch prediction mode. Defaults to 0.001 seconds.
             stream_depth (int): Depth of the input stream queue. Defaults to 10.
             allow_drop (bool): If True, allow dropping frames on input overflow. Defaults to False.
             inp_cnt (int): Number of input streams (for models requiring multiple inputs). Defaults to 1.
             **kwargs (any): Additional parameters to pass to `degirum.load_model()` when loading the model (if model is given as a name).
         """
         super().__init__([(stream_depth, allow_drop)] * inp_cnt)
+
+        self._non_blocking_batch_predict_timeout_s = (
+            non_blocking_batch_predict_timeout_s
+        )
+
         if isinstance(model, str):
             # Load the model by name, adding a token if not provided
             if "token" not in kwargs:
@@ -422,12 +544,23 @@ class AiGizmoBase(Gizmo):
         Internally feeds data from the input stream(s) into the model and yields results, invoking `on_result` for each inference result.
         """
 
+        block = not self.model.non_blocking_batch_predict
+        timeout_s = None if block else self._non_blocking_batch_predict_timeout_s
+
         def source():
             has_data = True
             while has_data:
                 # Get data from all inputs
                 for inp in self.get_inputs():
-                    d = inp.get()
+                    if block:
+                        d = inp.get()
+                    else:
+                        try:
+                            d = inp.get(timeout=timeout_s)
+                        except queue.Empty:
+                            yield None
+                            continue
+
                     if d == Stream._poison:
                         has_data = False
                         break
@@ -436,6 +569,9 @@ class AiGizmoBase(Gizmo):
                     break
 
         for result in self.model.predict_batch(source()):
+            if result is None:  # skip empty results (in non-blocking mode)
+                continue
+
             meta = result.info
             # If input was preprocessed bytes, attempt to attach original image for better visualization
             if isinstance(result._input_image, bytes):
@@ -1051,3 +1187,105 @@ class SinkGizmo(Gizmo):
             Stream (streams_base.Stream): The input Stream (queue) of this sink gizmo, which can be iterated to get collected results.
         """
         return self._inputs[0]
+
+
+class FPSStabilizingGizmo(Gizmo):
+    """FPS stabilizing gizmo that maintains stable frame rate by sending fake frames when input is empty.
+
+    When the input queue has frames available, they are sent through as-is. When the input queue
+    is empty, fake frames are generated by gradually shading the last genuine frame to maintain
+    the target FPS derived from video metadata.
+    """
+
+    def __init__(
+        self,
+        *,
+        stream_depth: int = 10,
+        allow_drop: bool = False,
+    ):
+        """Constructor.
+
+        Args:
+            stream_depth (int): Depth of the input frame queue. Defaults to 10.
+            allow_drop (bool): If True, allow dropping frames if the input queue is full. Defaults to False.
+        """
+        super().__init__([(stream_depth, allow_drop)])
+
+    def run(self):
+        """Run the FPS stabilizing loop.
+
+        Continuously reads frames from input queue and sends them downstream. When the input
+        queue is empty, generates fake frames by gradually shading the last genuine frame
+        to maintain stable FPS derived from video metadata.
+        """
+        last_data: Optional[StreamData] = None
+        fps = frame_interval = 0.0  # not defined
+        fake_frame_count = 0
+        last_frame_time = -1.0
+
+        input_queue = self.get_input(0)
+
+        time_budget = 0.0
+        while not self._abort:
+
+            # try to get a genuine frame first
+            try:
+                # calculate timeout
+                timeout: Optional[float] = None  # wait indefinite for first frame
+                if frame_interval > 0:
+                    # use 2x frame interval for normal stream, 0.5x for fake frames
+                    timeout = (
+                        2.0 * frame_interval
+                        if fake_frame_count == 0
+                        else 0.5 * frame_interval
+                    )
+
+                # get data from input queue, with proper timeout
+                data = input_queue.get(timeout=timeout)
+                if data == Stream._poison:
+                    break
+
+                # take FPS from video metadata if available
+                if fps <= 0:
+                    video_meta = data.meta.find_last(tag_video)
+                    if video_meta:
+                        fps = video_meta.get(VideoSourceGizmo.key_fps, fps)
+                        if fps > 0:
+                            frame_interval = 1.0 / fps
+
+                last_data = data
+                fake_frame_count = 0
+
+            except queue.Empty:
+                # no genuine frame available, check if we need to send a fake frame
+                if (
+                    frame_interval > 0
+                    and last_data is not None
+                    and time.time() - last_frame_time >= frame_interval + time_budget
+                ):
+                    # calculate shading factor with exponential decay
+                    shading_factor = max(0.3, np.exp(-0.1 * fake_frame_count))
+                    fake_frame_count += 1
+
+                    # create fake frame by shading
+                    fake_frame = (last_data.data * shading_factor).astype(
+                        last_data.data.dtype
+                    )
+                    data = StreamData(fake_frame, last_data.meta.clone())
+                else:
+                    # not time to send a fake frame yet
+                    continue
+
+            # update frame ID and timestamp
+            video_meta = data.meta.find_last(tag_video)
+            if video_meta:
+                video_meta[VideoSourceGizmo.key_frame_id] = self.result_cnt
+                video_meta[VideoSourceGizmo.key_timestamp] = time.time()
+
+            # send the frame
+            self.send_result(data)
+            current_time = time.time()
+            if last_frame_time >= 0:
+                time_budget += frame_interval - (current_time - last_frame_time)
+                time_budget = min(3 * frame_interval, time_budget)
+            last_frame_time = current_time

@@ -978,6 +978,7 @@ class ObjectTracker(ResultAnalyzerBase):
         trail_depth: int = 0,
         show_overlay: bool = True,
         annotation_color: Optional[tuple] = None,
+        show_only_track_ids: bool = False,
     ):
         """Constructor.
 
@@ -990,11 +991,13 @@ class ObjectTracker(ResultAnalyzerBase):
             trail_depth (int, optional): Number of recent positions to keep for each track's trail. Set 0 to disable trail tracking.
             show_overlay (bool, optional): If True, annotate the image; if False, return the original image.
             annotation_color (Tuple[int, int, int], optional): RGB tuple to use for annotations. If None, a contrasting color is chosen automatically.
+            show_only_track_ids (bool, optional): If True, only track IDs are shown in the annotations. If False, trails and labels are also shown when available.
         """
         self._tracker = _ByteTrack(class_list, track_thresh, track_buffer, match_thresh)
         self._anchor_point = anchor_point
         self._show_overlay = show_overlay
         self._annotation_color = annotation_color
+        self._show_only_track_ids = show_only_track_ids
         self._tracer: Optional[_Tracer] = (
             _Tracer(track_buffer, trail_depth) if trail_depth > 0 else None
         )
@@ -1047,8 +1050,8 @@ class ObjectTracker(ResultAnalyzerBase):
         )
         text_color = deduce_text_color(line_color)
 
-        if self._tracer is None:
-            # if tracing is disabled, show track IDs inside bboxes
+        if self._tracer is None or self._show_only_track_ids:
+            # when forced to or when tracing is disabled, show track IDs inside bboxes
             for obj in result.results:
                 if "track_id" in obj and "bbox" in obj:
                     track_id = str(obj["track_id"])
@@ -1064,19 +1067,19 @@ class ObjectTracker(ResultAnalyzerBase):
 
         else:
             # if tracing is enabled, show trails
-
-            all_trails = [
-                get_anchor_coordinates(np.array(trail), self._anchor_point).astype(int)
-                for _, trail in result.trails.items()
-                if len(trail) > 1
-            ]
-            cv2.polylines(
-                image,
-                all_trails,
-                False,
-                rgb_to_bgr(line_color),
-                result.overlay_line_width,
-            )
+            if result.overlay_line_width > 0:
+                all_trails = [
+                    get_anchor_coordinates(np.array(trail), self._anchor_point).astype(int)
+                    for _, trail in result.trails.items()
+                    if len(trail) > 1
+                ]
+                cv2.polylines(
+                    image,
+                    all_trails,
+                    False,
+                    rgb_to_bgr(line_color),
+                    result.overlay_line_width,
+                )
 
             if result.overlay_show_labels:
                 for tid, trail in result.trails.items():

@@ -135,7 +135,8 @@ class _LocalMinio:
                             os.path.join(root, file), bucket_path
                         ),
                         last_modified=datetime.datetime.fromtimestamp(
-                            os.path.getmtime(os.path.join(root, file))
+                            os.path.getmtime(os.path.join(root, file)),
+                            tz=datetime.timezone.utc,
                         ),
                         etag="",
                         size=os.path.getsize(os.path.join(root, file)),

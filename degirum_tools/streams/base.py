@@ -1,17 +1,21 @@
-# streams_base.py: streaming toolkit: base classes
-# Copyright DeGirum Corporation 2024
+#
+# streams.base.py: streaming toolkit: base classes
+#
+# Copyright DeGirum Corporation 2025
 # All rights reserved
+#
 # Implements base classes for streaming toolkit:
 #  - StreamMeta class is used to pass metainfo objects between gizmos.
 #  - StreamData class is used to pass data and metainfo objects between gizmos.
 #  - Stream class is a queue-based iterable class with optional item drop.
 #  - Gizmo class is a base class for all gizmos: streaming pipeline processing blocks.
 #  - Composition class is a class that holds and animates multiple connected gizmos.
+#
 
 import threading, queue, copy, time
 from abc import ABC, abstractmethod
-from typing import Optional, Any, List, Dict, Union, Iterator
-from .environment import get_test_mode
+from typing import Optional, Any, List, Dict, Union, Iterator, Tuple
+from ..environment import get_test_mode
 from degirum.exceptions import DegirumException
 
 
@@ -257,6 +261,68 @@ class Stream(queue.Queue):
         self.put(self._poison)
 
 
+class Watchdog:
+    """Monitors activity rate and timing using tick events and a filtered TPS estimate.
+
+    Tracks the frequency of `tick()` calls and the time since the last one. The `check()` method
+    evaluates whether the activity is recent enough and meets a minimum TPS (ticks per second) threshold,
+    using a single-pole low-pass filter to smooth TPS estimation.
+    """
+
+    def __init__(self, time_limit: float, tps_threshold: float, smoothing: float = 0.9):
+        """Initializes the Watchdog.
+
+        Args:
+            time_limit (float): Maximum allowed time (in seconds) since the last tick.
+            tps_threshold (float): Minimum required filtered ticks per second.
+            smoothing (float): Smoothing factor for the low-pass filter (0 < smoothing < 1).
+        """
+
+        self._time_limit = time_limit
+        self._tps_threshold = tps_threshold
+        self._smoothing = smoothing
+        self._last_tick: Optional[float] = None
+        self._average_tick = -1.0
+        self._lock = threading.Lock()
+
+    def tick(self):
+        """Records the current timestamp and updates the filtered TPS estimate.
+
+        Should be called regularly to track system activity. Uses the time between ticks to calculate
+        instantaneous TPS and applies a low-pass filter to smooth the estimate.
+        """
+
+        with self._lock:
+            now = time.time()
+            if self._last_tick is not None:
+                dt = now - self._last_tick
+                self._average_tick = (
+                    dt
+                    if self._average_tick < 0
+                    else (
+                        self._smoothing * self._average_tick
+                        + (1 - self._smoothing) * dt
+                    )
+                )
+            self._last_tick = now
+
+    def check(self) -> Tuple[bool, float]:
+        """Checks whether the watchdog is within the allowed timing and TPS threshold.
+
+        Returns:
+            Tuple[bool, float]: A tuple containing:
+                - bool: True if the watchdog is active (recent enough and meets TPS threshold), False otherwise.
+                - float: The current TPS value.
+
+        """
+        with self._lock:
+            if self._last_tick is None:
+                return True, 0  # No ticks yet, consider it active
+            age = time.time() - self._last_tick
+            tps = 1 / self._average_tick if self._average_tick > 0 else 0
+            return age <= self._time_limit and tps >= self._tps_threshold, tps
+
+
 class Gizmo(ABC):
     """Base class for all gizmos (streaming pipeline processing blocks).
 
@@ -337,6 +403,8 @@ class Gizmo(ABC):
         self._output_refs: List[Stream] = []
         self._connected_gizmos: set = set()
         self._abort = False
+
+        # public attributes
         self.composition: Optional[Composition] = None
         self.error: Optional[DegirumException] = None
         self.name = self.__class__.__name__
@@ -344,6 +412,7 @@ class Gizmo(ABC):
         self.start_time_s = time.time()  # gizmo start time
         self.elapsed_s = 0
         self.fps = 0  # achieved FPS rate
+        self.watchdog: Optional[Watchdog] = None  # optional watchdog
 
     def get_tags(self) -> List[str]:
         """Get the list of meta tags for this gizmo.
@@ -448,6 +517,9 @@ class Gizmo(ABC):
         """
         if data != Stream._poison:
             self.result_cnt += 1
+            if self.watchdog is not None:
+                self.watchdog.tick()
+
         for out in self._output_refs:
             if data == Stream._poison or data is None:
                 out.close()
@@ -503,6 +575,7 @@ class Composition:
                 If a Gizmo is provided, all gizmos connected to it (including itself) are added.
                 If an iterator of gizmos is provided, all those gizmos (and their connected gizmos) are added.
         """
+        self._lock = threading.Lock()
         self._threads: List[threading.Thread] = []
 
         # collect all connected gizmos
@@ -632,22 +705,24 @@ class Composition:
 
         This sets each gizmo's abort flag, clears all remaining items from their input queues, and sends poison pills to unblock any waiting gets. This method does not wait for threads to finish; call `wait()` to join threads.
         """
-        # signal abort to all gizmos
-        for gizmo in self._gizmos:
-            gizmo.abort()
 
-        # empty all streams to speed up completion
-        for gizmo in self._gizmos:
-            for i in gizmo._inputs:
-                while not i.empty():
-                    try:
-                        i.get_nowait()
-                    except queue.Empty:
-                        break
+        with self._lock:
+            # signal abort to all gizmos
+            for gizmo in self._gizmos:
+                gizmo.abort()
 
-        # send poison pills from all gizmos to unblock gets()
-        for gizmo in self._gizmos:
-            gizmo.send_result(Stream._poison)
+            # empty all streams to speed up completion
+            for gizmo in self._gizmos:
+                for i in gizmo._inputs:
+                    while not i.empty():
+                        try:
+                            i.get_nowait()
+                        except queue.Empty:
+                            break
+
+            # send poison pills from all gizmos to unblock gets()
+            for gizmo in self._gizmos:
+                gizmo.send_result(Stream._poison)
 
     def wait(self):
         """Wait for all gizmo threads in the composition to finish.

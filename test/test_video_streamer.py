@@ -7,32 +7,42 @@
 # Implements unit tests to test media server and video streaming functionality
 #
 
+import degirum_tools
+import numpy as np
+import time
+from degirum_tools import streams
+
 
 def test_video_streamer():
     """
     Test for VideoStreamerGizmo gizmo and MediaServer class
     """
 
-    import degirum_tools
-    import numpy as np
-    import time
-    from degirum_tools import streams
-
     w = h = 100
     fps = 30.0
+    localhost = "127.0.0.1"
 
     class TestSourceGizmo(streams.Gizmo):
+
+        def __init__(self, nframes=-1):
+            super().__init__([])
+            self._nframes = nframes
+
         def run(self):
             frame = np.zeros((h, w, 3), dtype=np.uint8)
             frame[:, :, 2] = 255  # Set red channel to max
             while not self._abort:
-                self.send_result(streams.StreamData(frame))
+                if self._nframes == -1 or self._nframes > 0:
+                    self.send_result(streams.StreamData(frame))
                 time.sleep(1 / fps)
+                if self._nframes > 0:
+                    self._nframes -= 1
 
     class TestSinkGizmo(streams.Gizmo):
 
-        def __init__(self):
+        def __init__(self, nframes):
             super().__init__([(0, False)])
+            self._nframes = nframes
 
         def run(self):
             cnt = 0
@@ -44,18 +54,20 @@ def test_video_streamer():
                 assert np.all(data.data[:, :, 0] == 0)
                 assert np.all(data.data[:, :, 1] == 0)
                 assert np.all(data.data[:, :, 2] > 250)
-                if cnt >= 10:  # Limit to 10 frames for the test
+                if cnt >= self._nframes:  # Limit frames for the test
                     break
             if self.composition:
                 self.composition.stop()
+            assert cnt == self._nframes, f"Expected {self._nframes} frames, got {cnt}"
 
-    url = "rtsp://localhost:8554/mystream"
-    src = TestSourceGizmo()
-    dst = streams.VideoStreamerGizmo(url, fps=fps)
-    rcv = streams.VideoSourceGizmo(url)
-    chk = TestSinkGizmo()
+    def do_test(in_frames, out_frames, do_detect_test):
+        port = 8554
+        url = f"rtsp://{localhost}:{port}/mystream"
 
-    with degirum_tools.MediaServer():
+        src = TestSourceGizmo(in_frames)
+        dst = streams.VideoStreamerGizmo(url, fps=fps)
+        rcv = streams.VideoSourceGizmo(url)
+        chk = TestSinkGizmo(out_frames)
 
         # start streaming of red frames to RTSP server
         src_composition = streams.Composition(src >> dst)
@@ -63,7 +75,23 @@ def test_video_streamer():
 
         time.sleep(1)  # Allow some time for the stream to start
 
+        # test detect_rtsp_cameras()
+        if do_detect_test:
+            detected = degirum_tools.detect_rtsp_cameras(f"{localhost}/32", port=port)
+            assert (
+                len(detected) == 1 and localhost in detected
+            ), "RTSP camera detection failed"
+            assert (
+                detected[localhost].get("require_auth") is False
+            ), "RTSP server should not require authentication"
+
         # receive and check frames from RTSP server
         rcv_composition = streams.Composition(rcv >> chk)
         rcv_composition.start()
         src_composition.stop()
+
+    with degirum_tools.MediaServer():
+        # test infinite source + camera detection
+        do_test(-1, 10, True)
+        # test ability to recover when source is dead
+        do_test(10, 40, False)

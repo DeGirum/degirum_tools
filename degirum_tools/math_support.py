@@ -852,3 +852,31 @@ class FIRFilterLP:
             Filtered output value with the same shape as the input sample.
         """
         return self.update(sample)
+
+
+def compute_kmeans(embeddings: List[np.ndarray], k: int = 0):
+    """
+    Compute k-means clustering on the given embeddings.
+    Args:
+        embeddings (List[np.ndarray]): List of embedding vectors.
+        k (int): Number of clusters. If 0, it will be deduced based on the number of embeddings.
+    Returns:
+        List[nd.ndarray]: List of embeddings closest to cluster centroid.
+    """
+    from scipy.cluster.vq import kmeans2
+
+    if k == 0:
+        k = int(max(3, len(embeddings) / 25))
+
+    embeddings_arr = np.array(embeddings)
+    centroids, labels = kmeans2(embeddings_arr, k, minit="++")
+
+    ret = []
+    for i in range(k):
+        cluster_embeddings = embeddings_arr[labels == i]
+        if len(cluster_embeddings) == 0:
+            continue
+        distances = np.linalg.norm(cluster_embeddings - centroids[i], axis=1)
+        ret.append(cluster_embeddings[np.argmin(distances)])
+
+    return ret
