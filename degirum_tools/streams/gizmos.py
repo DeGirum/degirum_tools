@@ -167,6 +167,8 @@ class GeneratorSourceGizmo(Gizmo):
     and outputs them as StreamData into the pipeline, similar to VideoSourceGizmo but for static images.
     """
 
+    key_file_path = "file_path"  # key for file path meta if input is a file
+
     def __init__(self, generator):
         """Constructor.
 
@@ -262,6 +264,7 @@ class GeneratorSourceGizmo(Gizmo):
                 VideoSourceGizmo.key_frame_count: -1,  # Unknown for generator
                 VideoSourceGizmo.key_frame_id: self.result_cnt,
                 VideoSourceGizmo.key_timestamp: time.time(),
+                self.key_file_path: image_input if isinstance(image_input, str) else "",
             }
 
             # Send the result
