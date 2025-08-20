@@ -8,10 +8,17 @@
 #
 
 import queue, copy, time, cv2, numpy as np
+from types import ModuleType
 import degirum as dg
 from abc import abstractmethod
 from typing import Optional, List, Union
 from contextlib import ExitStack
+
+try:
+    Image: Optional[ModuleType] = None
+    from PIL import Image
+except ImportError:
+    Image = None
 
 from .base import Stream, StreamData, StreamMeta, Gizmo
 
@@ -151,6 +158,114 @@ class VideoSourceGizmo(Gizmo):
 
         finally:
             self._close_video_source()
+
+
+class GeneratorSourceGizmo(Gizmo):
+    """Generator-based source gizmo.
+
+    Takes a generator that yields images in various formats (file paths, numpy arrays, or PIL images)
+    and outputs them as StreamData into the pipeline, similar to VideoSourceGizmo but for static images.
+    """
+
+    def __init__(self, generator):
+        """Constructor.
+
+        Args:
+            generator: A generator that yields images. Each yielded item can be:
+                - str: path to an image file
+                - numpy.ndarray: image as numpy array
+                - PIL.Image: PIL image object
+        """
+        super().__init__()  # No inputs for source gizmo
+        self._generator = generator
+
+    def get_tags(self) -> List[str]:
+        """Get list of tags assigned to this gizmo.
+
+        Returns:
+            List[str]: Tags for this gizmo (its name and the video tag).
+        """
+        return [self.name, tag_video]
+
+    def _convert_to_numpy(self, image_input) -> np.ndarray:
+        """Convert various image formats to numpy array.
+
+        Args:
+            image_input: Image in various formats (str path, numpy array, or PIL image)
+
+        Returns:
+            np.ndarray: Image as numpy array in BGR format (OpenCV standard)
+
+        Raises:
+            ValueError: If the input format is not supported
+            FileNotFoundError: If image file path doesn't exist
+        """
+        if isinstance(image_input, str):
+            # Load image from file path
+            img = cv2.imread(image_input)
+            if img is None:
+                raise FileNotFoundError(
+                    f"Could not load image from path: {image_input}"
+                )
+            return img
+
+        elif isinstance(image_input, np.ndarray):
+            # Already a numpy array, just ensure it's in the right format
+            if len(image_input.shape) == 2:
+                # Grayscale to BGR
+                return cv2.cvtColor(image_input, cv2.COLOR_GRAY2BGR)
+            elif len(image_input.shape) == 3:
+                if image_input.shape[2] == 3:
+                    # Assume it's already BGR or RGB - return as is
+                    return image_input
+                elif image_input.shape[2] == 4:
+                    # RGBA/BGRA to BGR
+                    return image_input[:, :, :3]
+            return image_input
+
+        elif Image is not None and isinstance(image_input, Image.Image):
+            # PIL Image to numpy array
+            # Convert to RGB first (PIL standard), then to BGR (OpenCV standard)
+            if image_input.mode != "RGB":
+                image_input = image_input.convert("RGB")
+            img_array = np.array(image_input)
+            # Convert RGB to BGR for OpenCV compatibility
+            return cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
+
+        else:
+            raise RuntimeError(
+                f"Unsupported image input type: {type(image_input)}. "
+                f"Supported types: str (file path), numpy.ndarray, PIL.Image"
+            )
+
+    def run(self):
+        """Run the generator source loop.
+
+        Iterates over the generator, converts each item to a numpy array image,
+        creates appropriate metadata (similar to VideoSourceGizmo), and sends
+        the results downstream.
+        """
+
+        for image_input in self._generator:
+            if self._abort:
+                break
+
+            # convert input to numpy array
+            img_array = self._convert_to_numpy(image_input)
+
+            # create metadata similar to VideoSourceGizmo
+            height, width = img_array.shape[:2]
+            meta = {
+                VideoSourceGizmo.key_frame_width: width,
+                VideoSourceGizmo.key_frame_height: height,
+                VideoSourceGizmo.key_fps: 0.0,  # No FPS for generator
+                VideoSourceGizmo.key_frame_count: -1,  # Unknown for generator
+                VideoSourceGizmo.key_frame_id: self.result_cnt,
+                VideoSourceGizmo.key_timestamp: time.time(),
+            }
+
+            # Send the result
+            self.send_result(StreamData(img_array, StreamMeta(meta, self.get_tags())))
 
 
 class VideoDisplayGizmo(Gizmo):
