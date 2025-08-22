@@ -151,7 +151,7 @@ class ObjectSelector(ResultAnalyzerBase):
         self._show_overlay = show_overlay
         self._annotation_color = annotation_color
 
-    def analyze(self, result):
+    def analyze(self, result) -> None:
         """
         Select the top-K objects based on the configured strategy, updating the result.
 
@@ -162,7 +162,7 @@ class ObjectSelector(ResultAnalyzerBase):
             result (InferenceResults): Model result with detection information.
 
         Returns:
-            None: The result object is modified in-place.
+            None: Modifies `result` in place; does not return a value.
         """
 
         if self._selection_strategy == ObjectSelectionStrategies.CUSTOM_METRIC:

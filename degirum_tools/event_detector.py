@@ -220,7 +220,7 @@ def ZoneCount(result, params):
             aggregation (str): Aggregation function to apply across zones. One of 'sum', 'max', 'min', 'mean', 'std'. Defaults to 'sum'.
 
     Returns:
-        Union[int, float]: Total count of matching objects in the selected zone(s).
+        count (int | float): Total count of matching objects in the selected zone(s).
 
     Raises:
         AttributeError: If `result.zone_counts` is missing (no ZoneCounter applied upstream).

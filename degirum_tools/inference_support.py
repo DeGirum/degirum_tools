@@ -120,7 +120,7 @@ import numpy as np
 import degirum as dg  # import DeGirum PySDK
 from contextlib import ExitStack
 from pathlib import Path
-from typing import Union, List, Optional
+from typing import Union, List, Optional, Iterator
 from dataclasses import dataclass
 from .compound_models import CompoundModelBase
 from .video_support import (
@@ -252,7 +252,7 @@ def predict_stream(
     *,
     fps: Optional[float] = None,
     analyzers: Union[ResultAnalyzerBase, List[ResultAnalyzerBase], None] = None,
-):
+) -> Iterator["dg.postprocessor.InferenceResults"]:
     """
     Run a PySDK model on a live or file-based video source, yielding inference results.
 
@@ -278,9 +278,8 @@ def predict_stream(
             One or more analyzers to apply to each inference result. If None, no additional
             analysis or annotation is performed beyond the model's standard postprocessing.
 
-    Returns:
-        Union[InferenceResults, AnalyzingPostprocessor]:
-            The inference result for each processed frame. If analyzers are present,
+    Yields:
+        InferenceResults: The inference result for each processed frame. If analyzers are present,
             the result object is wrapped to allow custom annotation in its `.image_overlay`.
 
     Example:
