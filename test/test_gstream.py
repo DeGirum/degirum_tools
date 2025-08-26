@@ -3,9 +3,10 @@ from degirum_tools.video_support import open_video_stream
 
 def test_gstreamer_pipeline():
     # Test with a sample GStreamer pipeline
-    gst_pipeline = "filesrc location=Traffic.mp4 ! decodebin ! videoconvert ! video/x-raw,format=RGB ! appsink name=sink"
+    gst_pipeline = "Traffic.mp4"
+    model = None  # Replace with a mock or actual model if needed
     try:
-        with open_video_stream(gst_pipeline) as stream:
+        with open_video_stream(gst_pipeline, source_type='gstream', model=model) as stream:
             assert stream.isOpened(), "Failed to open GStreamer pipeline"
             ret, frame = stream.read()
             assert ret, "Failed to read a frame from GStreamer pipeline"
@@ -16,12 +17,13 @@ def test_gstreamer_pipeline():
 
 def test_invalid_gstreamer_pipeline():
     invalid_pipeline = "invalid_pipeline ! appsink"
+    model = None  # Replace with a mock or actual model if needed
     try:
-        with open_video_stream(invalid_pipeline):
+        with open_video_stream(invalid_pipeline, source_type='gstream', model=model):
             pass  # This should not execute if the pipeline is invalid
     except Exception as e:
         # Match specific error messages
-        assert "Invalid GStreamer pipeline" in str(e) or "failed to start" in str(e), (
+        assert "Invalid GStreamer pipeline" in str(e) or "file not found" in str(e), (
             f"Unexpected error message: {e}"
         )
     else:

@@ -7,182 +7,16 @@
 # Implements classes and functions to handle video streams for capturing & saving
 #
 
-import time
-import cv2, numpy as np
+import numpy as np
 from contextlib import contextmanager
 from pathlib import Path
 from . import environment as env
 from .ui_support import Progress
 from typing import Union, Generator, Optional, Callable, Any, Tuple
 from urllib.parse import urlparse
-
-import platform
-import subprocess
-import os
+import time
 import cv2
-
-import platform
-import subprocess
-import os
-import cv2
-import pyudev
-
-def detect_platform() -> str:
-    try:
-        model = Path("/proc/device-tree/model").read_bytes().rstrip(b"\0\n").decode()
-    except (FileNotFoundError, OSError):
-        model = ""
-    cpuinfo = Path("/proc/cpuinfo").read_text(errors="ignore")
-
-    if "Raspberry Pi" in model:
-        print("Rpi device")
-        return "raspberrypi"
-    if "Jetson" in model or "NVIDIA" in model:
-        print("Nvidia device")
-        return "jetson"
-    if "GenuineIntel" in cpuinfo:
-        print("Intel device")
-        return "intel"
-    return "unknown"
-
-# ------------------ Camera Type Detection ------------------
-
-# ------------------------------------------------------------------
-# 1) Camera-type detector
-# ------------------------------------------------------------------
-def detect_camera_type(dev_node: str) -> str:
-    """
-    Return either:
-        • 'csi'  – Raspberry-Pi / Jetson MIPI-CSI sensor
-        • 'usb'  – everything else (integrated laptop webcam **or** external USB)
-
-    We still keep CSI separate because its source element is `libcamerasrc`
-    instead of `v4l2src`.
-    """
-    try:
-        import pyudev
-        context = pyudev.Context()
-        for dev in context.list_devices(subsystem='video4linux'):
-            if dev.device_node == dev_node:
-                path = dev.device_path.lower()
-                return "csi" if ("csi" in path or "unicam" in path) else "usb"
-    except Exception:
-        # graceful fallback to plain /sys
-        try:
-            link = os.readlink(f"/sys/class/video4linux/{Path(dev_node).name}").lower()
-            return "csi" if ("csi" in link or "unicam" in link) else "usb"
-        except Exception:
-            pass
-    return "usb"  # default: treat as generic UVC/USB cam
-
-
-# ------------------------------------------------------------------
-# 2) GStreamer-pipeline builder
-# ------------------------------------------------------------------
-def build_gst_pipeline(source: str,
-                       width: int  = 960,
-                       height: int = 540,
-                       fps: int    = 30) -> str:
-    """
-    Return a **Python-friendly** GST string ready for cv2.VideoCapture(),
-    with element order compatible with DeGirum models.
-
-    Order for *file*:  filesrc → decodebin → videoconvert → videoscale → caps → appsink
-    Order for *camera*: v4l2src/libcamerasrc → videoscale → videoconvert → caps → appsink
-    The final caps always include RGB + explicit width / height (+ framerate for files).
-    """
-
-    # ------------- File source ------------------------------------------------
-    if isinstance(source, str) and source.lower().endswith(".mp4"):
-        return (
-            f'filesrc location="{source}" ! decodebin ! '
-            f'videoconvert ! videoscale ! '
-            f'video/x-raw,width={width},height={height},format=RGB ! '
-            f'appsink name=sink'
-        )
-        #return "filesrc location=Traffic.mp4 ! decodebin ! videoconvert ! video/x-raw, width=960, height=540, format=RGB ! appsink name=sink"
-
-    #--------------RTSP source---------------------------------------------------
-    if isinstance(source, str) and source.strip().lower().startswith("rtsp://"):
-        # Safe, dynamic pipeline for RTSP with decodebin
-        return (
-            f"rtspsrc location={source} latency=0 ! "
-            f"decodebin ! videoconvert ! videoscale ! "
-            f"video/x-raw,width={width},height={height},format=BGR ! appsink name=sink"
-        )
-
-    # ------------- Camera source ---------------------------------------------
-    if str(source).isdigit():
-        cam_index = int(source)
-        dev_node  = f"/dev/video{cam_index}"
-        if not os.path.exists(dev_node):
-            raise FileNotFoundError(f"{dev_node} not found")
-
-        platform  = detect_platform()
-        cam_type  = detect_camera_type(dev_node)          # 'usb' or 'csi'
-        caps_tail = (f'video/x-raw,width={width},height={height},format=RGB'
-                     + (f',framerate={fps}/1' if fps else ''))
-
-        # —— Platform-specific recipes (same argument order everywhere) ————
-        if platform == "raspberrypi" and cam_type == "csi":
-            # Modern libcamera stack
-            return (
-                f'libcamerasrc ! videoscale ! videoconvert ! {caps_tail} ! '
-                f'appsink name=sink'
-            )
-
-        if platform == "jetson":
-            # Decode MJPEG (common UVC mode) → convert (NVMM → system) → RGB caps
-            return (
-                f'v4l2src device={dev_node} io-mode=2 ! '
-                f'image/jpeg,width={width},height={height},framerate={fps}/1 ! '
-                f'jpegdec ! nvvidconv ! videoscale ! videoconvert ! '
-                f'{caps_tail} ! appsink name=sink'
-            )
-
-        # Default for Intel, AMD, Pi-USB, etc.
-        return (
-            f'v4l2src device={dev_node} ! videoscale ! videoconvert ! '
-            f'{caps_tail} ! appsink name=sink'
-        )
-
-    # -------------------------------------------------------------------------
-    raise ValueError("source must be a camera index (0,1,…) or a .mp4 file path")
-
-
-
-# def _build_gstream_pipeline_string_for_local_file(video_source, width, height, fps=30):
-#     def _get_framerate_str(fps_val):
-#         if isinstance(fps_val, float):
-#             if abs(fps_val - 29.97) < 0.01:
-#                 return "30000/1001"
-#             elif abs(fps_val - 23.976) < 0.01:
-#                 return "24000/1001"
-#             else:
-#                 numerator = int(fps_val * 1000)
-#                 return f"{numerator}/1000"
-#         else:
-#             return f"{int(fps_val)}/1"
-
-#     print(f"video_source inside gstream pipeline builder is {video_source}")
-
-#     if isinstance(video_source, int):
-#         # webcam or RPi camera input pipeline
-#         device = f"/dev/video{video_source}"
-#         pipeline = (
-#             f"v4l2src device={device} ! videoconvert ! videoscale ! "
-#             f"video/x-raw,width={width},height={height},format=RGB ! appsink name=sink"
-#         )
-#     else:
-#         # video file input pipeline
-#         framerate_str = _get_framerate_str(fps)
-#         pipeline = (
-#             f"filesrc location={video_source} ! decodebin ! videoconvert ! videoscale ! "
-#             f"video/x-raw,width={width},height={height},framerate={framerate_str},format=RGB ! appsink name=sink"
-#         )
-
-#     return pipeline
-
+from .gst_support import build_gst_pipeline
 
 
 class VideoCaptureGst:
@@ -192,7 +26,9 @@ class VideoCaptureGst:
         gi.require_version("Gst", "1.0")
         from gi.repository import Gst, GLib
 
-        Gst.init(None)
+        if not Gst.is_initialized():
+            Gst.init(None)
+
         try:
             self.pipeline = Gst.parse_launch(pipeline_str)
         except GLib.Error as e:
@@ -203,11 +39,14 @@ class VideoCaptureGst:
             raise Exception(f"Invalid GStreamer pipeline (no appsink): {pipeline_str}")
 
         self.appsink.set_property("emit-signals", True)
-        self.pipeline.set_state(Gst.State.PLAYING)
+        self.appsink.set_property("sync", False)
+        self.appsink.set_property("max-buffers", 2)
+        self.appsink.set_property("drop", True)
 
+        self.pipeline.set_state(Gst.State.PLAYING)
         # Check if the pipeline transitions to the PLAYING state
-        state_change_result = self.pipeline.get_state(5 * Gst.SECOND)
-        if state_change_result[1] != Gst.State.PLAYING:
+        ret, state, _ = self.pipeline.get_state(5 * Gst.SECOND)
+        if state != Gst.State.PLAYING:
             raise Exception(f"GStreamer pipeline failed to start: {pipeline_str}")
 
         self.running = True
@@ -226,22 +65,21 @@ class VideoCaptureGst:
         caps = sample.get_caps()
         width = caps.get_structure(0).get_value("width")
         height = caps.get_structure(0).get_value("height")
-        
-        # DEBUG: Print frame size from appsink
-        print(f"[APPSINK] Frame captured: {width}x{height}, Buffer size: {buf.get_size()} bytes")
-        
+
         success, mapinfo = buf.map(Gst.MapFlags.READ)
         if not success:
-            print(f"[APPSINK] ERROR: Failed to map buffer")
+            print("[APPSINK] ERROR: Failed to map buffer")
             return False, None
 
         try:
+            expected_size = height * width * 3
+            actual_size = len(mapinfo.data)
+
+            if actual_size < expected_size:
+                print("[APPSINK] ERROR: Buffer is too small for requested array. Skipping frame.")
+                return False, None
             frame: np.ndarray = np.ndarray((height, width, 3), buffer=mapinfo.data, dtype=np.uint8)
-            
-            # DEBUG: Print numpy array details
-            print(f"[APPSINK] Numpy frame created: shape={frame.shape}, dtype={frame.dtype}, size={frame.nbytes} bytes")
-            print(f"[APPSINK] Frame data range: min={frame.min()}, max={frame.max()}, mean={frame.mean():.2f}")
-            
+
             return True, frame
         finally:
             buf.unmap(mapinfo)
@@ -283,115 +121,91 @@ class VideoCaptureGst:
         self.pipeline.set_state(Gst.State.NULL)
         self.running = False
 
+    def __del__(self):
+        self.release()
+
+
 @contextmanager
 def open_video_stream(
     video_source: Union[int, str, Path, None, cv2.VideoCapture, VideoCaptureGst],
     max_yt_quality: int = 0,
     *,
-    source_type: str = "auto",
+    source_type: str = "auto", model
 ) -> Generator[Union[cv2.VideoCapture, VideoCaptureGst], None, None]:
-    """Open a video stream with explicit *source_type* selection.
-
-    Parameters
-    ----------
-    video_source : Union[int, str, Path, None, cv2.VideoCapture, VideoCaptureGst]
-        Numeric camera index, file/URL string, Path or pre‑opened capture object.
-    max_yt_quality : int, optional
-        Max height (px) for YouTube streams. ``0`` means best available.
-    source_type : {"auto", "opencv", "gstream"}, optional
-        Force the backend used to open *video_source*:
-
-        * ``"auto"`` – original heuristic (default)
-        * ``"opencv"`` – always use ``cv2.VideoCapture``
-        * ``"gstream"`` – probe using OpenCV for resolution and then open
-          a GStreamer pipeline via :class:`VideoCaptureGst`.
-    """
-    print(f"Hurray ..inside open video stream")
-    # Preserve existing unit‑test redirection logic
-    if env.get_test_mode() or video_source is None:
-        video_source = env.get_var(env.var_VideoSource, 0)
-        if isinstance(video_source, str) and video_source.isnumeric():
-            video_source = int(video_source)
-
-    if isinstance(video_source, Path):
-        video_source = str(video_source)
-
-    # YouTube handling stays unchanged – do this irrespective of *source_type*
-    if (
-        isinstance(video_source, str)
-        and urlparse(video_source).hostname in ("www.youtube.com", "youtube.com", "youtu.be")
-    ):
-        import pafy
-
-        if max_yt_quality == 0:
-            video_source = pafy.new(video_source).getbest(preftype="mp4").url
-        else:
-            dash_hls_formats = [
-                91, 92, 93, 94, 95, 96, 132, 151, 133, 134, 135, 136, 137, 138,
-                160, 212, 264, 298, 299, 266,
-            ]
-            video_qualities = pafy.new(video_source).videostreams
-            video_qualities = sorted(video_qualities, key=lambda x: x.dimensions[1], reverse=True)
-
-            for v in video_qualities:
-                if (
-                    v.dimensions[1] <= max_yt_quality
-                    and v.extension == "mp4"
-                    and v.itag not in dash_hls_formats
-                ):
-                    video_source = v.url
-                    break
-            else:
-                video_source = pafy.new(video_source).getbest(preftype="mp4").url
-
-    # Decide backend based on *source_type*
-    backend = source_type.lower()
-    if backend not in {"auto", "opencv", "gstream"}:
-        raise ValueError(
-            f"Unknown source_type '{source_type}'. Expected 'auto', 'opencv' or 'gstream'."
-        )
-
-    if backend == "opencv":
-        stream: Union[VideoCaptureGst, cv2.VideoCapture] = cv2.VideoCapture(video_source)  # type: ignore[arg-type]
-
-    elif backend == "gstream":
-        # pipeline=video_source
-        # Probe with a *temporary* OpenCV capture to discover width / height / fps
-        probe = cv2.VideoCapture(video_source)  # type: ignore[arg-type]
-        if not probe.isOpened():
-            raise Exception(
-                f"Error opening '{video_source}' via OpenCV to probe properties"
-            )
-        width = int(probe.get(cv2.CAP_PROP_FRAME_WIDTH)) 
-        height = int(probe.get(cv2.CAP_PROP_FRAME_HEIGHT)) 
-        #fps = probe.get(cv2.CAP_PROP_FPS) or 30.0
-        fps = 30
-        probe.release()
-        print(f"\n\nDEBUG :Video Parameters fetched : '{video_source}' with {width}x{height} @ {fps:.2f} fps\n\n")
-
-        pipeline = build_gst_pipeline(video_source, width, height,fps)
-        print(f"\n\nDEBUG : Using GStreamer pipeline string is here: {pipeline}\n\n")
-        stream = VideoCaptureGst(pipeline)
-        print(f"\n\nDEBUG :GStreamer is applied: {stream}\n\n")
-
-    else:  # auto – fallback to original heuristic
-        if isinstance(video_source, str) and ("!" in video_source or "filesrc" in video_source):
-            stream = VideoCaptureGst(video_source)
-        else:
-            stream = cv2.VideoCapture(video_source)  # type: ignore[arg-type]
-
-    if not stream.isOpened():
-        raise Exception(f"Error opening '{video_source}' video stream")
-    else:
-        print(
-            f"Successfully opened video stream '{video_source}' using '{stream.__class__.__name__}'"
-        )
-
+    stream = None
     try:
-        yield stream
-    finally:
-        stream.release()
+        # Preserve existing unit‑test redirection logic
+        if env.get_test_mode() or video_source is None:
+            video_source = env.get_var(env.var_VideoSource, 0)
+            if isinstance(video_source, str) and video_source.isnumeric():
+                video_source = int(video_source)
 
+        if isinstance(video_source, Path):
+            video_source = str(video_source)
+
+        # YouTube handling stays unchanged – do this irrespective of *source_type*
+        if (
+            isinstance(video_source, str)
+            and urlparse(video_source).hostname in ("www.youtube.com", "youtube.com", "youtu.be")
+        ):
+            import pafy
+
+            if max_yt_quality == 0:
+                video_source = pafy.new(video_source).getbest(preftype="mp4").url
+            else:
+                dash_hls_formats = [
+                    91, 92, 93, 94, 95, 96, 132, 151, 133, 134, 135, 136, 137, 138,
+                    160, 212, 264, 298, 299, 266,
+                ]
+                video_qualities = pafy.new(video_source).videostreams
+                video_qualities = sorted(video_qualities, key=lambda x: x.dimensions[1], reverse=True)
+
+                for v in video_qualities:
+                    if (
+                        v.dimensions[1] <= max_yt_quality
+                        and v.extension == "mp4"
+                        and v.itag not in dash_hls_formats
+                    ):
+                        video_source = v.url
+                        break
+                else:
+                    video_source = pafy.new(video_source).getbest(preftype="mp4").url
+
+        # Decide backend based on *source_type*
+        backend = source_type.lower()
+        if backend not in {"auto", "opencv", "gstream"}:
+            raise ValueError(
+                f"Unknown source_type '{source_type}'. Expected 'auto', 'opencv' or 'gstream'."
+            )
+
+        if backend == "opencv":
+            stream: Union[VideoCaptureGst, cv2.VideoCapture] = cv2.VideoCapture(video_source)  # type: ignore[arg-type]
+
+        elif backend == "gstream":
+            pipeline = build_gst_pipeline(video_source)
+            stream = VideoCaptureGst(pipeline)
+
+        else:  # auto – fallback to original heuristic
+            if isinstance(video_source, str) and ("!" in video_source or "filesrc" in video_source):
+                stream = VideoCaptureGst(video_source)
+            else:
+                stream = cv2.VideoCapture(video_source)  # type: ignore[arg-type]
+
+        if not stream.isOpened():
+            raise Exception(f"Error opening '{video_source}' video stream")
+        else:
+            print(
+                f"Successfully opened video stream '{video_source}' using '{stream.__class__.__name__}'"
+            )
+
+        yield stream
+    except Exception:
+        if stream is not None and hasattr(stream, "release"):
+            stream.release()
+        raise
+    finally:
+        if stream is not None and hasattr(stream, "release"):
+            stream.release()
 
 
 def video_source(
@@ -441,11 +255,9 @@ def video_source(
                 )
             else:
                 break
-                
         # DEBUG: Print frame details before yielding
         frame_counter += 1
         print(f"[VIDEO_SOURCE] Frame #{frame_counter}: shape={frame.shape}, dtype={frame.dtype}")
-        
         if fps:
             if is_file:
                 frame_id += 1
@@ -471,6 +283,7 @@ def video_source(
         else:
             print(f"[VIDEO_SOURCE] Yielding frame #{frame_counter} to model")
             yield frame
+
 
 def get_video_stream_properties(video_source: Union[int, str, Path, None, cv2.VideoCapture, VideoCaptureGst]) -> tuple:
     """

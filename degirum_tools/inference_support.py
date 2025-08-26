@@ -14,12 +14,7 @@ from pathlib import Path
 from typing import Union, List, Optional
 from dataclasses import dataclass
 from .compound_models import CompoundModelBase
-from .video_support import (
-    open_video_stream, 
-    get_video_stream_properties,
-    video_source,
-    open_video_writer, VideoCaptureGst
-)
+from .video_support import (open_video_stream, get_video_stream_properties, video_source, open_video_writer, VideoCaptureGst)
 from .ui_support import Progress, Display, Timer
 from .result_analyzer_base import ResultAnalyzerBase
 from . import environment as env
@@ -201,7 +196,6 @@ def predict_stream(
     *,
     fps: Optional[float] = None,
     analyzers: Union[ResultAnalyzerBase, List[ResultAnalyzerBase], None] = None,
-    robust_rtsp: bool = False,
 ):
     """Run a model on a video stream
 
@@ -223,27 +217,14 @@ def predict_stream(
         When `analyzers` is not None, each prediction result contains additional keys, added by those analyzers.
         Also prediction result object has overridden `image_overlay` method which additionally displays analyzers' annotations.
     """
-
-    analyzing_postprocessor = _create_analyzing_postprocessor_class(analyzers)
-    print(f"[PREDICT_STREAM] Starting prediction with source_type={source_type}, robust_rtsp={robust_rtsp}")
-    
-    with open_video_stream(video_source_id, source_type=source_type, robust_rtsp=robust_rtsp) as stream:
-        print(f"[PREDICT_STREAM] Video stream opened successfully")
-        
-        # DEBUG: Initialize result counter
-        result_counter = 0
-        
-        print(f"[PREDICT_STREAM] Starting model.predict_batch() with video_source generator")
+    if analyzers is not None:
+        attach_analyzers(model, analyzers)
+    with open_video_stream(video_source_id, source_type=source_type, model=model) as stream:
+        print(f"[PREDICT_STREAM] Video stream opened successfully: {video_source_id}")
         for res in model.predict_batch(video_source(stream, fps=fps)):
-            result_counter += 1
-            print(f"[PREDICT_STREAM] Model result #{result_counter} received")
-            
-            if analyzers is not None:
-                print(f"[PREDICT_STREAM] Applying analyzers to result #{result_counter}")
-                yield analyzing_postprocessor(result=res)
-            else:
-                print(f"[PREDICT_STREAM] Yielding result #{result_counter} without analyzers")
-                yield res
+            yield res
+    if analyzers is not None:
+        attach_analyzers(model, None)
 
 
 def annotate_video(
