@@ -141,7 +141,7 @@ def test_model_registry_model_specs(sample_models_dict):
     model_names = [spec.model_name for spec in specs]
     assert "face_detector_orca" in model_names
     assert "face_detector_cpu" in model_names
-    
+
     # Check default parameters for all specs
     for spec in specs:
         assert spec.inference_host_address == "@cloud"
@@ -168,8 +168,10 @@ def test_model_registry_model_specs(sample_models_dict):
         assert spec.load_kwargs == load_kwargs
 
     # Test model_spec with single model
-    single_model_registry = registry.for_task("face_detection").for_hardware("N2X/ORCA1")
-    
+    single_model_registry = registry.for_task("face_detection").for_hardware(
+        "N2X/ORCA1"
+    )
+
     single_spec = single_model_registry.model_spec()
     assert single_spec.model_name == "face_detector_orca"
     assert single_spec.zoo_url == "https://cs.degirum.com/degirum/orca"
@@ -184,7 +186,10 @@ def test_model_registry_model_specs(sample_models_dict):
         empty_registry.model_spec()
 
     # Test with multiple models (should raise error for model_spec)
-    with pytest.raises(RuntimeError, match="Multiple models available in the registry; use model_specs\\(\\) instead"):
+    with pytest.raises(
+        RuntimeError,
+        match="Multiple models available in the registry; use model_specs\\(\\) instead",
+    ):
         face_registry.model_spec()
 
     # integration test using ModelSpec and ModelRegistry together
