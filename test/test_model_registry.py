@@ -23,7 +23,6 @@ def sample_models_dict():
             "task": "face_detection",
             "hardware": "N2X/ORCA1",
             "zoo_url": "https://cs.degirum.com/degirum/orca",
-            "fps": 120.5,
             "metadata": {"input_size": "640x640"},
         },
         "face_detector_cpu": {
@@ -31,21 +30,18 @@ def sample_models_dict():
             "task": "face_detection",
             "hardware": "N2X/CPU",
             "zoo_url": "degirum/public",
-            "fps": 30.2,
         },
         "object_detector_orca": {
             "description": "Object detection model for ORCA",
             "task": "object_detection",
             "hardware": "N2X/ORCA1",
             "zoo_url": "https://cs.degirum.com/degirum/orca",
-            "fps": 95.8,
         },
         "segmentation_cpu": {
             "description": "Segmentation model for CPU",
             "task": "segmentation",
             "hardware": "N2X/CPU",
             "zoo_url": "degirum/public",
-            "fps": 15.3,
         },
     }
 
@@ -131,45 +127,65 @@ def test_model_registry_filtering_methods(sample_models_dict):
     assert filtered_registry.models == expected_chained_models
 
 
-def test_model_registry_best_model_spec(sample_models_dict):
-    """Test best_model_spec method with various scenarios"""
+def test_model_registry_model_specs(sample_models_dict):
+    """Test model_specs and model_spec methods with various scenarios"""
 
-    # Test with default parameters
+    # Test model_specs with default parameters
     registry = ModelRegistry(models=sample_models_dict)
     face_registry = registry.for_task("face_detection")
 
-    best_spec = face_registry.best_model_spec()
+    specs = face_registry.model_specs()
 
-    # Should select face_detector_orca over face_detector_cpu
-    assert best_spec.model_name == "face_detector_orca"
-    assert best_spec.zoo_url == "https://cs.degirum.com/degirum/orca"
-    assert best_spec.inference_host_address == "@cloud"
-    assert best_spec.connect_kwargs == {}
-    assert best_spec.load_kwargs == {}
+    # Should return 2 specs for face detection models
+    assert len(specs) == 2
+    model_names = [spec.model_name for spec in specs]
+    assert "face_detector_orca" in model_names
+    assert "face_detector_cpu" in model_names
+    
+    # Check default parameters for all specs
+    for spec in specs:
+        assert spec.inference_host_address == "@cloud"
+        assert spec.connect_kwargs == {}
+        assert spec.load_kwargs == {}
 
-    # Test with custom parameters
+    # Test model_specs with custom parameters
     connect_kwargs = {"token": "test_token"}
     load_kwargs = {"confidence": 0.8}
 
-    best_spec = registry.best_model_spec(
+    specs = registry.model_specs(
         inference_host_address="@localhost",
         zoo_url="custom_zoo",
         connect_kwargs=connect_kwargs,
         load_kwargs=load_kwargs,
     )
 
-    # Should select face_detector_orca (highest fps: 120.5)
-    assert best_spec.model_name == "face_detector_orca"
-    assert best_spec.zoo_url == "custom_zoo"  # Overridden
-    assert best_spec.inference_host_address == "@localhost"
-    assert best_spec.connect_kwargs == connect_kwargs
-    assert best_spec.load_kwargs == load_kwargs
+    # Should return all 4 models with custom parameters
+    assert len(specs) == 4
+    for spec in specs:
+        assert spec.zoo_url == "custom_zoo"  # Overridden
+        assert spec.inference_host_address == "@localhost"
+        assert spec.connect_kwargs == connect_kwargs
+        assert spec.load_kwargs == load_kwargs
+
+    # Test model_spec with single model
+    single_model_registry = registry.for_task("face_detection").for_hardware("N2X/ORCA1")
+    
+    single_spec = single_model_registry.model_spec()
+    assert single_spec.model_name == "face_detector_orca"
+    assert single_spec.zoo_url == "https://cs.degirum.com/degirum/orca"
+    assert single_spec.inference_host_address == "@cloud"
+    assert single_spec.connect_kwargs == {}
+    assert single_spec.load_kwargs == {}
 
     # Test with no models
     empty_registry = ModelRegistry(models={})
 
     with pytest.raises(RuntimeError, match="No models available in the registry"):
-        empty_registry.best_model_spec()
+        empty_registry.model_spec()
+
+    # Test with multiple models (should raise error for model_spec)
+    with pytest.raises(RuntimeError, match="Multiple models available in the registry; use model_specs\\(\\) instead"):
+        face_registry.model_spec()
 
     # integration test using ModelSpec and ModelRegistry together
     models_dict = {
@@ -178,23 +194,18 @@ def test_model_registry_best_model_spec(sample_models_dict):
             "task": "detection",
             "hardware": "CPU",
             "zoo_url": "test_zoo",
-            "fps": 25.0,
         }
     }
 
     registry = ModelRegistry(models=models_dict)
-    model_spec = registry.best_model_spec(
-        inference_host_address="@localhost",
-        connect_kwargs={"token": "test"},
-        load_kwargs={"threshold": 0.5},
-    )
+    model_spec = registry.model_spec()
 
     assert isinstance(model_spec, ModelSpec)
     assert model_spec.model_name == "test_model"
     assert model_spec.zoo_url == "test_zoo"
-    assert model_spec.inference_host_address == "@localhost"
-    assert model_spec.connect_kwargs == {"token": "test"}
-    assert model_spec.load_kwargs == {"threshold": 0.5}
+    assert model_spec.inference_host_address == "@cloud"
+    assert model_spec.connect_kwargs == {}
+    assert model_spec.load_kwargs == {}
 
 
 def test_model_registry_get_methods(sample_models_dict):

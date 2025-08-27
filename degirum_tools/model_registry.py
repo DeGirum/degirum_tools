@@ -109,7 +109,6 @@ class ModelRegistry:
     key_task = "task"
     key_hardware = "hardware"
     key_zoo_url = "zoo_url"
-    key_fps = "fps"
     key_metadata = "metadata"
 
     def __init__(
@@ -171,14 +170,14 @@ class ModelRegistry:
         }
         return ModelRegistry(models=task_models)
 
-    def best_model_spec(
+    def model_specs(
         self,
         inference_host_address: str = "@cloud",
         zoo_url: Optional[str] = None,
         connect_kwargs: dict = {},
         load_kwargs: dict = {},
-    ) -> ModelSpec:
-        """Get the best model specification based on highest FPS.
+    ) -> List[ModelSpec]:
+        """Get model specifications for all models in the registry
 
         Args:
             inference_host_address: Where to run inference for this model
@@ -188,28 +187,35 @@ class ModelRegistry:
 
         Returns:
             ModelSpec instance for the model with highest FPS
+        """
 
-        Raises:
-            RuntimeError: If no models are available in the registry
+        return [
+            ModelSpec(
+                model_name=model_name,
+                zoo_url=model_info[self.key_zoo_url] if zoo_url is None else zoo_url,
+                inference_host_address=inference_host_address,
+                connect_kwargs=connect_kwargs,
+                load_kwargs=load_kwargs,
+            )
+            for model_name, model_info in self.models.items()
+        ]
+
+    def model_spec(self):
+        """
+        Get model specification for the single model in the registry.
+        Raises error if zero or multiple models are present.
+
+        Returns:
+            ModelSpec instance for the single model
         """
 
         if not self.models:
             raise RuntimeError("No models available in the registry")
-
-        # Find model with highest FPS
-        best_model_name = max(
-            self.models,
-            key=lambda k: self.models[k].get(self.key_fps, 0),
-        )
-        best_model_info = self.models[best_model_name]
-
-        return ModelSpec(
-            model_name=best_model_name,
-            zoo_url=best_model_info[self.key_zoo_url] if zoo_url is None else zoo_url,
-            inference_host_address=inference_host_address,
-            connect_kwargs=connect_kwargs,
-            load_kwargs=load_kwargs,
-        )
+        if len(self.models) != 1:
+            raise RuntimeError(
+                "Multiple models available in the registry; use model_specs() instead"
+            )
+        return self.model_specs()[0]
 
     def get_tasks(self) -> List[str]:
         """Get list of unique tasks in the registry.
@@ -242,7 +248,6 @@ properties:
           - {key_task}
           - {key_hardware}
           - {key_zoo_url}
-          - {key_fps}
         properties:
           {key_description}:
             type: string
@@ -252,9 +257,6 @@ properties:
             type: string
           {key_zoo_url}:
             type: string
-          {key_fps}:
-            type: number
-            minimum: 0
           {key_metadata}:
             type: object
         additionalProperties: false
