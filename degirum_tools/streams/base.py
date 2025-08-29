@@ -505,9 +505,13 @@ class Gizmo(ABC):
         Returns:
             Gizmo: The source gizmo (other_gizmo), enabling chaining of connections.
         """
-        g, inp = other_gizmo if isinstance(other_gizmo, tuple) else (other_gizmo, 0)
-        g.connect_to(self, inp)
-        return g
+        if other_gizmo is not None:
+            g, inp = other_gizmo if isinstance(other_gizmo, tuple) else (other_gizmo, 0)
+            g.connect_to(self, inp)
+            return g
+        else:
+            # to allow chaining with Nones, skipping them
+            return self
 
     def send_result(self, data: Optional[StreamData]):
         """Send a result to all connected output streams.
