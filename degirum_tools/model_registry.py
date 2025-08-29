@@ -29,7 +29,7 @@ class ModelSpec:
         model_name: Exact model name to load
         zoo_url: Zoo URL where this model is hosted
         inference_host_address: Where to run inference for this model
-        connect_kwargs: Additional keyword arguments for zoo connection (e.g., token, etc.)
+        token: Optional token for zoo connection
         load_kwargs: Additional keyword arguments for model loading
 
     Example:
@@ -37,7 +37,7 @@ class ModelSpec:
         ...     model_name="yolov8n_relu6_face--640x640_quant_n2x_orca1_1",
         ...     zoo_url="https://cs.degirum.com/degirum/orca",
         ...     inference_host_address="@localhost",
-        ...     connect_kwargs={"token": "auth_token"},
+        ...     token="auth_token",
         ...     load_kwargs={"output_confidence_threshold": 0.1}
         ... )
     """
@@ -45,7 +45,7 @@ class ModelSpec:
     model_name: str
     zoo_url: str = "degirum/public"
     inference_host_address: str = "@cloud"
-    connect_kwargs: Dict[str, Any] = field(default_factory=dict)
+    token: Optional[str] = None
     load_kwargs: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
@@ -56,14 +56,12 @@ class ModelSpec:
             raise ValueError("zoo_url cannot be empty")
         if not self.inference_host_address:
             raise ValueError("inference_host_address cannot be empty")
-        if self.connect_kwargs is None:
-            self.connect_kwargs = {}
         if self.load_kwargs is None:
             self.load_kwargs = {}
 
     def zoo_connect(self):
         """
-        Connect to zoo with connect_kwargs (this is where token should go)
+        Connect to a model zoo.
         Use this method to optimize multiple model loads from the same zoo.
         Otherwise, load_model() will connect to zoo automatically.
 
@@ -71,9 +69,7 @@ class ModelSpec:
             Connected zoo instance
         """
 
-        zoo = dg.connect(
-            self.inference_host_address, self.zoo_url, **self.connect_kwargs
-        )
+        zoo = dg.connect(self.inference_host_address, self.zoo_url, self.token)
         return zoo
 
     def load_model(self, zoo=None):
@@ -99,7 +95,7 @@ class ModelRegistry:
 
     Typical usage:
         >>> registry = ModelRegistry()
-        >>> model_spec = registry.for_task("face_detection").for_hardware("N2X/ORCA1").best_model_spec()
+        >>> model_spec = registry.for_task("face_detection").for_hardware("N2X/ORCA1").model_spec()
         >>> model = model_spec.load_model()
     """
 
@@ -172,9 +168,10 @@ class ModelRegistry:
 
     def model_specs(
         self,
+        *,
         inference_host_address: str = "@cloud",
         zoo_url: Optional[str] = None,
-        connect_kwargs: dict = {},
+        token: Optional[str] = None,
         load_kwargs: dict = {},
     ) -> List[ModelSpec]:
         """Get model specifications for all models in the registry
@@ -182,7 +179,7 @@ class ModelRegistry:
         Args:
             inference_host_address: Where to run inference for this model
             zoo_url: Optional override for the model's zoo_url (to be used for local zoos)
-            connect_kwargs: Additional keyword arguments for zoo connection (e.g., "token", etc.)
+            token: Optional token for zoo connection
             load_kwargs: Additional keyword arguments for model loading (passed to PySDK load_model())
 
         Returns:
@@ -194,16 +191,19 @@ class ModelRegistry:
                 model_name=model_name,
                 zoo_url=model_info[self.key_zoo_url] if zoo_url is None else zoo_url,
                 inference_host_address=inference_host_address,
-                connect_kwargs=connect_kwargs,
+                token=token,
                 load_kwargs=load_kwargs,
             )
             for model_name, model_info in self.models.items()
         ]
 
-    def model_spec(self):
+    def model_spec(self, **kwargs) -> ModelSpec:
         """
         Get model specification for the single model in the registry.
         Raises error if zero or multiple models are present.
+
+        Args:
+            see model_specs()
 
         Returns:
             ModelSpec instance for the single model

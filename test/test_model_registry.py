@@ -145,17 +145,17 @@ def test_model_registry_model_specs(sample_models_dict):
     # Check default parameters for all specs
     for spec in specs:
         assert spec.inference_host_address == "@cloud"
-        assert spec.connect_kwargs == {}
+        assert spec.token is None
         assert spec.load_kwargs == {}
 
     # Test model_specs with custom parameters
-    connect_kwargs = {"token": "test_token"}
+    token = "test_token"
     load_kwargs = {"confidence": 0.8}
 
     specs = registry.model_specs(
         inference_host_address="@localhost",
         zoo_url="custom_zoo",
-        connect_kwargs=connect_kwargs,
+        token=token,
         load_kwargs=load_kwargs,
     )
 
@@ -164,7 +164,7 @@ def test_model_registry_model_specs(sample_models_dict):
     for spec in specs:
         assert spec.zoo_url == "custom_zoo"  # Overridden
         assert spec.inference_host_address == "@localhost"
-        assert spec.connect_kwargs == connect_kwargs
+        assert spec.token == token
         assert spec.load_kwargs == load_kwargs
 
     # Test model_spec with single model
@@ -176,7 +176,7 @@ def test_model_registry_model_specs(sample_models_dict):
     assert single_spec.model_name == "face_detector_orca"
     assert single_spec.zoo_url == "https://cs.degirum.com/degirum/orca"
     assert single_spec.inference_host_address == "@cloud"
-    assert single_spec.connect_kwargs == {}
+    assert single_spec.token is None
     assert single_spec.load_kwargs == {}
 
     # Test with no models
@@ -209,7 +209,7 @@ def test_model_registry_model_specs(sample_models_dict):
     assert model_spec.model_name == "test_model"
     assert model_spec.zoo_url == "test_zoo"
     assert model_spec.inference_host_address == "@cloud"
-    assert model_spec.connect_kwargs == {}
+    assert model_spec.token is None
     assert model_spec.load_kwargs == {}
 
 
