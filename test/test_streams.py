@@ -120,8 +120,8 @@ def test_streams_video_source(short_video):
         assert video_meta[source.key_frame_id] == i
 
 
-def test_streams_generator_source():
-    """Test for GeneratorSourceGizmo"""
+def test_streams_iterator_source():
+    """Test for IteratorSourceGizmo"""
 
     # Test with numpy arrays
     test_images = []
@@ -142,7 +142,7 @@ def test_streams_generator_source():
             yield img
 
     # Test with generator
-    source = streams.GeneratorSourceGizmo(image_generator())
+    source = streams.IteratorSourceGizmo(image_generator())
     sink = VideoSink()
     streams.Composition(source >> sink).start()
 
@@ -174,8 +174,8 @@ def test_streams_generator_source():
         assert streams.VideoSourceGizmo.key_timestamp in video_meta
 
 
-def test_streams_generator_source_file_paths():
-    """Test GeneratorSourceGizmo with file paths"""
+def test_streams_iterator_source_file_paths():
+    """Test IteratorSourceGizmo with file paths"""
 
     # Get some test image files
     import glob
@@ -189,7 +189,7 @@ def test_streams_generator_source_file_paths():
         for file_path in image_files:
             yield file_path
 
-    source = streams.GeneratorSourceGizmo(file_generator())
+    source = streams.IteratorSourceGizmo(file_generator())
     sink = VideoSink()
     streams.Composition(source >> sink).start()
 
@@ -207,8 +207,8 @@ def test_streams_generator_source_file_paths():
         assert video_meta[streams.VideoSourceGizmo.key_frame_id] == i
 
 
-def test_streams_generator_source_pil_images():
-    """Test GeneratorSourceGizmo with PIL Images"""
+def test_streams_iterator_source_pil_images():
+    """Test IteratorSourceGizmo with PIL Images"""
 
     try:
         from PIL import Image
@@ -225,7 +225,7 @@ def test_streams_generator_source_pil_images():
         for img in pil_images:
             yield img
 
-    source = streams.GeneratorSourceGizmo(pil_generator())
+    source = streams.IteratorSourceGizmo(pil_generator())
     sink = VideoSink()
     streams.Composition(source >> sink).start()
 
@@ -250,8 +250,8 @@ def test_streams_generator_source_pil_images():
         )
 
 
-def test_streams_generator_source_mixed_formats():
-    """Test GeneratorSourceGizmo with mixed input formats"""
+def test_streams_iterator_source_mixed_formats():
+    """Test IteratorSourceGizmo with mixed input formats"""
 
     # Create mixed format inputs
     test_inputs: list = []
@@ -281,7 +281,7 @@ def test_streams_generator_source_mixed_formats():
         for inp in test_inputs:
             yield inp
 
-    source = streams.GeneratorSourceGizmo(mixed_generator())
+    source = streams.IteratorSourceGizmo(mixed_generator())
     sink = VideoSink()
     streams.Composition(source >> sink).start()
 
@@ -298,13 +298,13 @@ def test_streams_generator_source_mixed_formats():
         assert video_meta[streams.VideoSourceGizmo.key_frame_id] == i
 
 
-def test_streams_generator_source_error_handling():
-    """Test GeneratorSourceGizmo error handling"""
+def test_streams_iterator_source_error_handling():
+    """Test IteratorSourceGizmo error handling"""
 
     def invalid_generator():
         yield "non_existent_file.jpg"  # File that doesn't exist
 
-    source = streams.GeneratorSourceGizmo(invalid_generator())
+    source = streams.IteratorSourceGizmo(invalid_generator())
     sink = VideoSink()
 
     # Should raise FileNotFoundError for non-existent file
@@ -314,7 +314,7 @@ def test_streams_generator_source_error_handling():
     def unsupported_type_generator():
         yield 12345  # Unsupported type
 
-    source2 = streams.GeneratorSourceGizmo(unsupported_type_generator())
+    source2 = streams.IteratorSourceGizmo(unsupported_type_generator())
     sink2 = VideoSink()
 
     # Should raise RuntimeError for unsupported type
@@ -322,14 +322,14 @@ def test_streams_generator_source_error_handling():
         streams.Composition(source2 >> sink2).start()
 
 
-def test_streams_generator_source_empty():
-    """Test GeneratorSourceGizmo with empty generator"""
+def test_streams_iterator_source_empty():
+    """Test IteratorSourceGizmo with empty iterator"""
 
     def empty_generator():
         return
         yield  # This will never execute
 
-    source = streams.GeneratorSourceGizmo(empty_generator())
+    source = streams.IteratorSourceGizmo(empty_generator())
     sink = VideoSink()
     streams.Composition(source >> sink).start()
 

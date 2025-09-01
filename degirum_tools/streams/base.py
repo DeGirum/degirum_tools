@@ -494,7 +494,7 @@ class Gizmo(ABC):
         """
         return (self, self.get_input(index))
 
-    def __rshift__(self, other_gizmo: Union[Any, tuple]) -> "Gizmo":
+    def __rshift__(self, other_gizmo: Union[Any, tuple, None]) -> "Gizmo":
         """Connect another gizmo to this gizmo using the `>>` operator.
 
         This implements the right-shift operator, allowing syntax like `source >> target` or `source >> target[input_index]`.
