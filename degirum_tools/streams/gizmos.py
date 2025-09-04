@@ -11,7 +11,7 @@ import queue, copy, time, cv2, numpy as np
 from types import ModuleType
 import degirum as dg
 from abc import abstractmethod
-from typing import Optional, List, Union
+from typing import Iterator, Optional, List, Union
 from contextlib import ExitStack
 
 try:
@@ -160,26 +160,26 @@ class VideoSourceGizmo(Gizmo):
             self._close_video_source()
 
 
-class GeneratorSourceGizmo(Gizmo):
-    """Generator-based source gizmo.
+class IteratorSourceGizmo(Gizmo):
+    """Iterator-based source gizmo.
 
-    Takes a generator that yields images in various formats (file paths, numpy arrays, or PIL images)
+    Takes an iterator that yields images in various formats (file paths, numpy arrays, or PIL images)
     and outputs them as StreamData into the pipeline, similar to VideoSourceGizmo but for static images.
     """
 
     key_file_path = "file_path"  # key for file path meta if input is a file
 
-    def __init__(self, generator):
+    def __init__(self, iterator: Iterator):
         """Constructor.
 
         Args:
-            generator: A generator that yields images. Each yielded item can be:
+            iterator: An iterator that yields images. Each yielded item can be:
                 - str: path to an image file
                 - numpy.ndarray: image as numpy array
                 - PIL.Image: PIL image object
         """
         super().__init__()  # No inputs for source gizmo
-        self._generator = generator
+        self._iterator = iterator
 
     def get_tags(self) -> List[str]:
         """Get list of tags assigned to this gizmo.
@@ -241,14 +241,14 @@ class GeneratorSourceGizmo(Gizmo):
             )
 
     def run(self):
-        """Run the generator source loop.
+        """Run the iterator source loop.
 
-        Iterates over the generator, converts each item to a numpy array image,
+        Iterates over the iterator, converts each item to a numpy array image,
         creates appropriate metadata (similar to VideoSourceGizmo), and sends
         the results downstream.
         """
 
-        for image_input in self._generator:
+        for image_input in self._iterator:
             if self._abort:
                 break
 
@@ -260,8 +260,8 @@ class GeneratorSourceGizmo(Gizmo):
             meta = {
                 VideoSourceGizmo.key_frame_width: width,
                 VideoSourceGizmo.key_frame_height: height,
-                VideoSourceGizmo.key_fps: 0.0,  # No FPS for generator
-                VideoSourceGizmo.key_frame_count: -1,  # Unknown for generator
+                VideoSourceGizmo.key_fps: 0.0,  # No FPS for iterator
+                VideoSourceGizmo.key_frame_count: -1,  # Unknown for iterator
                 VideoSourceGizmo.key_frame_id: self.result_cnt,
                 VideoSourceGizmo.key_timestamp: time.time(),
                 self.key_file_path: image_input if isinstance(image_input, str) else "",
@@ -802,6 +802,14 @@ class AiObjectDetectionCroppingGizmo(Gizmo):
         """
         return [self.name, tag_crop]
 
+    def require_tags(self, inp: int) -> List[str]:
+        """Get the list of meta tags this gizmo requires in upstream meta for a specific input.
+
+        Returns:
+            List[str]: Tags required by this gizmo in upstream meta for the specified input.
+        """
+        return [tag_inference]
+
     def run(self):
         """Run the object cropping loop.
 
@@ -906,6 +914,17 @@ class CropCombiningGizmo(Gizmo):
         # Inputs 1..N are for cropped results (fixed depth, no dropping to avoid desync)
         input_defs = [(0, False)] + [(stream_depth, False)] * crop_inputs_num
         super().__init__(input_defs)
+
+    def require_tags(self, inp: int) -> List[str]:
+        """Get the list of meta tags this gizmo requires in upstream meta for a specific input.
+
+        Returns:
+            List[str]: Tags required by this gizmo in upstream meta for the specified input.
+        """
+        if inp == 0:
+            return [tag_video]
+        else:
+            return [tag_video, tag_crop, tag_inference]
 
     def run(self):
         """Run the crop combining loop.
@@ -1101,6 +1120,14 @@ class AiResultCombiningGizmo(Gizmo):
         """
         return [self.name, tag_inference]
 
+    def require_tags(self, inp: int) -> List[str]:
+        """Get the list of meta tags this gizmo requires in upstream meta for a specific input.
+
+        Returns:
+            List[str]: Tags required by this gizmo in upstream meta for the specified input.
+        """
+        return [tag_inference]
+
     def run(self):
         """Run the result combining loop.
 
@@ -1233,6 +1260,14 @@ class AiAnalyzerGizmo(Gizmo):
         """
         return [self.name, tag_inference, tag_analyzer]
 
+    def require_tags(self, inp: int) -> List[str]:
+        """Get the list of meta tags this gizmo requires in upstream meta for a specific input.
+
+        Returns:
+            List[str]: Tags required by this gizmo in upstream meta for the specified input.
+        """
+        return [tag_inference]
+
     def run(self):
         """Run the analyzer processing loop.
 
@@ -1328,6 +1363,14 @@ class FPSStabilizingGizmo(Gizmo):
             allow_drop (bool): If True, allow dropping frames if the input queue is full. Defaults to False.
         """
         super().__init__([(stream_depth, allow_drop)])
+
+    def require_tags(self, inp):
+        """Get the list of meta tags this gizmo requires in upstream meta for a specific input.
+
+        Returns:
+            List[str]: Tags required by this gizmo in upstream meta for the specified input.
+        """
+        return [tag_video]
 
     def run(self):
         """Run the FPS stabilizing loop.

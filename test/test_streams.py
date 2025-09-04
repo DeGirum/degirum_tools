@@ -120,8 +120,8 @@ def test_streams_video_source(short_video):
         assert video_meta[source.key_frame_id] == i
 
 
-def test_streams_generator_source():
-    """Test for GeneratorSourceGizmo"""
+def test_streams_iterator_source():
+    """Test for IteratorSourceGizmo"""
 
     # Test with numpy arrays
     test_images = []
@@ -142,7 +142,7 @@ def test_streams_generator_source():
             yield img
 
     # Test with generator
-    source = streams.GeneratorSourceGizmo(image_generator())
+    source = streams.IteratorSourceGizmo(image_generator())
     sink = VideoSink()
     streams.Composition(source >> sink).start()
 
@@ -174,8 +174,8 @@ def test_streams_generator_source():
         assert streams.VideoSourceGizmo.key_timestamp in video_meta
 
 
-def test_streams_generator_source_file_paths():
-    """Test GeneratorSourceGizmo with file paths"""
+def test_streams_iterator_source_file_paths():
+    """Test IteratorSourceGizmo with file paths"""
 
     # Get some test image files
     import glob
@@ -189,7 +189,7 @@ def test_streams_generator_source_file_paths():
         for file_path in image_files:
             yield file_path
 
-    source = streams.GeneratorSourceGizmo(file_generator())
+    source = streams.IteratorSourceGizmo(file_generator())
     sink = VideoSink()
     streams.Composition(source >> sink).start()
 
@@ -207,8 +207,8 @@ def test_streams_generator_source_file_paths():
         assert video_meta[streams.VideoSourceGizmo.key_frame_id] == i
 
 
-def test_streams_generator_source_pil_images():
-    """Test GeneratorSourceGizmo with PIL Images"""
+def test_streams_iterator_source_pil_images():
+    """Test IteratorSourceGizmo with PIL Images"""
 
     try:
         from PIL import Image
@@ -225,7 +225,7 @@ def test_streams_generator_source_pil_images():
         for img in pil_images:
             yield img
 
-    source = streams.GeneratorSourceGizmo(pil_generator())
+    source = streams.IteratorSourceGizmo(pil_generator())
     sink = VideoSink()
     streams.Composition(source >> sink).start()
 
@@ -250,8 +250,8 @@ def test_streams_generator_source_pil_images():
         )
 
 
-def test_streams_generator_source_mixed_formats():
-    """Test GeneratorSourceGizmo with mixed input formats"""
+def test_streams_iterator_source_mixed_formats():
+    """Test IteratorSourceGizmo with mixed input formats"""
 
     # Create mixed format inputs
     test_inputs: list = []
@@ -281,7 +281,7 @@ def test_streams_generator_source_mixed_formats():
         for inp in test_inputs:
             yield inp
 
-    source = streams.GeneratorSourceGizmo(mixed_generator())
+    source = streams.IteratorSourceGizmo(mixed_generator())
     sink = VideoSink()
     streams.Composition(source >> sink).start()
 
@@ -298,13 +298,13 @@ def test_streams_generator_source_mixed_formats():
         assert video_meta[streams.VideoSourceGizmo.key_frame_id] == i
 
 
-def test_streams_generator_source_error_handling():
-    """Test GeneratorSourceGizmo error handling"""
+def test_streams_iterator_source_error_handling():
+    """Test IteratorSourceGizmo error handling"""
 
     def invalid_generator():
         yield "non_existent_file.jpg"  # File that doesn't exist
 
-    source = streams.GeneratorSourceGizmo(invalid_generator())
+    source = streams.IteratorSourceGizmo(invalid_generator())
     sink = VideoSink()
 
     # Should raise FileNotFoundError for non-existent file
@@ -314,7 +314,7 @@ def test_streams_generator_source_error_handling():
     def unsupported_type_generator():
         yield 12345  # Unsupported type
 
-    source2 = streams.GeneratorSourceGizmo(unsupported_type_generator())
+    source2 = streams.IteratorSourceGizmo(unsupported_type_generator())
     sink2 = VideoSink()
 
     # Should raise RuntimeError for unsupported type
@@ -322,14 +322,14 @@ def test_streams_generator_source_error_handling():
         streams.Composition(source2 >> sink2).start()
 
 
-def test_streams_generator_source_empty():
-    """Test GeneratorSourceGizmo with empty generator"""
+def test_streams_iterator_source_empty():
+    """Test IteratorSourceGizmo with empty iterator"""
 
     def empty_generator():
         return
         yield  # This will never execute
 
-    source = streams.GeneratorSourceGizmo(empty_generator())
+    source = streams.IteratorSourceGizmo(empty_generator())
     sink = VideoSink()
     streams.Composition(source >> sink).start()
 
@@ -1118,3 +1118,91 @@ def test_streams_load_composition(zoo_dir, detection_model_name):
                 - [source, unknown]
             """
         )
+
+
+def test_streams_require_tags_and_check_requirements():
+    """Test for Gizmo.require_tags() and check_requirements() logic"""
+
+    # Minimal Gizmo subclass with custom require_tags and get_tags
+    class SourceGizmo(streams.Gizmo):
+        def run(self):
+            pass
+
+        def get_tags(self):
+            return ["SourceTag"]
+
+    class MiddleGizmo(streams.Gizmo):
+        def run(self):
+            pass
+
+        def get_tags(self):
+            return ["MiddleTag"]
+
+        def require_tags(self, inp):
+            return ["SourceTag"]
+
+    class SinkGizmo(streams.Gizmo):
+        def run(self):
+            pass
+
+        def require_tags(self, inp):
+            return ["MiddleTag", "SourceTag"]
+
+    # Compose a valid pipeline: Source -> Middle -> Sink
+    src1 = SourceGizmo()
+    mid1 = MiddleGizmo([(0, False)])
+    sink1 = SinkGizmo([(0, False)])
+
+    # Should not raise: all requirements are met
+    c = streams.Composition(src1 >> mid1 >> sink1)
+    assert set(g.__class__.__name__ for g in c._gizmos) == {
+        "SourceGizmo",
+        "MiddleGizmo",
+        "SinkGizmo",
+    }
+
+    # Now break the chain: Sink requires MiddleTag, but connect only to Source
+    src2 = SourceGizmo()
+    sink2 = SinkGizmo([(0, False)])
+
+    with pytest.raises(Exception) as excinfo:
+        streams.Composition(src2 >> sink2)
+    assert "unmet tag requirements" in str(excinfo.value)
+
+    # Also test: Middle requires SourceTag, but connect only to Sink (which does not provide it)
+    mid3 = MiddleGizmo([(0, False)])
+    sink3 = SinkGizmo([(0, False)])
+    with pytest.raises(Exception) as excinfo2:
+        streams.Composition(mid3 >> sink3)
+    assert "unmet tag requirements" in str(excinfo2.value)
+
+    # Subtest: Two-input gizmo with different requirements for each input
+    class TwoInputGizmo(streams.Gizmo):
+        def run(self):
+            pass
+
+        def require_tags(self, inp):
+            if inp == 0:
+                return ["SourceTag"]
+            elif inp == 1:
+                return ["SourceTag", "MiddleTag"]
+            return []
+
+    src4 = SourceGizmo()
+    mid4 = MiddleGizmo([(0, False)])
+    two_in4 = TwoInputGizmo([(0, False), (0, False)])
+
+    # Should not raise: both requirements are met
+    c = streams.Composition(src4 >> two_in4[0], src4 >> mid4 >> two_in4[1])
+    assert set(g.__class__.__name__ for g in c._gizmos) >= {
+        "SourceGizmo",
+        "MiddleGizmo",
+        "TwoInputGizmo",
+    }
+
+    # Should raise: only one requirement is met (input 1 missing MiddleTag)
+    src5 = SourceGizmo()
+    two_in5 = TwoInputGizmo([(0, False), (0, False)])
+    with pytest.raises(Exception) as excinfo3:
+        streams.Composition(src5 >> two_in5[0])
+    assert "unmet tag requirements" in str(excinfo3.value)
