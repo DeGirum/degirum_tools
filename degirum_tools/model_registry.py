@@ -172,7 +172,7 @@ class ModelRegistry:
         inference_host_address: str = "@cloud",
         zoo_url: Optional[str] = None,
         token: Optional[str] = None,
-        load_kwargs: dict = {},
+        load_kwargs: Optional[dict] = None,
     ) -> List[ModelSpec]:
         """Get model specifications for all models in the registry
 
@@ -192,7 +192,7 @@ class ModelRegistry:
                 zoo_url=model_info[self.key_zoo_url] if zoo_url is None else zoo_url,
                 inference_host_address=inference_host_address,
                 token=token,
-                load_kwargs=load_kwargs,
+                load_kwargs=load_kwargs if load_kwargs is not None else {},
             )
             for model_name, model_info in self.models.items()
         ]

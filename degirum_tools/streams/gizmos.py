@@ -163,7 +163,7 @@ class VideoSourceGizmo(Gizmo):
 class IteratorSourceGizmo(Gizmo):
     """Iterator-based source gizmo.
 
-    Takes a iterator that yields images in various formats (file paths, numpy arrays, or PIL images)
+    Takes an iterator that yields images in various formats (file paths, numpy arrays, or PIL images)
     and outputs them as StreamData into the pipeline, similar to VideoSourceGizmo but for static images.
     """
 
