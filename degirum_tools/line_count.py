@@ -652,7 +652,7 @@ class LineCounter(ResultAnalyzerBase):
             line (list or np.ndarray): Two endpoints of a line [x1, y1, x2, y2].
 
         Returns:
-            np.ndarray: Vector representing the direction of the line (x2 - x1, y2 - y1).
+            vector (np.ndarray): Direction vector of the line `(x2 - x1, y2 - y1)`.
         """
         return np.array([line[2] - line[0], line[3] - line[1]])
 
