@@ -236,7 +236,14 @@ class ModelRegistry:
         """
         return sorted({v[self.key_hardware] for v in self.models.values()})
 
-    # configuration file schema for validation
+    """
+    YAML/JSON schema for validating model registry configuration files.
+    This schema ensures that the configuration file contains a top-level '{key_models}' object,
+    where each key is a model name matching the pattern "^[a-zA-Z0-9_-]+$". Each model entry must
+    specify required fields: '{key_description}', '{key_task}', '{key_hardware}', and '{key_zoo_url}'.
+    Optional metadata can be provided via '{key_metadata}'. No additional properties are allowed at
+    any level, enforcing strict structure for registry files.
+    """
     schema_text = f"""
 
 type: object
