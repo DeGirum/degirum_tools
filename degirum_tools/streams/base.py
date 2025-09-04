@@ -422,6 +422,14 @@ class Gizmo(ABC):
         """
         return [self.name]
 
+    def require_tags(self, inp: int) -> List[str]:
+        """Get the list of meta tags this gizmo requires in upstream meta for a specific input.
+
+        Returns:
+            List[str]: Tags required by this gizmo in upstream meta for the specified input.
+        """
+        return []
+
     def get_input(self, inp: int) -> Stream:
         """Get a specific input stream by index.
 
@@ -582,14 +590,27 @@ class Composition:
         self._lock = threading.Lock()
         self._threads: List[threading.Thread] = []
 
+        def check_requirements(g, connected):
+            required_tags = {tag for inp in range(len(g.get_inputs())) for tag in g.require_tags(inp)}
+            upstream_tags = {tag for c in connected if c != g for tag in c.get_tags()}
+            if not required_tags.issubset(upstream_tags):
+                raise Exception(
+                    f"Gizmo {g.name} has unmet tag requirements in the provided gizmo set: "
+                    f"required tags: {required_tags}, tags found in upstream gizmos: {upstream_tags}"
+                )
+
         # collect all connected gizmos
         all_gizmos: set = set()
         for g in gizmos:
             if isinstance(g, Iterator):
                 for gi in g:
-                    all_gizmos |= gi.get_connected()
+                    connected = gi.get_connected()
+                    check_requirements(gi, connected)
+                    all_gizmos |= connected
             elif isinstance(g, Gizmo):
-                all_gizmos |= g.get_connected()
+                connected = g.get_connected()
+                check_requirements(g, connected)
+                all_gizmos |= connected
             else:
                 raise Exception(f"Invalid argument type {type(g)}")
 

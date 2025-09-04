@@ -1118,3 +1118,91 @@ def test_streams_load_composition(zoo_dir, detection_model_name):
                 - [source, unknown]
             """
         )
+
+
+def test_streams_require_tags_and_check_requirements():
+    """Test for Gizmo.require_tags() and check_requirements() logic"""
+
+    # Minimal Gizmo subclass with custom require_tags and get_tags
+    class SourceGizmo(streams.Gizmo):
+        def run(self):
+            pass
+
+        def get_tags(self):
+            return ["SourceTag"]
+
+    class MiddleGizmo(streams.Gizmo):
+        def run(self):
+            pass
+
+        def get_tags(self):
+            return ["MiddleTag"]
+
+        def require_tags(self, inp):
+            return ["SourceTag"]
+
+    class SinkGizmo(streams.Gizmo):
+        def run(self):
+            pass
+
+        def require_tags(self, inp):
+            return ["MiddleTag", "SourceTag"]
+
+    # Compose a valid pipeline: Source -> Middle -> Sink
+    src1 = SourceGizmo()
+    mid1 = MiddleGizmo([(0, False)])
+    sink1 = SinkGizmo([(0, False)])
+
+    # Should not raise: all requirements are met
+    c = streams.Composition(src1 >> mid1 >> sink1)
+    assert set(g.__class__.__name__ for g in c._gizmos) == {
+        "SourceGizmo",
+        "MiddleGizmo",
+        "SinkGizmo",
+    }
+
+    # Now break the chain: Sink requires MiddleTag, but connect only to Source
+    src2 = SourceGizmo()
+    sink2 = SinkGizmo([(0, False)])
+
+    with pytest.raises(Exception) as excinfo:
+        streams.Composition(src2 >> sink2)
+    assert "unmet tag requirements" in str(excinfo.value)
+
+    # Also test: Middle requires SourceTag, but connect only to Sink (which does not provide it)
+    mid3 = MiddleGizmo([(0, False)])
+    sink3 = SinkGizmo([(0, False)])
+    with pytest.raises(Exception) as excinfo2:
+        streams.Composition(mid3 >> sink3)
+    assert "unmet tag requirements" in str(excinfo2.value)
+
+    # Subtest: Two-input gizmo with different requirements for each input
+    class TwoInputGizmo(streams.Gizmo):
+        def run(self):
+            pass
+
+        def require_tags(self, inp):
+            if inp == 0:
+                return ["SourceTag"]
+            elif inp == 1:
+                return ["SourceTag", "MiddleTag"]
+            return []
+
+    src4 = SourceGizmo()
+    mid4 = MiddleGizmo([(0, False)])
+    two_in4 = TwoInputGizmo([(0, False), (0, False)])
+
+    # Should not raise: both requirements are met
+    c = streams.Composition(src4 >> two_in4[0], src4 >> mid4 >> two_in4[1])
+    assert set(g.__class__.__name__ for g in c._gizmos) >= {
+        "SourceGizmo",
+        "MiddleGizmo",
+        "TwoInputGizmo",
+    }
+
+    # Should raise: only one requirement is met (input 1 missing MiddleTag)
+    src5 = SourceGizmo()
+    two_in5 = TwoInputGizmo([(0, False), (0, False)])
+    with pytest.raises(Exception) as excinfo3:
+        streams.Composition(src5 >> two_in5[0])
+    assert "unmet tag requirements" in str(excinfo3.value)

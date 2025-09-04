@@ -802,6 +802,14 @@ class AiObjectDetectionCroppingGizmo(Gizmo):
         """
         return [self.name, tag_crop]
 
+    def require_tags(self, inp: int) -> List[str]:
+        """Get the list of meta tags this gizmo requires in upstream meta for a specific input.
+
+        Returns:
+            List[str]: Tags required by this gizmo in upstream meta for the specified input.
+        """
+        return [tag_inference]
+
     def run(self):
         """Run the object cropping loop.
 
@@ -906,6 +914,17 @@ class CropCombiningGizmo(Gizmo):
         # Inputs 1..N are for cropped results (fixed depth, no dropping to avoid desync)
         input_defs = [(0, False)] + [(stream_depth, False)] * crop_inputs_num
         super().__init__(input_defs)
+
+    def require_tags(self, inp: int) -> List[str]:
+        """Get the list of meta tags this gizmo requires in upstream meta for a specific input.
+
+        Returns:
+            List[str]: Tags required by this gizmo in upstream meta for the specified input.
+        """
+        if inp == 0:
+            return [tag_video]
+        else:
+            return [tag_video, tag_crop, tag_inference]
 
     def run(self):
         """Run the crop combining loop.
@@ -1101,6 +1120,14 @@ class AiResultCombiningGizmo(Gizmo):
         """
         return [self.name, tag_inference]
 
+    def require_tags(self, inp: int) -> List[str]:
+        """Get the list of meta tags this gizmo requires in upstream meta for a specific input.
+
+        Returns:
+            List[str]: Tags required by this gizmo in upstream meta for the specified input.
+        """
+        return [tag_inference]
+
     def run(self):
         """Run the result combining loop.
 
@@ -1233,6 +1260,14 @@ class AiAnalyzerGizmo(Gizmo):
         """
         return [self.name, tag_inference, tag_analyzer]
 
+    def require_tags(self, inp: int) -> List[str]:
+        """Get the list of meta tags this gizmo requires in upstream meta for a specific input.
+
+        Returns:
+            List[str]: Tags required by this gizmo in upstream meta for the specified input.
+        """
+        return [tag_inference]
+
     def run(self):
         """Run the analyzer processing loop.
 
@@ -1328,6 +1363,14 @@ class FPSStabilizingGizmo(Gizmo):
             allow_drop (bool): If True, allow dropping frames if the input queue is full. Defaults to False.
         """
         super().__init__([(stream_depth, allow_drop)])
+
+    def require_tags(self, inp):
+        """Get the list of meta tags this gizmo requires in upstream meta for a specific input.
+
+        Returns:
+            List[str]: Tags required by this gizmo in upstream meta for the specified input.
+        """
+        return [tag_video]
 
     def run(self):
         """Run the FPS stabilizing loop.
