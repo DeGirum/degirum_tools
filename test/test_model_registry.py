@@ -23,25 +23,28 @@ def sample_models_dict():
             "task": "face_detection",
             "hardware": "N2X/ORCA1",
             "zoo_url": "https://cs.degirum.com/degirum/orca",
-            "metadata": {"input_size": "640x640"},
+            "metadata": {"input_size": [640, 640]},
         },
         "face_detector_cpu": {
             "description": "Face detection model for CPU",
             "task": "face_detection",
             "hardware": "N2X/CPU",
             "zoo_url": "degirum/public",
+            "metadata": {"input_size": [112, 112]},
         },
         "object_detector_orca": {
             "description": "Object detection model for ORCA",
             "task": "object_detection",
             "hardware": "N2X/ORCA1",
             "zoo_url": "https://cs.degirum.com/degirum/orca",
+            "metadata": {"input_size": [640, 640]},
         },
         "segmentation_cpu": {
             "description": "Segmentation model for CPU",
             "task": "segmentation",
             "hardware": "N2X/CPU",
             "zoo_url": "degirum/public",
+            "metadata": {"input_size": [112, 112]},
         },
     }
 
@@ -147,6 +150,8 @@ def test_model_registry_model_specs(sample_models_dict):
         assert spec.inference_host_address == "@cloud"
         assert spec.token is None
         assert spec.load_kwargs == {}
+        model_metadata = sample_models_dict[spec.model_name].get("metadata", {})
+        assert spec.metadata == model_metadata
 
     # Test model_specs with custom parameters
     token = "test_token"
@@ -178,6 +183,8 @@ def test_model_registry_model_specs(sample_models_dict):
     assert single_spec.inference_host_address == "@cloud"
     assert single_spec.token is None
     assert single_spec.load_kwargs == {}
+    model_metadata = sample_models_dict[single_spec.model_name].get("metadata", {})
+    assert single_spec.metadata == model_metadata
 
     # Test with no models
     empty_registry = ModelRegistry(models={})
@@ -211,6 +218,10 @@ def test_model_registry_model_specs(sample_models_dict):
     assert model_spec.inference_host_address == "@cloud"
     assert model_spec.token is None
     assert model_spec.load_kwargs == {}
+    assert model_spec.metadata == models_dict[model_spec.model_name].get("metadata", {})
+
+    for name, model in registry.models.items():
+        assert "metadata" in model or model.get("metadata", {}) == {}
 
 
 def test_model_registry_get_methods(sample_models_dict):

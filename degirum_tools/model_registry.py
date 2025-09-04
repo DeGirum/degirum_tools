@@ -31,6 +31,7 @@ class ModelSpec:
         inference_host_address: Where to run inference for this model
         token: Optional token for zoo connection
         load_kwargs: Additional keyword arguments for model loading
+        metadata: Optional metadata dictionary for additional information (usually taken from model registry)
 
     Example:
         >>> detector_spec = ModelSpec(
@@ -47,6 +48,7 @@ class ModelSpec:
     inference_host_address: str = "@cloud"
     token: Optional[str] = None
     load_kwargs: Dict[str, Any] = field(default_factory=dict)
+    metadata: Optional[dict] = field(default_factory=dict)
 
     def __post_init__(self):
         """Validate model specification after initialization."""
@@ -193,6 +195,7 @@ class ModelRegistry:
                 inference_host_address=inference_host_address,
                 token=token,
                 load_kwargs=load_kwargs if load_kwargs is not None else {},
+                metadata=model_info.get(self.key_metadata, {}),
             )
             for model_name, model_info in self.models.items()
         ]
