@@ -39,7 +39,7 @@ Each entry in ``models.yaml`` defines a model with a short key, description,
 task, hardware, and a ``zoo_url`` (which may point to a public or private zoo).
 Optional ``metadata`` may be included for display or selection.
 
-The registry validates the file using a strict schema (see ``schema_text``).
+The registry validates the file using a strict schema.
 
 Model Registry Schema (YAML):
 ```yaml
