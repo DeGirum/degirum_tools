@@ -117,7 +117,7 @@ class ModelSpec:
     ```python
     detector_spec = ModelSpec(
         model_name="yolov8n_relu6_face--640x640_quant_n2x_orca1_1",
-        zoo_url="https://hub.degirum.com/degirum/orca",
+        zoo_url="https://hub.degirum.com/degirum/degirum",
         inference_host_address="@local",
         token="your_token",
         load_kwargs={"output_confidence_threshold": 0.1},
