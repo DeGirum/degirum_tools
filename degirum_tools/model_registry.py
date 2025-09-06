@@ -80,7 +80,7 @@ models:
     description: Face detector
     task: face_detection
     hardware: N2X/ORCA1
-    zoo_url: https://hub.degirum.com/degirum/orca
+    zoo_url: https://hub.degirum.com/degirum/degirum
     metadata:
       author: DeGirum
       license: proprietary
