@@ -24,7 +24,7 @@ Typical usage:
 ```python
 from degirum_tools.model_registry import ModelRegistry
 
-# Load the default models.yaml that ships with degirum_tools
+# Load the models.yaml
 registry = ModelRegistry()
 
 # Filter by task and hardware, then obtain the single spec
