@@ -24,8 +24,8 @@ Typical usage:
 ```python
 from degirum_tools.model_registry import ModelRegistry
 
-# Load the models.yaml
-registry = ModelRegistry()
+# Loads the models.yaml
+registry = ModelRegistry(config_file="models.yaml")
 
 # Filter by task and hardware, then obtain the single spec
 spec = registry.for_task("face_detection").for_hardware("N2X/ORCA1").model_spec()
@@ -76,8 +76,8 @@ additionalProperties: false
 Example models.yaml snippet:
 ```yaml
 models:
-  yolov8_face:
-    description: Small face detector
+  yolov8n_relu6_face--640x640_quant_n2x_orca1_1:
+    description: Face detector
     task: face_detection
     hardware: N2X/ORCA1
     zoo_url: https://hub.degirum.com/degirum/orca
