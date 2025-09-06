@@ -20,8 +20,7 @@ in a consistent and portable way:
 - ``ModelRegistry``: a lightweight registry that reads a YAML file and returns
   one or more ``ModelSpec`` objects filtered by task and/or hardware.
 
-Typical usage
--------------
+Typical usage:
 ```python
 from degirum_tools.model_registry import ModelRegistry
 
@@ -35,13 +34,57 @@ spec = registry.for_task("face_detection").for_hardware("N2X/ORCA1").model_spec(
 model = spec.load_model()
 ```
 
-YAML layout
------------
+YAML layout:
 Each entry in ``models.yaml`` defines a model with a short key, description,
 task, hardware, and a ``zoo_url`` (which may point to a public or private zoo).
 Optional ``metadata`` may be included for display or selection.
 
 The registry validates the file using a strict schema (see ``schema_text``).
+
+Model Registry Schema (YAML):
+```yaml
+type: object
+properties:
+  models:
+    type: object
+    patternProperties:
+      "^[a-zA-Z0-9_-]+$":
+        type: object
+        required:
+          - description
+          - task
+          - hardware
+          - zoo_url
+        properties:
+          description:
+            type: string
+          task:
+            type: string
+          hardware:
+            type: string
+          zoo_url:
+            type: string
+          metadata:
+            type: object
+        additionalProperties: false
+    additionalProperties: false
+required:
+  - models
+additionalProperties: false
+```
+
+Example models.yaml snippet:
+```yaml
+models:
+  yolov8_face:
+    description: Small face detector
+    task: face_detection
+    hardware: N2X/ORCA1
+    zoo_url: https://hub.degirum.com/degirum/orca
+    metadata:
+      author: DeGirum
+      license: proprietary
+```
 """
 
 from dataclasses import dataclass, field
@@ -70,8 +113,7 @@ class ModelSpec:
         metadata (Optional[dict]): Optional metadata dictionary (typically
             copied from the registry entry).
 
-    Examples
-    --------
+    Examples:
     ```python
     detector_spec = ModelSpec(
         model_name="yolov8n_relu6_face--640x640_quant_n2x_orca1_1",
@@ -118,11 +160,9 @@ class ModelSpec:
         self, zoo: Optional[dg.zoo_manager.ZooManager] = None
     ) -> dg.model.Model:
         """Load the model described by this spec.
-
         Args:
             zoo (optional): ZooManager.
-                If omitted, a new connection is created.
-
+            If omitted, a new connection is created.
         Returns:
             Loaded model instance.
         """
@@ -139,8 +179,7 @@ class ModelRegistry:
     Loads model specifications from a YAML configuration file and provides
     query methods to filter by task and hardware.
 
-    Examples
-    --------
+    Examples:
     ```python
     registry = ModelRegistry()
     spec = registry.for_task("face_detection").for_hardware("N2X/ORCA1").model_spec()
@@ -288,7 +327,8 @@ class ModelRegistry:
     where each key is a model name matching the pattern "^[a-zA-Z0-9_-]+$". Each model entry must
     specify required fields: '{key_description}', '{key_task}', '{key_hardware}', and '{key_zoo_url}'.
     Optional metadata can be provided via '{key_metadata}'. No additional properties are allowed at
-    any level, enforcing strict structure for registry files.
+    the top level or within each model entry. The '{key_metadata}' object itself is intentionally
+    free-form to hold any auxiliary information you need.
     """
     schema_text = f"""
 
