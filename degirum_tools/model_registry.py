@@ -8,39 +8,79 @@
 # Also implements a ModelRegistry class for managing multiple model specifications,
 # loading them from a YAML configuration file, and querying based on tasks and hardware.
 #
+"""
+Model Registry Overview
+=======================
+
+This module provides two building blocks for declaring and loading AI models
+in a consistent and portable way:
+
+- ``ModelSpec``: a small dataclass that describes how to connect to a model zoo
+  and which model to load, with optional token and loader keyword arguments.
+- ``ModelRegistry``: a lightweight registry that reads a YAML file and returns
+  one or more ``ModelSpec`` objects filtered by task and/or hardware.
+
+Typical usage
+-------------
+```python
+from degirum_tools.model_registry import ModelRegistry
+
+# Load the default models.yaml that ships with degirum_tools
+registry = ModelRegistry()
+
+# Filter by task and hardware, then obtain the single spec
+spec = registry.for_task("face_detection").for_hardware("N2X/ORCA1").model_spec()
+
+# Connect and load the model (or pass a preconnected manager via spec.load_model(zoo=...))
+model = spec.load_model()
+```
+
+YAML layout
+-----------
+Each entry in ``models.yaml`` defines a model with a short key, description,
+task, hardware, and a ``zoo_url`` (which may point to a public or private zoo).
+Optional ``metadata`` may be included for display or selection.
+
+The registry validates the file using a strict schema (see ``schema_text``).
+"""
 
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
+import degirum as dg
 import jsonschema
 import yaml
-import degirum as dg
 
 
 @dataclass
 class ModelSpec:
-    """
-    Specification for a single AI model with extensible parameters.
+    """Specification for a single AI model with extensible parameters.
 
     Each model can have its own zoo_url, inference_host_address, and additional parameters for connection and loading.
 
     Attributes:
-        model_name: Exact model name to load
-        zoo_url: Zoo URL where this model is hosted
-        inference_host_address: Where to run inference for this model
-        token: Optional token for zoo connection
-        load_kwargs: Additional keyword arguments for model loading
-        metadata: Optional metadata dictionary for additional information (usually taken from model registry)
+        model_name (str): Exact model name to load.
+        zoo_url (str): Model zoo URL (for example, ``degirum/public`` or a cloud URL).
+        inference_host_address (str): Where to run inference (for example,
+            ``"@cloud"``, ``"@local"``, or a server IP).
+        token (Optional[str]): Optional token for zoo authentication.
+        load_kwargs (Dict[str, Any]): Extra keyword arguments forwarded to
+                ``load_model``.
+        metadata (Optional[dict]): Optional metadata dictionary (typically
+            copied from the registry entry).
 
-    Example:
-        >>> detector_spec = ModelSpec(
-        ...     model_name="yolov8n_relu6_face--640x640_quant_n2x_orca1_1",
-        ...     zoo_url="https://cs.degirum.com/degirum/orca",
-        ...     inference_host_address="@localhost",
-        ...     token="auth_token",
-        ...     load_kwargs={"output_confidence_threshold": 0.1}
-        ... )
+    Examples
+    --------
+    ```python
+    detector_spec = ModelSpec(
+        model_name="yolov8n_relu6_face--640x640_quant_n2x_orca1_1",
+        zoo_url="https://hub.degirum.com/degirum/orca",
+        inference_host_address="@local",
+        token="your_token",
+        load_kwargs={"output_confidence_threshold": 0.1},
+    )
+    ```
     """
 
     model_name: str
@@ -61,28 +101,30 @@ class ModelSpec:
         if self.load_kwargs is None:
             self.load_kwargs = {}
 
-    def zoo_connect(self):
-        """
-        Connect to a model zoo.
+    def zoo_connect(self) -> dg.zoo_manager.ZooManager:
+        """Connect to a model zoo.
+
         Use this method to optimize multiple model loads from the same zoo.
-        Otherwise, load_model() will connect to zoo automatically.
+        Otherwise, `load_model()` will connect to the zoo automatically.
 
         Returns:
-            Connected zoo instance
+            Connected ZooManager for the specified host/zoo.
         """
 
         zoo = dg.connect(self.inference_host_address, self.zoo_url, self.token)
         return zoo
 
-    def load_model(self, zoo=None):
-        """
-        Load the model using this specification.
+    def load_model(
+        self, zoo: Optional[dg.zoo_manager.ZooManager] = None
+    ) -> dg.model.Model:
+        """Load the model described by this spec.
 
         Args:
-            zoo: Optional pre-connected zoo instance. If None, will connect automatically.
+            zoo (optional): ZooManager.
+                If omitted, a new connection is created.
 
         Returns:
-            Loaded model instance
+            Loaded model instance.
         """
         if zoo is None:
             zoo = self.zoo_connect()
@@ -92,13 +134,18 @@ class ModelSpec:
 
 
 class ModelRegistry:
-    """AI model registry. Centralized model management for specific applications.
-    Loads model specifications from a YAML configuration file and provides query methods.
+    """AI model registry.
+    Centralized model management for specific applications.
+    Loads model specifications from a YAML configuration file and provides
+    query methods to filter by task and hardware.
 
-    Typical usage:
-        >>> registry = ModelRegistry()
-        >>> model_spec = registry.for_task("face_detection").for_hardware("N2X/ORCA1").model_spec()
-        >>> model = model_spec.load_model()
+    Examples
+    --------
+    ```python
+    registry = ModelRegistry()
+    spec = registry.for_task("face_detection").for_hardware("N2X/ORCA1").model_spec()
+    model = spec.load_model()
+    ```
     """
 
     # configuration file dictionary keys
@@ -118,8 +165,11 @@ class ModelRegistry:
         """Initialize model registry from configuration file or provided models dictionary.
 
         Args:
-            models: Optional dictionary of model specifications. If provided, overrides config_file.
-            config_file: Path to YAML configuration file. If None, uses default 'models.yaml' in the same directory.
+            models (dict, optional): Pre-populated model dictionary. Bbypasses
+                reading a YAML file.
+            config_file (Path|str, optional): Path to a YAML configuration
+                file. If ``None``, uses ``models.yaml`` next to
+                this module.
         """
 
         self.models: Dict[str, dict]  # model dictionary
@@ -139,13 +189,14 @@ class ModelRegistry:
             self.models = config.get(self.key_models, {})
 
     def for_hardware(self, hardware: str) -> "ModelRegistry":
-        """Get new model registry with models compatible with specified hardware.
+        """Return a registry filtered by hardware.
 
         Args:
-            hardware: Hardware type in PySDK format RUNTIME/DEVICE, e.g., 'N2X/ORCA1'
+            hardware (str): Hardware type in PySDK format ``RUNTIME/DEVICE``,
+                e.g., ``"N2X/ORCA1"``.
 
         Returns:
-            ModelRegistry instance with filtered models
+            Registry containing only models compatible with the specified runtime/hardware combination.
         """
 
         compatible_models = {
@@ -154,13 +205,14 @@ class ModelRegistry:
         return ModelRegistry(models=compatible_models)
 
     def for_task(self, task: str) -> "ModelRegistry":
-        """Get new model registry with models for specified task.
+        """Return a registry filtered by task.
 
         Args:
-            task: Task name, e.g., 'face_detection', 'object_detection', 'segmentation'
+            task (str): Task name, e.g., ``"face_detection"``,
+                ``"object_detection"``, ``"segmentation"``.
 
         Returns:
-            ModelRegistry instance with filtered models
+            Registry containing only models for the given task.
         """
 
         task_models = {
@@ -176,16 +228,19 @@ class ModelRegistry:
         token: Optional[str] = None,
         load_kwargs: Optional[dict] = None,
     ) -> List[ModelSpec]:
-        """Get model specifications for all models in the registry
+        """Return model specifications for all models in the registry.
 
         Args:
-            inference_host_address: Where to run inference for this model
-            zoo_url: Optional override for the model's zoo_url (to be used for local zoos)
-            token: Optional token for zoo connection
-            load_kwargs: Additional keyword arguments for model loading (passed to PySDK load_model())
+            inference_host_address (str): Where to run inference for each
+                model (for example, ``"@cloud"`` or a server hostname/IP).
+            zoo_url (str, optional): Override the ``zoo_url`` declared per
+                model. Useful for local zoos.
+            token (str, optional): Optional token for zoo authentication.
+            load_kwargs (dict, optional): Extra keyword arguments forwarded to
+                ``load_model`` for each spec.
 
         Returns:
-            ModelSpec instance for the model with highest FPS
+            One ModelSpec per registry entry (after any filters).
         """
 
         return [
@@ -201,15 +256,15 @@ class ModelRegistry:
         ]
 
     def model_spec(self, **kwargs) -> ModelSpec:
-        """
-        Get model specification for the single model in the registry.
-        Raises error if zero or multiple models are present.
+        """Return the single model specification.
+        Raises an error if either zero or multiple models are present.
 
-        Args:
-            see model_specs()
+        Use this only when the registry contains exactly one model (for
+        example, after filtering by task and hardware). Otherwise, a
+        ``RuntimeError`` is raised.
 
         Returns:
-            ModelSpec instance for the single model
+            ModelSpec: The sole model specification in the registry.
         """
 
         if not self.models:
@@ -221,23 +276,14 @@ class ModelRegistry:
         return self.model_specs()[0]
 
     def get_tasks(self) -> List[str]:
-        """Get list of unique tasks in the registry.
-
-        Returns:
-            List of task names
-        """
+        """Return the unique task names present in the registry."""
         return sorted({v[self.key_task] for v in self.models.values()})
 
     def get_hardware(self) -> List[str]:
-        """Get list of unique hardware types in the registry.
-
-        Returns:
-            List of hardware types
-        """
+        """Return the unique hardware types present in the registry."""
         return sorted({v[self.key_hardware] for v in self.models.values()})
 
-    """
-    YAML/JSON schema for validating model registry configuration files.
+    """YAML/JSON schema for validating model registry configuration files.
     This schema ensures that the configuration file contains a top-level '{key_models}' object,
     where each key is a model name matching the pattern "^[a-zA-Z0-9_-]+$". Each model entry must
     specify required fields: '{key_description}', '{key_task}', '{key_hardware}', and '{key_zoo_url}'.
