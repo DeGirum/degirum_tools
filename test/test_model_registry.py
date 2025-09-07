@@ -192,13 +192,6 @@ def test_model_registry_model_specs(sample_models_dict):
     with pytest.raises(RuntimeError, match="No models available in the registry"):
         empty_registry.model_spec()
 
-    # Test with multiple models (should raise error for model_spec)
-    with pytest.raises(
-        RuntimeError,
-        match="Multiple models available in the registry; use model_specs\\(\\) instead",
-    ):
-        face_registry.model_spec()
-
     # integration test using ModelSpec and ModelRegistry together
     models_dict = {
         "test_model": {

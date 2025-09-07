@@ -202,23 +202,19 @@ class ModelRegistry:
 
     def model_spec(self, **kwargs) -> ModelSpec:
         """
-        Get model specification for the single model in the registry.
-        Raises error if zero or multiple models are present.
+        Get model specification for the first model in the registry.
+        Raises error if no models are present.
 
         Args:
             see model_specs()
 
         Returns:
-            ModelSpec instance for the single model
+            ModelSpec instance for the first model in the registry
         """
 
         if not self.models:
             raise RuntimeError("No models available in the registry")
-        if len(self.models) != 1:
-            raise RuntimeError(
-                "Multiple models available in the registry; use model_specs() instead"
-            )
-        return self.model_specs()[0]
+        return self.model_specs(**kwargs)[0]
 
     def get_tasks(self) -> List[str]:
         """Get list of unique tasks in the registry.
