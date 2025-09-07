@@ -185,7 +185,7 @@ class ModelRegistry:
             load_kwargs: Additional keyword arguments for model loading (passed to PySDK load_model())
 
         Returns:
-            ModelSpec instance for the model with highest FPS
+            ModelSpec instances for all models in the registry
         """
 
         return [
