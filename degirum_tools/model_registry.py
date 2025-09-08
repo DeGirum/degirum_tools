@@ -387,18 +387,18 @@ class ModelRegistry:
             }
         )
 
-    f"""
+    """
     YAML/JSON schema for validating model registry configuration files.
-    This schema ensures that the configuration file contains a top-level '{key_models}' object,
+    This schema ensures that the configuration file contains a top-level 'models' object,
     where each key is a model name matching the pattern "^[a-zA-Z0-9_-]+$". Each model entry must
-    specify required fields: '{key_task}', '{key_hardware}', and '{key_zoo_url}'.
-    Optional alias can be provided for each model via '{key_alias}'.
-    Optional metadata dictionary of arbitrary properties can be provided via '{key_metadata}'.
+    specify required fields: 'task', 'hardware', and 'zoo_url'.
+    Optional alias can be provided for each model via 'alias'.
+    Optional metadata dictionary of arbitrary properties can be provided via 'metadata'.
     No additional properties are allowed at model level, enforcing strict structure for registry files.
-    Additionally, a top-level optional '{key_defaults}' object can specify default values for:
-      - {key_inference_host_address}
-      - {key_token}
-      - {key_model_properties}
+    Additionally, a top-level optional 'defaults' object can specify default values for:
+      - inference_host_address
+      - token
+      - model_properties
     """
     schema_text = f"""
 type: object
