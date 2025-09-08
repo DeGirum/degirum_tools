@@ -33,6 +33,7 @@ def sample_models_dict():
             "hardware": ["N2X/CPU"],
             "zoo_url": "degirum/public",
             "metadata": {"input_size": [112, 112], "fps": 10.0},
+            "alias": "cpu_face",
         },
         "object_detector_orca": {
             "description": "Object detection model for ORCA",
@@ -40,6 +41,7 @@ def sample_models_dict():
             "hardware": ["N2X/ORCA1"],
             "zoo_url": "https://cs.degirum.com/degirum/orca",
             "metadata": {"input_size": [640, 640], "fps": 25.0},
+            "alias": "orca_object",
         },
         "segmentation_cpu": {
             "description": "Segmentation model for CPU",
@@ -47,6 +49,7 @@ def sample_models_dict():
             "hardware": ["N2X/CPU"],
             "zoo_url": "degirum/public",
             "metadata": {"input_size": [112, 112], "fps": 5.0},
+            "alias": "cpu_segmentation",
         },
     }
 
@@ -334,6 +337,13 @@ def test_model_registry_get_methods(sample_models_dict, sample_config_dict):
     expected_hardware = ["N2X/CPU", "N2X/ORCA1"]
     assert sorted(hardware) == sorted(expected_hardware)
 
+    # Test get_aliases method
+    aliases = registry.get_aliases()
+    expected_aliases = [
+        model["alias"] for model in sample_models_dict.values() if "alias" in model
+    ]
+    assert sorted(aliases) == sorted(expected_aliases)
+
     # Test with empty registry
     empty_registry = ModelRegistry(
         config={"models": {}, "defaults": sample_config_dict["defaults"]}
@@ -346,3 +356,7 @@ def test_model_registry_get_methods(sample_models_dict, sample_config_dict):
     # Test get_hardware method with empty registry
     empty_hardware = empty_registry.get_hardware()
     assert empty_hardware == []
+
+    # Test get_aliases method with empty registry
+    empty_aliases = empty_registry.get_aliases()
+    assert empty_aliases == []
