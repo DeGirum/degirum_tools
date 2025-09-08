@@ -9,6 +9,7 @@
 
 import pytest
 import yaml
+import requests
 from pathlib import Path
 from unittest.mock import patch, mock_open
 from degirum_tools.model_registry import ModelSpec, ModelRegistry
@@ -16,64 +17,69 @@ from degirum_tools.model_registry import ModelSpec, ModelRegistry
 
 @pytest.fixture
 def sample_models_dict():
-    """Sample models dictionary for testing"""
+    """Sample models dictionary for testing (hardware as list)"""
     return {
         "face_detector_orca": {
             "description": "Face detection model for ORCA",
             "task": "face_detection",
-            "hardware": "N2X/ORCA1",
+            "hardware": ["N2X/ORCA1"],
             "zoo_url": "https://cs.degirum.com/degirum/orca",
-            "metadata": {"input_size": [640, 640]},
+            "metadata": {"input_size": [640, 640], "fps": 30.0},
+            "alias": "orca_face",
         },
         "face_detector_cpu": {
             "description": "Face detection model for CPU",
             "task": "face_detection",
-            "hardware": "N2X/CPU",
+            "hardware": ["N2X/CPU"],
             "zoo_url": "degirum/public",
-            "metadata": {"input_size": [112, 112]},
+            "metadata": {"input_size": [112, 112], "fps": 10.0},
         },
         "object_detector_orca": {
             "description": "Object detection model for ORCA",
             "task": "object_detection",
-            "hardware": "N2X/ORCA1",
+            "hardware": ["N2X/ORCA1"],
             "zoo_url": "https://cs.degirum.com/degirum/orca",
-            "metadata": {"input_size": [640, 640]},
+            "metadata": {"input_size": [640, 640], "fps": 25.0},
         },
         "segmentation_cpu": {
             "description": "Segmentation model for CPU",
             "task": "segmentation",
-            "hardware": "N2X/CPU",
+            "hardware": ["N2X/CPU"],
             "zoo_url": "degirum/public",
-            "metadata": {"input_size": [112, 112]},
+            "metadata": {"input_size": [112, 112], "fps": 5.0},
         },
     }
 
 
 @pytest.fixture
 def sample_config_dict(sample_models_dict):
-    """Sample config dictionary for testing"""
-    return {"models": sample_models_dict}
+    """Sample config dictionary for testing (with defaults)"""
+    return {
+        "models": sample_models_dict,
+        "defaults": {
+            "inference_host_address": "@cloud",
+        },
+    }
 
 
 def test_model_registry_creation(sample_models_dict, sample_config_dict):
     """Test ModelRegistry creation with various methods"""
 
-    # Test creation with models dictionary
-    registry = ModelRegistry(models=sample_models_dict)
-    assert registry.models == sample_models_dict
+    # Test creation with config dictionary
+    registry = ModelRegistry(config=sample_config_dict)
+    assert registry.config["models"] == sample_models_dict
 
     # Test creation with config file
     config_yaml = yaml.dump(sample_config_dict)
     with patch("builtins.open", mock_open(read_data=config_yaml)) as mocked_open:
         registry = ModelRegistry(config_file="test_config.yaml")
-        assert registry.models == sample_config_dict["models"]
+        assert registry.config["models"] == sample_config_dict["models"]
         mocked_open.assert_called_once_with("test_config.yaml", "r")
 
     # Test creation with default config file
     with patch("builtins.open", mock_open(read_data=config_yaml)) as mocked_open:
         registry = ModelRegistry()
-        assert registry.models == sample_config_dict["models"]
-        # Should use the default models.yaml file in the same directory as model_registry.py
+        assert registry.config["models"] == sample_config_dict["models"]
         expected_path = Path(__file__).parent.parent / "degirum_tools" / "models.yaml"
         mocked_open.assert_called_once_with(expected_path, "r")
 
@@ -87,24 +93,41 @@ def test_model_registry_creation(sample_models_dict, sample_config_dict):
             ModelRegistry(config_file="invalid_config.yaml")
         mocked_open.assert_called_once_with("invalid_config.yaml", "r")
 
+    # Test creation with config URL (mock requests.get)
+    class MockResponse:
+        def __init__(self, text, status_code=200):
+            self.text = text
+            self.status_code = status_code
 
-def test_model_registry_filtering_methods(sample_models_dict):
+        def raise_for_status(self):
+            if self.status_code != 200:
+                raise requests.HTTPError(f"Status {self.status_code}")
+
+    with patch(
+        "requests.get", return_value=MockResponse(yaml.dump(sample_config_dict))
+    ) as mock_get:
+        registry = ModelRegistry(config_file="https://example.com/models.yaml")
+        assert registry.config["models"] == sample_models_dict
+        mock_get.assert_called_once_with("https://example.com/models.yaml")
+
+
+def test_model_registry_filtering_methods(sample_models_dict, sample_config_dict):
     """Test for_hardware, for_task, and chained filtering methods"""
 
-    registry = ModelRegistry(models=sample_models_dict)
+    registry = ModelRegistry(config=sample_config_dict)
 
     # Test for_hardware filtering
     orca_registry = registry.for_hardware("N2X/ORCA1")
     expected_orca_models = {
         name: model
         for name, model in sample_models_dict.items()
-        if model.get("hardware") == "N2X/ORCA1"
+        if "N2X/ORCA1" in model.get("hardware", [])
     }
-    assert orca_registry.models == expected_orca_models
+    assert orca_registry.config["models"] == expected_orca_models
 
     # Test for_hardware with no matches
     gpu_registry = registry.for_hardware("GPU")
-    assert gpu_registry.models == {}
+    assert gpu_registry.config["models"] == {}
 
     # Test for_task filtering
     face_registry = registry.for_task("face_detection")
@@ -113,11 +136,41 @@ def test_model_registry_filtering_methods(sample_models_dict):
         for name, model in sample_models_dict.items()
         if model.get("task") == "face_detection"
     }
-    assert face_registry.models == expected_face_models
+    assert face_registry.config["models"] == expected_face_models
 
     # Test for_task with no matches
     classification_registry = registry.for_task("classification")
-    assert classification_registry.models == {}
+    assert classification_registry.config["models"] == {}
+
+    # Test for_alias filtering (using fixture with alias field)
+    alias_registry = ModelRegistry(config=sample_config_dict)
+
+    # for_alias positive
+    alias_filtered = alias_registry.for_alias("orca_face")
+    expected_alias_models = {
+        name: model
+        for name, model in sample_models_dict.items()
+        if "alias" in model and model["alias"] == "orca_face"
+    }
+    assert alias_filtered.config["models"] == expected_alias_models
+
+    # for_alias negative
+    no_alias_filtered = alias_registry.for_alias("nonexistent_alias")
+    assert no_alias_filtered.config["models"] == {}
+
+    # Test for_meta filtering (filter by input_size)
+    meta_registry = ModelRegistry(config=sample_config_dict)
+    meta_filtered = meta_registry.for_meta({"input_size": [640, 640]})
+    expected_meta_models = {
+        name: model
+        for name, model in sample_models_dict.items()
+        if model.get("metadata", {}).get("input_size") == [640, 640]
+    }
+    assert meta_filtered.config["models"] == expected_meta_models
+
+    # for_meta with no matches
+    no_meta_filtered = meta_registry.for_meta({"input_size": [999, 999]})
+    assert no_meta_filtered.config["models"] == {}
 
     # Test chained filtering
     filtered_registry = registry.for_task("face_detection").for_hardware("N2X/ORCA1")
@@ -125,19 +178,19 @@ def test_model_registry_filtering_methods(sample_models_dict):
         name: model
         for name, model in sample_models_dict.items()
         if model.get("task") == "face_detection"
-        and model.get("hardware") == "N2X/ORCA1"
+        and "N2X/ORCA1" in model.get("hardware", [])
     }
-    assert filtered_registry.models == expected_chained_models
+    assert filtered_registry.config["models"] == expected_chained_models
 
 
-def test_model_registry_model_specs(sample_models_dict):
-    """Test model_specs and model_spec methods with various scenarios"""
+def test_model_registry_model_specs(sample_models_dict, sample_config_dict):
+    """Test all_model_specs and top_model_spec methods with various scenarios"""
 
-    # Test model_specs with default parameters
-    registry = ModelRegistry(models=sample_models_dict)
+    # Test all_model_specs with default parameters
+    registry = ModelRegistry(config=sample_config_dict)
     face_registry = registry.for_task("face_detection")
 
-    specs = face_registry.model_specs()
+    specs = face_registry.all_model_specs()
 
     # Should return 2 specs for face detection models
     assert len(specs) == 2
@@ -149,19 +202,19 @@ def test_model_registry_model_specs(sample_models_dict):
     for spec in specs:
         assert spec.inference_host_address == "@cloud"
         assert spec.token is None
-        assert spec.load_kwargs == {}
+        assert spec.model_properties == {}
         model_metadata = sample_models_dict[spec.model_name].get("metadata", {})
         assert spec.metadata == model_metadata
 
-    # Test model_specs with custom parameters
+    # Test all_model_specs with custom parameters
     token = "test_token"
-    load_kwargs = {"confidence": 0.8}
+    model_properties = {"confidence": 0.8}
 
-    specs = registry.model_specs(
+    specs = registry.all_model_specs(
         inference_host_address="@localhost",
         zoo_url="custom_zoo",
         token=token,
-        load_kwargs=load_kwargs,
+        model_properties=model_properties,
     )
 
     # Should return all 4 models with custom parameters
@@ -170,58 +223,106 @@ def test_model_registry_model_specs(sample_models_dict):
         assert spec.zoo_url == "custom_zoo"  # Overridden
         assert spec.inference_host_address == "@localhost"
         assert spec.token == token
-        assert spec.load_kwargs == load_kwargs
+        assert spec.model_properties == model_properties
 
-    # Test model_spec with single model
+    # Test top_model_spec with single model
     single_model_registry = registry.for_task("face_detection").for_hardware(
         "N2X/ORCA1"
     )
 
-    single_spec = single_model_registry.model_spec()
+    single_spec = single_model_registry.top_model_spec()
     assert single_spec.model_name == "face_detector_orca"
     assert single_spec.zoo_url == "https://cs.degirum.com/degirum/orca"
     assert single_spec.inference_host_address == "@cloud"
     assert single_spec.token is None
-    assert single_spec.load_kwargs == {}
+    assert single_spec.model_properties == {}
     model_metadata = sample_models_dict[single_spec.model_name].get("metadata", {})
     assert single_spec.metadata == model_metadata
 
     # Test with no models
-    empty_registry = ModelRegistry(models={})
+    empty_registry = ModelRegistry(
+        config={"models": {}, "defaults": sample_config_dict["defaults"]}
+    )
 
     with pytest.raises(RuntimeError, match="No models available in the registry"):
-        empty_registry.model_spec()
+        empty_registry.top_model_spec()
 
     # integration test using ModelSpec and ModelRegistry together
     models_dict = {
         "test_model": {
             "description": "Test model",
             "task": "detection",
-            "hardware": "CPU",
+            "hardware": ["CPU"],
             "zoo_url": "test_zoo",
         }
     }
-
-    registry = ModelRegistry(models=models_dict)
-    model_spec = registry.model_spec()
+    config = {
+        "models": models_dict,
+        "defaults": sample_config_dict["defaults"],
+    }
+    registry = ModelRegistry(config=config)
+    model_spec = registry.top_model_spec()
 
     assert isinstance(model_spec, ModelSpec)
     assert model_spec.model_name == "test_model"
     assert model_spec.zoo_url == "test_zoo"
     assert model_spec.inference_host_address == "@cloud"
     assert model_spec.token is None
-    assert model_spec.load_kwargs == {}
+    assert model_spec.model_properties == {}
     assert model_spec.metadata == models_dict[model_spec.model_name].get("metadata", {})
 
-    for name, model in registry.models.items():
+    for name, model in registry.config["models"].items():
         assert "metadata" in model or model.get("metadata", {}) == {}
 
+    # Test best_model_spec for highest/lowest fps
+    registry = ModelRegistry(config=sample_config_dict)
+    best_spec = registry.best_model_spec("fps", "max")
+    assert best_spec.model_name == "face_detector_orca"
+    assert isinstance(best_spec.metadata, dict) and best_spec.metadata["fps"] == 30.0
+    worst_spec = registry.best_model_spec("fps", "min")
+    assert worst_spec.model_name == "segmentation_cpu"
+    assert isinstance(worst_spec.metadata, dict) and worst_spec.metadata["fps"] == 5.0
 
-def test_model_registry_get_methods(sample_models_dict):
+    # Test with_defaults functionality
+    # Change defaults and verify all_model_specs reflects new defaults
+    registry = ModelRegistry(config=sample_config_dict)
+    registry2 = registry.with_defaults(
+        inference_host_address="@local",
+        token="abc123",
+        zoo_url="custom_zoo",
+        model_properties={"confidence": 0.8},
+    )
+    specs = registry2.all_model_specs()
+    for spec in specs:
+        assert spec.inference_host_address == "@local"
+        assert spec.token == "abc123"
+        assert spec.zoo_url == "custom_zoo"
+        assert spec.model_properties == {"confidence": 0.8}
+    # Original registry should remain unchanged
+    orig_specs = registry.all_model_specs()
+    for spec in orig_specs:
+        assert spec.inference_host_address == "@cloud"
+        assert spec.token is None
+
+    # test overrides
+    specs = registry2.all_model_specs(
+        inference_host_address="localhost",
+        token="def456",
+        zoo_url="private_zoo",
+        model_properties={"postprocess": "None"},
+    )
+    for spec in specs:
+        assert spec.inference_host_address == "localhost"
+        assert spec.token == "def456"
+        assert spec.zoo_url == "private_zoo"
+        assert spec.model_properties == {"postprocess": "None"}
+
+
+def test_model_registry_get_methods(sample_models_dict, sample_config_dict):
     """Test get_tasks and get_hardware methods with populated and empty registries"""
 
     # Test with populated registry
-    registry = ModelRegistry(models=sample_models_dict)
+    registry = ModelRegistry(config=sample_config_dict)
 
     # Test get_tasks method
     tasks = registry.get_tasks()
@@ -234,7 +335,9 @@ def test_model_registry_get_methods(sample_models_dict):
     assert sorted(hardware) == sorted(expected_hardware)
 
     # Test with empty registry
-    empty_registry = ModelRegistry(models={})
+    empty_registry = ModelRegistry(
+        config={"models": {}, "defaults": sample_config_dict["defaults"]}
+    )
 
     # Test get_tasks method with empty registry
     empty_tasks = empty_registry.get_tasks()
