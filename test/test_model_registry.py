@@ -111,7 +111,7 @@ def test_model_registry_creation(sample_models_dict, sample_config_dict):
     ) as mock_get:
         registry = ModelRegistry(config_file="https://example.com/models.yaml")
         assert registry.config["models"] == sample_models_dict
-        mock_get.assert_called_once_with("https://example.com/models.yaml")
+        mock_get.assert_called_once_with("https://example.com/models.yaml", timeout=5)
 
 
 def test_model_registry_filtering_methods(sample_models_dict, sample_config_dict):
@@ -184,6 +184,16 @@ def test_model_registry_filtering_methods(sample_models_dict, sample_config_dict
         and "N2X/ORCA1" in model.get("hardware", [])
     }
     assert filtered_registry.config["models"] == expected_chained_models
+
+    # Test for_meta with custom predicate: select models with fps > 20
+    meta_registry = ModelRegistry(config=sample_config_dict)
+    meta_filtered = meta_registry.for_meta({"fps": lambda v: v["fps"] > 20})
+    expected_meta_models = {
+        name: model
+        for name, model in sample_models_dict.items()
+        if model.get("metadata", {}).get("fps", 0) > 20
+    }
+    assert meta_filtered.config["models"] == expected_meta_models
 
 
 def test_model_registry_model_specs(sample_models_dict, sample_config_dict):
@@ -318,7 +328,7 @@ def test_model_registry_model_specs(sample_models_dict, sample_config_dict):
         assert spec.inference_host_address == "localhost"
         assert spec.token == "def456"
         assert spec.zoo_url == "private_zoo"
-        assert spec.model_properties == {"postprocess": "None"}
+        assert spec.model_properties == {"confidence": 0.8, "postprocess": "None"}
 
 
 def test_model_registry_get_methods(sample_models_dict, sample_config_dict):

@@ -92,6 +92,13 @@ class ModelSpec:
         # Load model with model_properties
         return zoo.load_model(self.model_name, **self.model_properties)
 
+    def __repr__(self):
+        return (
+            f"ModelSpec(name={self.model_name!r}, zoo={self.zoo_url!r}, "
+            f"host={self.inference_host_address!r}, props={list(self.model_properties.keys())}, "
+            f"meta_keys={list(self.metadata.keys()) if isinstance(self.metadata, dict) else None})"
+        )
+
 
 class ModelRegistry:
     """AI model registry. Centralized model management for specific applications.
@@ -138,8 +145,12 @@ class ModelRegistry:
             if isinstance(config_file, str) and (
                 config_file.startswith("http://") or config_file.startswith("https://")
             ):
-                response = requests.get(config_file)
-                response.raise_for_status()
+
+                response = requests.get(config_file, timeout=5)
+                try:
+                    response.raise_for_status()
+                except requests.HTTPError as e:
+                    raise RuntimeError(f"Failed to fetch registry from URL: {e}") from e
                 config = yaml.safe_load(response.text)
             else:
                 with open(config_file, "r") as f:
@@ -180,13 +191,13 @@ class ModelRegistry:
         new_config = copy.deepcopy(self.config)
 
         defaults = new_config[self.key_defaults]
-        if inference_host_address:
+        if inference_host_address is not None:
             defaults[self.key_inference_host_address] = inference_host_address
-        if zoo_url:
+        if zoo_url is not None:
             defaults[self.key_zoo_url] = zoo_url
-        if token:
+        if token is not None:
             defaults[self.key_token] = token
-        if model_properties:
+        if model_properties is not None:
             defaults[self.key_model_properties] = model_properties
 
         return ModelRegistry(config=new_config)
@@ -251,6 +262,8 @@ class ModelRegistry:
         Args:
             meta: model metadata dictionary, containing key-value pairs for filtering.
             Only models which metadata matches all key-value pairs in that dictionary will be included.
+            If the value is callable, it will be called with the model metadata as the argument and must return a boolean.
+            This way you may pass custom predicates.
 
         Returns:
             ModelRegistry instance with filtered models
@@ -261,7 +274,14 @@ class ModelRegistry:
             k: v
             for k, v in self.config[self.key_models].items()
             if self.key_metadata in v
-            and all(v[self.key_metadata].get(mk) == mv for mk, mv in meta.items())
+            and all(
+                (
+                    mv(v[self.key_metadata])
+                    if callable(mv)
+                    else v[self.key_metadata].get(mk) == mv
+                )
+                for mk, mv in meta.items()
+            )
         }
         return ModelRegistry(config=new_config)
 
@@ -296,7 +316,12 @@ class ModelRegistry:
             token = defaults.get(self.key_token)
         if model_properties is None:
             model_properties = defaults.get(self.key_model_properties, {})
+        else:
+            merged = copy.deepcopy(defaults.get(self.key_model_properties, {}))
+            merged.update(model_properties)
+            model_properties = merged
 
+        assert model_properties is not None
         return [
             ModelSpec(
                 model_name=model_name,
@@ -311,7 +336,7 @@ class ModelRegistry:
 
     def top_model_spec(self, **kwargs) -> ModelSpec:
         """
-        Get model specification for the topmost model in the registry.
+        Get model specification for the topmost model in the registry (as defined in registry YAML file).
         Raises error if no models are present.
 
         Args:
@@ -427,7 +452,7 @@ properties:
             type: string
           {key_metadata}:
             type: object
-        additionalProperties: false
+        additionalProperties: true
     additionalProperties: false
   {key_defaults}:
     type: object
@@ -440,8 +465,8 @@ properties:
         type: object
     required:
       - {key_inference_host_address}
-    additionalProperties: false
+    additionalProperties: true
 required:
   - {key_models}
-additionalProperties: false
+additionalProperties: true
     """
