@@ -255,7 +255,7 @@ class ZoneCounter(ResultAnalyzerBase):
             Union[List[AnchorPoint], AnchorPoint]
         ] = AnchorPoint.BOTTOM_CENTER,
         bounding_box_scale: float = 1.0,
-        iopa_threshold: float = 0.0,
+        iopa_threshold: Union[float, List[float]] = 0.0,
         use_tracking: Optional[bool] = False,
         timeout_frames: int = 0,
         window_name: Optional[str] = None,
@@ -273,7 +273,7 @@ class ZoneCounter(ResultAnalyzerBase):
             per_class_display (bool, optional): If True, maintain and display counts per class separately. Default False.
             triggering_position (list or AnchorPoint or None, optional): Anchor point(s) on the bounding box to use for zone triggering. If None, uses IoPA threshold instead. Default `AnchorPoint.BOTTOM_CENTER`.
             bounding_box_scale (float, optional): Scale factor applied to detection bounding boxes before checking zone membership. Default 1.0 (no scaling).
-            iopa_threshold (float, optional): Intersection over polygon area threshold for considering an object inside a zone when using IoPA. Default 0.0 (any overlap is counted).
+            iopa_threshold (float or List[float], optional): Intersection over polygon area threshold(s) for considering an object inside a zone when using IoPA. Can be a single float applied to all zones or a list of floats (one per zone). Default 0.0 (any overlap is counted).
             use_tracking (bool, optional): If True, use object tracking to maintain zone presence information over time. Default False.
             timeout_frames (int, optional): Number of consecutive frames an object can be missing and still be considered in-zone (requires tracking). Default 0.
             window_name (str, optional): Name of an OpenCV window for interactive polygon editing. If provided, enables interactive mode via `window_attach()`. Default None.
@@ -296,20 +296,33 @@ class ZoneCounter(ResultAnalyzerBase):
         self._bounding_box_scale = bounding_box_scale
         if self._bounding_box_scale <= 0.0 or self._bounding_box_scale > 1.0:
             raise ValueError("bounding_box_scale must be from 0 to 1")
-        self._iopa_threshold = iopa_threshold
-        if self._iopa_threshold <= 0 and self._triggering_position is None:
-            raise ValueError(
-                "iopa_threshold must be specified when triggering_position is None"
-            )
+
+        # Process iopa_threshold - convert scalar to list if needed
+        self._polygons = [
+            np.array(polygon, dtype=np.int32) for polygon in count_polygons
+        ]
+        if isinstance(iopa_threshold, (int, float)):
+            self._iopa_threshold = [float(iopa_threshold)] * len(self._polygons)
+        else:
+            if len(iopa_threshold) != len(self._polygons):
+                raise ValueError(
+                    f"iopa_threshold list length ({len(iopa_threshold)}) must match number of zones ({len(self._polygons)})"
+                )
+            self._iopa_threshold = [float(t) for t in iopa_threshold]
+
+        # Validate iopa_threshold values
+        if self._triggering_position is None:
+            for i, threshold in enumerate(self._iopa_threshold):
+                if threshold <= 0:
+                    raise ValueError(
+                        f"iopa_threshold[{i}] must be > 0 when triggering_position is None"
+                    )
         self._use_tracking = use_tracking
         self._timeout_frames = timeout_frames
         if self._timeout_frames > 0 and not self._use_tracking:
             raise ValueError(
                 "timeout_frames can be used only when use_tracking is True"
             )
-        self._polygons = [
-            np.array(polygon, dtype=np.int32) for polygon in count_polygons
-        ]
         self._show_overlay = show_overlay
         self._show_inzone_counters = show_inzone_counters
         if self._show_inzone_counters not in [None, "time", "frames", "all"]:
@@ -590,10 +603,10 @@ class ZoneCounter(ResultAnalyzerBase):
                     self._wh,
                     self._triggering_position,
                     self._bounding_box_scale,
-                    self._iopa_threshold,
+                    self._iopa_threshold[i],
                     self._timeout_frames,
                 )
-                for polygon in self._polygons
+                for i, polygon in enumerate(self._polygons)
             ]
         if not self._mouse_callback_installed and self._win_name is not None:
             self._install_mouse_callback()
@@ -626,7 +639,7 @@ class ZoneCounter(ResultAnalyzerBase):
                         self._wh,
                         self._triggering_position,
                         self._bounding_box_scale,
-                        self._iopa_threshold,
+                        self._iopa_threshold[idx],
                         self._timeout_frames,
                     )
 
