@@ -5,10 +5,9 @@
 # All rights reserved
 #
 
-import pytest
 import numpy as np
 import PIL.Image
-from degirum_tools.image_tools import crop_image, image_size
+from degirum_tools.image_tools import crop_image
 
 
 def test_crop_image():
@@ -46,26 +45,26 @@ def test_crop_image():
     # Test reversed coordinates (TLBL format)
     bbox_reversed = [75, 60, 25, 20]
     result_reversed = crop_image(opencv_img, bbox_reversed)
-    assert result_reversed is not None
+    assert isinstance(result_reversed, np.ndarray)
     assert result_reversed.shape == (40, 50, 3)  # Should normalize to same size
 
     # Test float coordinates (should round)
     bbox_float = [25.7, 20.3, 74.9, 59.6]
     result_float = crop_image(opencv_img, bbox_float)
-    assert result_float is not None
+    assert isinstance(result_float, np.ndarray)
     assert result_float.shape == (40, 49, 3)  # Should round to [26, 20, 75, 60]
 
     # Step 4: Test boundary conditions
     # Test negative coordinates (should clamp to 0)
     bbox_negative = [-10, -5, 50, 40]
     result_negative = crop_image(opencv_img, bbox_negative)
-    assert result_negative is not None
+    assert isinstance(result_negative, np.ndarray)
     assert result_negative.shape == (40, 50, 3)  # Should clamp to [0, 0, 50, 40]
 
     # Test coordinates beyond image bounds
     bbox_beyond = [50, 40, 150, 120]  # Extends beyond 100x80 image
     result_beyond = crop_image(opencv_img, bbox_beyond)
-    assert result_beyond is not None
+    assert isinstance(result_beyond, np.ndarray)
     assert result_beyond.shape == (40, 50, 3)  # Should clamp to [50, 40, 100, 80]
 
     # Step 5: Test zero-area cases
@@ -88,13 +87,13 @@ def test_crop_image():
     # Test small valid area near edge
     bbox_small = [90, 70, 95, 75]
     result_small = crop_image(opencv_img, bbox_small)
-    assert result_small is not None
+    assert isinstance(result_small, np.ndarray)
     assert result_small.shape == (5, 5, 3)
 
     # Test single pixel crop
     bbox_pixel = [50, 40, 51, 41]
     result_pixel = crop_image(opencv_img, bbox_pixel)
-    assert result_pixel is not None
+    assert isinstance(result_pixel, np.ndarray)
     assert result_pixel.shape == (1, 1, 3)
 
     # Step 7: Test PIL image mode preservation
@@ -112,9 +111,9 @@ def test_crop_image():
 
     # Step 8: Test OpenCV dtype preservation
     for dtype in [np.uint8, np.uint16, np.float32]:
-        test_img = np.random.rand(50, 40, 3).astype(dtype)
+        test_img_cv = np.random.rand(50, 40, 3).astype(dtype)
         bbox_dtype = [10, 10, 30, 25]
-        result_dtype = crop_image(test_img, bbox_dtype)
+        result_dtype = crop_image(test_img_cv, bbox_dtype)
         assert result_dtype is not None
         assert isinstance(result_dtype, np.ndarray)
         assert result_dtype.dtype == dtype

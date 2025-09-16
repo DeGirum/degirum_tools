@@ -9,7 +9,7 @@
 
 import cv2, numpy as np
 import PIL.Image
-from typing import Optional, Union
+from typing import Optional, Sequence, Union
 
 
 ImageType = Union[np.ndarray, PIL.Image.Image]
@@ -37,7 +37,9 @@ def image_size(img: ImageType) -> tuple:
         return (img.shape[1], img.shape[0])
 
 
-def crop_image(img: ImageType, bbox: list) -> Optional[ImageType]:
+def crop_image(
+    img: ImageType, bbox: Union[Sequence, np.ndarray]
+) -> Optional[ImageType]:
     """Crop and return PIL/OpenCV image to given bbox
 
     Args:
