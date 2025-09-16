@@ -502,6 +502,7 @@ class EventNotifier(ResultAnalyzerBase):
         clip_embed_ai_annotations: bool = True,
         clip_target_fps: float = 30.0,
         storage_config: Optional[ObjectStorageConfig] = None,
+        notification_timeout_s: Optional[float] = None,
     ):
         """Constructor.
 
@@ -524,7 +525,7 @@ class EventNotifier(ResultAnalyzerBase):
             clip_embed_ai_annotations (bool, optional): If True, embed AI annotations in the saved clip. Default is True.
             clip_target_fps (float, optional): Frame rate (FPS) for the saved video clip. Default is 30.0.
             storage_config (ObjectStorageConfig, optional): Storage configuration for clip saving. For local storage, use endpoint="./" and local directory as bucket. For cloud storage, use S3-compatible endpoint and credentials. If None, clips are only saved locally.
-
+            notification_timeout_s (float, optional): Maximum time in seconds to wait for a notification job to complete before marking it as timed out. If None, uses the default timeout.
         Raises:
             ValueError: If holdoff unit is not "seconds" or "frames".
             ImportError: If required optional packages are not installed.
@@ -597,7 +598,11 @@ class EventNotifier(ResultAnalyzerBase):
                 notification_title=self._name,
                 notification_tags=notification_tags,
                 storage_cfg=self._storage_cfg if clip_save else None,
-                pending_timeout_s=2 * clip_duration / clip_target_fps,
+                pending_timeout_s=(
+                    2 * clip_duration / clip_target_fps
+                    if notification_timeout_s is None
+                    else notification_timeout_s
+                ),
             )
 
     def analyze(self, result):
