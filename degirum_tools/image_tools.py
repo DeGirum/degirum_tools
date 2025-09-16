@@ -37,17 +37,38 @@ def image_size(img: ImageType) -> tuple:
         return (img.shape[1], img.shape[0])
 
 
-def crop_image(img: ImageType, bbox: list):
+def crop_image(img: ImageType, bbox: list) -> Optional[ImageType]:
     """Crop and return PIL/OpenCV image to given bbox
 
     Args:
         img: image
         bbox: bounding box in format [x0, y0, x1, y1]
+
+    Returns:
+        Cropped image or None if bbox has zero area
     """
+
+    img_size = np.array(image_size(img))
+
+    int_bbox = np.round(bbox).astype(int)
+    int_bbox = np.hstack(
+        (
+            np.min(int_bbox[0:3:2]),
+            np.min(int_bbox[1:4:2]),
+            np.max(int_bbox[0:3:2]),
+            np.max(int_bbox[1:4:2]),
+        )
+    )
+    int_bbox = np.clip(int_bbox, [0, 0, 0, 0], np.hstack((img_size, img_size)))
+
+    if int_bbox[2] == int_bbox[0] or int_bbox[3] == int_bbox[1]:
+        # Return None for zero-area crop
+        return None
+
     if isinstance(img, PILImage):
-        return img.crop(tuple(bbox))
+        return img.crop(int_bbox.tolist())
     else:
-        return img[int(bbox[1]) : int(bbox[3]), int(bbox[0]) : int(bbox[2])]
+        return img[int_bbox[1] : int_bbox[3], int_bbox[0] : int_bbox[2]]
 
 
 def resize_image(
