@@ -7,6 +7,9 @@
 
 import json, os, degirum as dg, numpy as np
 from typing import List, Optional
+import faster_coco_eval
+
+faster_coco_eval.init_as_pycocotools()
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 from pycocotools.mask import encode
@@ -99,17 +102,20 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
             sorted_img_id_list = sorted_img_id_list[0:max_images]
 
         with self.model:
+            results_list = []
             if self.show_progress:
                 progress = Progress(len(sorted_path_list))
-            for image_number, predictions in enumerate(
-                self.model.predict_batch(sorted_path_list)
+            for image_id, predictions in zip(
+                sorted_img_id_list, self.model.predict_batch(sorted_path_list)
             ):
                 if self.show_progress:
                     progress.step()
-                image_id = sorted_img_id_list[image_number]
-                ObjectDetectionModelEvaluator._save_results_coco_json(
-                    predictions.results, jdict, image_id, self.classmap
+                results_list.append(
+                    {"image_id": image_id, "results": predictions.results}
                 )
+            ObjectDetectionModelEvaluator._convert_results_coco_json(
+                results_list, jdict, self.classmap
+            )
 
         # save the predictions to a json file
         if self.pred_path:
@@ -179,38 +185,47 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
         return ObjectDetectionModelEvaluator._run_length_encode(segmentation_res)
 
     @staticmethod
-    def _save_results_coco_json(results, jdict, image_id, class_map=None):
+    def _convert_results_coco_json(res_list, jdict, class_map=None):
         """Serialize YOLO predictions to COCO json format."""
         max_category_id = 0
-        for result in results:
-            box = xyxy2xywh(np.asarray(result["bbox"]).reshape(1, 4) * 1.0)  # xywh
-            box[:, :2] -= box[:, 2:] / 2  # xy center to top-left corner
-            box = box.reshape(-1).tolist()
-            category_id = (
-                class_map[result["category_id"]] if class_map else result["category_id"]
-            )
-            # detection base result
-            detected_elem = {
-                "image_id": image_id,
-                "category_id": category_id,
-                "bbox": [np.round(x, 3) for x in box],
-                "score": np.round(result["score"], 5),
-            }
-            # pose model addition
-            if "landmarks" in result:
-                detected_elem["keypoints"] = (
-                    ObjectDetectionModelEvaluator._process_keypoints(
-                        result["landmarks"]
+        for dict_res in res_list:
+            image_id = dict_res["image_id"]
+            results = dict_res["results"]
+            for result in results:
+                if "bbox" not in result.keys():
+                    continue
+                box = xyxy2xywh(np.asarray(result["bbox"]).reshape(1, 4) * 1.0)  # xywh
+                box[:, :2] -= box[:, 2:] / 2  # xy center to top-left corner
+                box = box.reshape(-1).tolist()
+                category_id = (
+                    class_map[result["category_id"]]
+                    if class_map
+                    else result["category_id"]
+                )
+                # detection base result
+                detected_elem = {
+                    "image_id": image_id,
+                    "category_id": category_id,
+                    "bbox": [np.round(x, 3) for x in box],
+                    "score": np.round(result["score"], 5),
+                }
+                # pose model addition
+                if "landmarks" in result:
+                    detected_elem["keypoints"] = (
+                        ObjectDetectionModelEvaluator._process_keypoints(
+                            result["landmarks"]
+                        )
                     )
-                )
-            # segmentation model addition
-            if "mask" in result:
-                detected_elem["segmentation"] = (
-                    ObjectDetectionModelEvaluator._process_segmentation(result["mask"])
-                )
+                # segmentation model addition
+                if "mask" in result:
+                    detected_elem["segmentation"] = (
+                        ObjectDetectionModelEvaluator._process_segmentation(
+                            result["mask"]
+                        )
+                    )
 
-            jdict.append(detected_elem)
-            max_category_id = max(max_category_id, category_id)
+                jdict.append(detected_elem)
+                max_category_id = max(max_category_id, category_id)
         return max_category_id
 
     @staticmethod
