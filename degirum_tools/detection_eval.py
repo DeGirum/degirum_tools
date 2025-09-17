@@ -193,7 +193,6 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
             results = dict_res["results"]
             for result in results:
                 if "bbox" not in result.keys():
-                    print(result)
                     continue
                 box = xyxy2xywh(np.asarray(result["bbox"]).reshape(1, 4) * 1.0)  # xywh
                 box[:, :2] -= box[:, 2:] / 2  # xy center to top-left corner
