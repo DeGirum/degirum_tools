@@ -105,6 +105,7 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
             sorted_path_list = sorted_path_list[0:max_images]
             sorted_img_id_list = sorted_img_id_list[0:max_images]
 
+        # run the model inference on the images
         with self.model:
             results_list = []
             if self.show_progress:
@@ -114,6 +115,7 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
             ):
                 if self.show_progress:
                     progress.step()
+                # segmentation model addition
                 if self.is_segmentation_model:
                     image = predictions._input_image
                     image_shape = (
@@ -136,6 +138,7 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
                 results_list.append(
                     {"image_id": image_id, "results": predictions.results}
                 )
+            # convert the predictions to COCO json format
             ObjectDetectionModelEvaluator._convert_results_coco_json(
                 results_list, jdict, self.classmap
             )
@@ -248,6 +251,9 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
                             result["landmarks"]
                         )
                     )
+                # segmentation model addition
+                if "segmentation" in result:
+                    detected_elem["segmentation"] = result["segmentation"]
 
                 jdict.append(detected_elem)
                 max_category_id = max(max_category_id, category_id)
