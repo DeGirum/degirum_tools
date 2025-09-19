@@ -119,14 +119,13 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
                 if self.is_segmentation_model:
                     image = predictions._input_image
                     image_shape = (
-                        getattr(image, "shape", None)
-                        or (getattr(image, "height", None), getattr(image, "width", None))
+                        getattr(image, "shape", (-1, -1))
+                        or (
+                            getattr(image, "height", -1),
+                            getattr(image, "width", -1),
+                        )
                     )[:2]
-                    if (
-                        image_shape is None
-                        or len(image_shape) > 1
-                        and any([s is None for s in image_shape])
-                    ):
+                    if any([s == -1 for s in image_shape]):
                         raise Exception("Cannot retrieve image shape.")
                     for ridx in range(len(predictions.results)):
                         predictions.results[ridx]["segmentation"] = (
@@ -199,7 +198,7 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
 
     @staticmethod
     def _process_segmentation(
-        segmentation_res: dict, image_shape: tuple[int]
+        segmentation_res: dict, image_shape: tuple[int, int]
     ) -> List[float]:
         """
         Convert PySDK segmentation results format to pycocotools segmentation format
