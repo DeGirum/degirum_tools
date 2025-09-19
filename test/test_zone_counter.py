@@ -1026,6 +1026,138 @@ def test_zone_counter():
                 ],
             ],
         },
+        # ----------------------------------------------------------------
+        # IoPA threshold list tests
+        # ----------------------------------------------------------------
+        {
+            "case": "IoPA list - different thresholds per zone",
+            "params": {
+                "count_polygons": zones,
+                "triggering_position": None,
+                "iopa_threshold": [0.1, 0.5],  # Different thresholds for each zone
+                "use_tracking": False,
+            },
+            "inp": [
+                [
+                    {
+                        "bbox": box_1_zone_1,
+                        "label": "label1",
+                    },  # Small overlap with zone 1
+                    {
+                        "bbox": box_2_zone_1,
+                        "label": "label2",
+                    },  # Larger overlap with zone 1
+                    {"bbox": box_1_zone_2, "label": "label3"},  # Overlap with zone 2
+                ]
+            ],
+            "res": [
+                [
+                    [
+                        {
+                            "bbox": box_1_zone_1,
+                            "label": "label1",
+                            "in_zone": [
+                                False,
+                                False,
+                            ],  # Low IoPA with zone 1, doesn't meet 0.1 threshold
+                        },
+                        {
+                            "bbox": box_2_zone_1,
+                            "label": "label2",
+                            "in_zone": [
+                                True,
+                                False,
+                            ],  # Good IoPA with zone 1, meets 0.1 threshold
+                        },
+                        {
+                            "bbox": box_1_zone_2,
+                            "label": "label3",
+                            "in_zone": [
+                                False,
+                                True,
+                            ],  # IoPA with zone 2 meets 0.5 threshold
+                        },
+                    ],
+                    [{"total": 1}, {"total": 1}],
+                ]
+            ],
+        },
+        {
+            "case": "IoPA list - scalar vs list equivalence",
+            "params": {
+                "count_polygons": zones,
+                "triggering_position": None,
+                "iopa_threshold": [0.2, 0.2],  # Same threshold for both zones
+                "use_tracking": False,
+            },
+            "inp": [
+                [
+                    {"bbox": box_1_zone_1, "label": "label1"},
+                    {"bbox": box_2_zone_1, "label": "label2"},
+                    {"bbox": box_1_zone_2, "label": "label3"},
+                ]
+            ],
+            "res": [
+                [
+                    [
+                        {
+                            "bbox": box_1_zone_1,
+                            "label": "label1",
+                            "in_zone": [False, False],
+                        },
+                        {
+                            "bbox": box_2_zone_1,
+                            "label": "label2",
+                            "in_zone": [True, False],
+                        },
+                        {
+                            "bbox": box_1_zone_2,
+                            "label": "label3",
+                            "in_zone": [False, True],
+                        },
+                    ],
+                    [{"total": 1}, {"total": 1}],
+                ]
+            ],
+        },
+        {
+            "case": "IoPA list - very strict thresholds",
+            "params": {
+                "count_polygons": zones,
+                "triggering_position": None,
+                "iopa_threshold": [0.8, 0.9],  # Very high thresholds
+                "use_tracking": False,
+            },
+            "inp": [
+                [
+                    {"bbox": box_1_zone_1, "label": "label1"},
+                    {"bbox": box_2_zone_1, "label": "label2"},
+                    {"bbox": box_1_zone_2, "label": "label3"},
+                ]
+            ],
+            "res": [
+                [
+                    [
+                        {
+                            "bbox": box_1_zone_1,
+                            "label": "label1",
+                            "in_zone": [False, False],  # Doesn't meet high threshold
+                        },
+                        {
+                            "bbox": box_2_zone_1,
+                            "label": "label2",
+                            "in_zone": [False, False],  # Doesn't meet high threshold
+                        },
+                        {
+                            "bbox": box_1_zone_2,
+                            "label": "label3",
+                            "in_zone": [False, False],  # Doesn't meet high threshold
+                        },
+                    ],
+                    [{"total": 0}, {"total": 0}],
+                ]
+            ],
+        },
     ]
 
     keys_to_ignore = ["time_in_zone"]

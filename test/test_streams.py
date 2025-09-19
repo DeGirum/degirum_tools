@@ -120,6 +120,223 @@ def test_streams_video_source(short_video):
         assert video_meta[source.key_frame_id] == i
 
 
+def test_streams_iterator_source():
+    """Test for IteratorSourceGizmo"""
+
+    # Test with numpy arrays
+    test_images = []
+    expected_shapes = []
+
+    # Create test images as numpy arrays
+    img1 = np.random.randint(0, 255, (100, 150, 3), dtype=np.uint8)  # BGR color
+    img2 = np.random.randint(0, 255, (200, 300, 3), dtype=np.uint8)  # Different size
+    img3 = np.random.randint(0, 255, (50, 75), dtype=np.uint8)  # Grayscale
+
+    test_images.extend([img1, img2, img3])
+    expected_shapes.extend(
+        [img1.shape, img2.shape, (img3.shape[0], img3.shape[1], 3)]
+    )  # Grayscale converted to BGR
+
+    def image_generator():
+        for img in test_images:
+            yield img
+
+    # Test with generator
+    source = streams.IteratorSourceGizmo(image_generator())
+    sink = VideoSink()
+    streams.Composition(source >> sink).start()
+
+    # Verify tags
+    assert streams.tag_video in source.get_tags()
+    assert source.name in source.get_tags()
+
+    # Verify correct number of frames
+    assert sink.frames_cnt == len(test_images)
+
+    # Verify each frame
+    for i, (frame, expected_shape) in enumerate(zip(sink.frames, expected_shapes)):
+        assert frame.data.shape == expected_shape
+
+        # Check metadata
+        video_meta = frame.meta.find_last(streams.tag_video)
+        assert video_meta is not None
+        assert video_meta[streams.VideoSourceGizmo.key_frame_width] == expected_shape[1]
+        assert (
+            video_meta[streams.VideoSourceGizmo.key_frame_height] == expected_shape[0]
+        )
+        assert (
+            video_meta[streams.VideoSourceGizmo.key_fps] == 0.0
+        )  # No FPS for generator
+        assert (
+            video_meta[streams.VideoSourceGizmo.key_frame_count] == -1
+        )  # Unknown for generator
+        assert video_meta[streams.VideoSourceGizmo.key_frame_id] == i
+        assert streams.VideoSourceGizmo.key_timestamp in video_meta
+
+
+def test_streams_iterator_source_file_paths():
+    """Test IteratorSourceGizmo with file paths"""
+
+    # Get some test image files
+    import glob
+
+    image_files = glob.glob("test/sample_dataset/chair/*.jpg")[:3]  # Use first 3 images
+
+    if not image_files:
+        pytest.skip("No test images found")
+
+    def file_generator():
+        for file_path in image_files:
+            yield file_path
+
+    source = streams.IteratorSourceGizmo(file_generator())
+    sink = VideoSink()
+    streams.Composition(source >> sink).start()
+
+    assert sink.frames_cnt == len(image_files)
+
+    # Verify each frame is properly loaded
+    for i, frame in enumerate(sink.frames):
+        assert isinstance(frame.data, np.ndarray)
+        assert len(frame.data.shape) == 3  # Should be color image
+        assert frame.data.shape[2] == 3  # Should have 3 channels (BGR)
+
+        # Check metadata
+        video_meta = frame.meta.find_last(streams.tag_video)
+        assert video_meta is not None
+        assert video_meta[streams.VideoSourceGizmo.key_frame_id] == i
+
+
+def test_streams_iterator_source_pil_images():
+    """Test IteratorSourceGizmo with PIL Images"""
+
+    try:
+        from PIL import Image
+    except ImportError:
+        pytest.skip("PIL not available")
+
+    # Create test PIL images
+    pil_images = []
+    pil_images.append(Image.new("RGB", (100, 200), color="red"))
+    pil_images.append(Image.new("RGB", (150, 100), color="green"))
+    pil_images.append(Image.new("L", (80, 120), color=128))  # Grayscale
+
+    def pil_generator():
+        for img in pil_images:
+            yield img
+
+    source = streams.IteratorSourceGizmo(pil_generator())
+    sink = VideoSink()
+    streams.Composition(source >> sink).start()
+
+    assert sink.frames_cnt == len(pil_images)
+
+    expected_shapes = [
+        (200, 100, 3),
+        (100, 150, 3),
+        (120, 80, 3),
+    ]  # PIL uses (width, height), OpenCV uses (height, width)
+
+    for i, (frame, expected_shape) in enumerate(zip(sink.frames, expected_shapes)):
+        assert frame.data.shape == expected_shape
+        assert isinstance(frame.data, np.ndarray)
+
+        # Verify conversion from RGB to BGR happened correctly
+        video_meta = frame.meta.find_last(streams.tag_video)
+        assert video_meta is not None
+        assert video_meta[streams.VideoSourceGizmo.key_frame_width] == expected_shape[1]
+        assert (
+            video_meta[streams.VideoSourceGizmo.key_frame_height] == expected_shape[0]
+        )
+
+
+def test_streams_iterator_source_mixed_formats():
+    """Test IteratorSourceGizmo with mixed input formats"""
+
+    # Create mixed format inputs
+    test_inputs: list = []
+
+    # Numpy array
+    test_inputs.append(np.random.randint(0, 255, (50, 60, 3), dtype=np.uint8))
+
+    # Try to add PIL image if available
+    try:
+        from PIL import Image
+
+        test_inputs.append(Image.new("RGB", (70, 80), color="blue"))
+    except ImportError:
+        pass
+
+    # Try to add file path if images exist
+    import glob
+
+    image_files = glob.glob("test/sample_dataset/chair/*.jpg")
+    if image_files:
+        test_inputs.append(image_files[0])
+
+    if len(test_inputs) < 2:
+        pytest.skip("Not enough test inputs available")
+
+    def mixed_generator():
+        for inp in test_inputs:
+            yield inp
+
+    source = streams.IteratorSourceGizmo(mixed_generator())
+    sink = VideoSink()
+    streams.Composition(source >> sink).start()
+
+    assert sink.frames_cnt == len(test_inputs)
+
+    # Verify all frames are properly converted to numpy arrays
+    for i, frame in enumerate(sink.frames):
+        assert isinstance(frame.data, np.ndarray)
+        assert len(frame.data.shape) == 3  # Should be 3D (H, W, C)
+        assert frame.data.shape[2] == 3  # Should have 3 color channels
+
+        video_meta = frame.meta.find_last(streams.tag_video)
+        assert video_meta is not None
+        assert video_meta[streams.VideoSourceGizmo.key_frame_id] == i
+
+
+def test_streams_iterator_source_error_handling():
+    """Test IteratorSourceGizmo error handling"""
+
+    def invalid_generator():
+        yield "non_existent_file.jpg"  # File that doesn't exist
+
+    source = streams.IteratorSourceGizmo(invalid_generator())
+    sink = VideoSink()
+
+    # Should raise FileNotFoundError for non-existent file
+    with pytest.raises(Exception):  # Could be wrapped in other exceptions
+        streams.Composition(source >> sink).start()
+
+    def unsupported_type_generator():
+        yield 12345  # Unsupported type
+
+    source2 = streams.IteratorSourceGizmo(unsupported_type_generator())
+    sink2 = VideoSink()
+
+    # Should raise RuntimeError for unsupported type
+    with pytest.raises(Exception):  # Could be wrapped in other exceptions
+        streams.Composition(source2 >> sink2).start()
+
+
+def test_streams_iterator_source_empty():
+    """Test IteratorSourceGizmo with empty iterator"""
+
+    def empty_generator():
+        return
+        yield  # This will never execute
+
+    source = streams.IteratorSourceGizmo(empty_generator())
+    sink = VideoSink()
+    streams.Composition(source >> sink).start()
+
+    # Should handle empty generator gracefully
+    assert sink.frames_cnt == 0
+
+
 def test_streams_video_saver(short_video, temp_dir):
     """Test for VideoSaverGizmo"""
 
@@ -901,3 +1118,91 @@ def test_streams_load_composition(zoo_dir, detection_model_name):
                 - [source, unknown]
             """
         )
+
+
+def test_streams_require_tags_and_check_requirements():
+    """Test for Gizmo.require_tags() and check_requirements() logic"""
+
+    # Minimal Gizmo subclass with custom require_tags and get_tags
+    class SourceGizmo(streams.Gizmo):
+        def run(self):
+            pass
+
+        def get_tags(self):
+            return ["SourceTag"]
+
+    class MiddleGizmo(streams.Gizmo):
+        def run(self):
+            pass
+
+        def get_tags(self):
+            return ["MiddleTag"]
+
+        def require_tags(self, inp):
+            return ["SourceTag"]
+
+    class SinkGizmo(streams.Gizmo):
+        def run(self):
+            pass
+
+        def require_tags(self, inp):
+            return ["MiddleTag", "SourceTag"]
+
+    # Compose a valid pipeline: Source -> Middle -> Sink
+    src1 = SourceGizmo()
+    mid1 = MiddleGizmo([(0, False)])
+    sink1 = SinkGizmo([(0, False)])
+
+    # Should not raise: all requirements are met
+    c = streams.Composition(src1 >> mid1 >> sink1)
+    assert set(g.__class__.__name__ for g in c._gizmos) == {
+        "SourceGizmo",
+        "MiddleGizmo",
+        "SinkGizmo",
+    }
+
+    # Now break the chain: Sink requires MiddleTag, but connect only to Source
+    src2 = SourceGizmo()
+    sink2 = SinkGizmo([(0, False)])
+
+    with pytest.raises(Exception) as excinfo:
+        streams.Composition(src2 >> sink2)
+    assert "unmet tag requirements" in str(excinfo.value)
+
+    # Also test: Middle requires SourceTag, but connect only to Sink (which does not provide it)
+    mid3 = MiddleGizmo([(0, False)])
+    sink3 = SinkGizmo([(0, False)])
+    with pytest.raises(Exception) as excinfo2:
+        streams.Composition(mid3 >> sink3)
+    assert "unmet tag requirements" in str(excinfo2.value)
+
+    # Subtest: Two-input gizmo with different requirements for each input
+    class TwoInputGizmo(streams.Gizmo):
+        def run(self):
+            pass
+
+        def require_tags(self, inp):
+            if inp == 0:
+                return ["SourceTag"]
+            elif inp == 1:
+                return ["SourceTag", "MiddleTag"]
+            return []
+
+    src4 = SourceGizmo()
+    mid4 = MiddleGizmo([(0, False)])
+    two_in4 = TwoInputGizmo([(0, False), (0, False)])
+
+    # Should not raise: both requirements are met
+    c = streams.Composition(src4 >> two_in4[0], src4 >> mid4 >> two_in4[1])
+    assert set(g.__class__.__name__ for g in c._gizmos) >= {
+        "SourceGizmo",
+        "MiddleGizmo",
+        "TwoInputGizmo",
+    }
+
+    # Should raise: only one requirement is met (input 1 missing MiddleTag)
+    src5 = SourceGizmo()
+    two_in5 = TwoInputGizmo([(0, False), (0, False)])
+    with pytest.raises(Exception) as excinfo3:
+        streams.Composition(src5 >> two_in5[0])
+    assert "unmet tag requirements" in str(excinfo3.value)

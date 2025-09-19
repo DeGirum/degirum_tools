@@ -46,6 +46,15 @@ Configuration Options:
     - `storage_config`: Storage configuration for clip saving (supports local and cloud storage)
     - `show_overlay`: Enable/disable visual annotations
 
+Message Formatting:
+    - Use Python format strings in the `message` parameter to include dynamic content (e.g., `{time}` for the time the notification was sent)
+    - Use markdown formatting for rich text notifications (e.g. `**bold**`, `*italic*`, `[link](url)`)
+    - Supported placeholders include:
+        - `{result}`: The inference result
+        - `{time}`: The time the notification was sent
+        - `{url}`: The URL of the uploaded file
+        - `{filename}`: The name of the uploaded file
+
 Example:
     For local storage configuration:
     ```python
@@ -290,7 +299,8 @@ class NotificationServer:
         storage = configure_file_uploads()
         notifier = configure_notifications()
 
-        param_key_url = "url"  # key to access the file URL in the job results
+        param_key_url = "url"  # key to access the file URL in job results
+        param_key_filename = "filename"  # key to access the file name in job results
 
         #
         # Run file upload job
@@ -318,7 +328,10 @@ class NotificationServer:
                 job.error = e
 
             job.is_done = True
-            return {param_key_url: url} if url else None
+            ret = {param_key_filename: filename}
+            if url:
+                ret[param_key_url] = url
+            return ret
 
         #
         # Run notification job
@@ -382,6 +395,9 @@ class NotificationServer:
                     if job is None:  # poison pill received
                         queue_is_active = False
                 except queue.Empty:
+                    job = None
+                except KeyboardInterrupt:
+                    queue_is_active = False
                     job = None
 
                 if job is not None:
@@ -486,6 +502,7 @@ class EventNotifier(ResultAnalyzerBase):
         clip_embed_ai_annotations: bool = True,
         clip_target_fps: float = 30.0,
         storage_config: Optional[ObjectStorageConfig] = None,
+        notification_timeout_s: Optional[float] = None,
     ):
         """Constructor.
 
@@ -508,7 +525,7 @@ class EventNotifier(ResultAnalyzerBase):
             clip_embed_ai_annotations (bool, optional): If True, embed AI annotations in the saved clip. Default is True.
             clip_target_fps (float, optional): Frame rate (FPS) for the saved video clip. Default is 30.0.
             storage_config (ObjectStorageConfig, optional): Storage configuration for clip saving. For local storage, use endpoint="./" and local directory as bucket. For cloud storage, use S3-compatible endpoint and credentials. If None, clips are only saved locally.
-
+            notification_timeout_s (float, optional): Maximum time in seconds to wait for a notification job to complete before marking it as timed out. If None, uses the default timeout.
         Raises:
             ValueError: If holdoff unit is not "seconds" or "frames".
             ImportError: If required optional packages are not installed.
@@ -578,9 +595,14 @@ class EventNotifier(ResultAnalyzerBase):
         if (isinstance(notification_config, str) and notification_config) or clip_save:
             self.notification_server = NotificationServer(
                 notification_config,
-                self._name,
-                notification_tags,
-                self._storage_cfg if clip_save else None,
+                notification_title=self._name,
+                notification_tags=notification_tags,
+                storage_cfg=self._storage_cfg if clip_save else None,
+                pending_timeout_s=(
+                    2 * clip_duration / clip_target_fps
+                    if notification_timeout_s is None
+                    else notification_timeout_s
+                ),
             )
 
     def analyze(self, result):

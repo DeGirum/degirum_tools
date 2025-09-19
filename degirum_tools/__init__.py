@@ -65,6 +65,7 @@ from .figure_annotator import *
 from .inference_support import *
 from .line_count import *
 from .math_support import *
+from .model_registry import *
 from .notifier import *
 from .object_selector import *
 from .object_storage_support import *

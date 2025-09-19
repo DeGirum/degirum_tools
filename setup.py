@@ -9,7 +9,7 @@
 #
 
 
-from setuptools import setup
+from setuptools import setup, find_packages
 from pathlib import Path
 
 root_path = Path(__file__).resolve().parent
@@ -28,9 +28,7 @@ setup(
     license="MIT",
     long_description=readme,
     long_description_content_type="text/markdown",
-    packages=[
-        "degirum_tools",
-    ],
+    packages=find_packages(),
     classifiers=[
         "Programming Language :: Python :: 3",
     ],

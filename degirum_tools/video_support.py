@@ -64,15 +64,16 @@ from .image_tools import ImageType, image_size, resize_image, to_opencv
 from typing import Union, Generator, Optional, Callable, Any, List, Dict, Tuple
 
 
-@contextmanager
-def open_video_stream(
+def create_video_stream(
     video_source: Union[int, str, Path, None] = None, max_yt_quality: int = 0
-) -> Generator[cv2.VideoCapture, None, None]:
-    """Open a video stream from various sources.
+) -> cv2.VideoCapture:
+    """Create a video stream from various sources.
 
-    This function provides a context manager for opening video streams from different
+    This function creates and returns video stream object working from different
     sources, including local cameras, IP cameras, video files, and YouTube videos.
     The stream is automatically closed when the context is exited.
+    Use `open_video_stream()` to create a context manager for this function for
+    automatic cleanup.
 
     Args:
         video_source (Union[int, str, Path, None], optional): Video source specification:
@@ -85,7 +86,7 @@ def open_video_stream(
         max_yt_quality (int, optional): Maximum video quality for YouTube videos in
             pixels (height). If 0, use best quality. Defaults to 0.
 
-    Yields:
+    Returns:
         cv2.VideoCapture: OpenCV video capture object.
 
     Raises:
@@ -153,7 +154,39 @@ def open_video_stream(
     stream = cv2.VideoCapture(video_source)  # type: ignore[arg-type]
     if not stream.isOpened():
         raise Exception(f"Error opening '{video_source}' video stream")
+    return stream
 
+
+@contextmanager
+def open_video_stream(
+    video_source: Union[int, str, Path, None] = None, max_yt_quality: int = 0
+) -> Generator[cv2.VideoCapture, None, None]:
+    """Open a video stream from various sources.
+
+    This function provides a context manager for opening video streams from different
+    sources, including local cameras, IP cameras, video files, and YouTube videos.
+    The stream is automatically closed when the context is exited.
+    Internally it calls `create_video_stream` to create the stream.
+
+    Args:
+        video_source (Union[int, str, Path, None], optional): Video source specification:
+            - int: 0-based index for local cameras
+            - str: IP camera URL (rtsp://user:password@hostname)
+            - str: Local video file path
+            - str: URL to mp4 video file
+            - str: YouTube video URL
+            - None: Use environment variable or default camera
+        max_yt_quality (int, optional): Maximum video quality for YouTube videos in
+            pixels (height). If 0, use best quality. Defaults to 0.
+
+    Yields:
+        cv2.VideoCapture: OpenCV video capture object.
+
+    Raises:
+        Exception: If the video stream cannot be opened.
+
+    """
+    stream = create_video_stream(video_source, max_yt_quality)
     try:
         yield stream
     finally:
@@ -475,6 +508,61 @@ def video2jpegs(
         return fi
 
 
+def detect_rtsp_cameras(subnet_cidr, *, timeout_s=0.5, port=554, max_workers=16):
+    """Scan given subnet for RTSP cameras by probing given port with OPTIONS request.
+    Args:
+        subnet_cidr (str): Subnet in CIDR notation (e.g., '192.168.0.0/24').
+        timeout_s (float): Timeout for each connection attempt in seconds.
+        port (int): Port to probe for RTSP cameras (default is 554).
+        max_workers (int): Maximum number of concurrent threads for scanning (default is 16).
+    Returns:
+        dict: Dictionary with IP addresses as keys and properties as values.
+              Properties include 'require_auth' indicating if authentication is required.
+    """
+
+    import ipaddress, socket
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def send_rtsp_options(ip, timeout_s, port):
+        """Send RTSP OPTIONS request and check for valid response."""
+        try:
+            with socket.create_connection((ip, port), timeout=timeout_s) as sock:
+                sock.settimeout(timeout_s)
+                request = (
+                    f"OPTIONS rtsp://{ip}/ RTSP/1.0\r\n"
+                    f"CSeq: 1\r\n"
+                    f"User-Agent: PythonRTSPScanner\r\n"
+                    f"\r\n"
+                )
+                sock.sendall(request.encode("utf-8"))
+                response = sock.recv(4096).decode("utf-8", errors="ignore")
+                if response.startswith("RTSP/1.0"):
+                    props = {}
+                    props["require_auth"] = (
+                        "401 Unauthorized" in response or "WWW-Authenticate" in response
+                    )
+                    return ip, props
+
+        except (socket.timeout, socket.error):
+            pass
+        return None
+
+    network = ipaddress.ip_network(subnet_cidr, strict=False)
+    ips = [str(ip) for ip in network.hosts()]
+    results = {}
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(send_rtsp_options, ip, timeout_s, port): ip for ip in ips
+        }
+        for future in as_completed(futures):
+            result = future.result()
+            if result:
+                ip, info = result
+                results[ip] = info
+    return results
+
+
 class ClipSaver:
     """Video clip saver with pre/post trigger buffering.
 
@@ -706,9 +794,10 @@ class ClipSaver:
 
         # save unfinished clip if any
         if self._end_counter > 0:
-            for _ in range(self._end_counter):
-                self._clip_buffer.popleft()
-            self._save_clip()
+            if len(self._clip_buffer) > self._end_counter:
+                for _ in range(self._end_counter):
+                    self._clip_buffer.popleft()
+                self._save_clip()
 
         nthreads = 0
         for thread in threading.enumerate():
@@ -805,6 +894,7 @@ class VideoStreamer:
         *,
         fps: float = 30.0,
         pix_fmt="bgr24",
+        gop_size: int = 50,
         verbose: bool = False,
     ):
         """Initializes the video streamer.
@@ -817,6 +907,7 @@ class VideoStreamer:
             height (int): Height of the video frames in pixels.
             fps (float, optional): Frames per second for the stream. Defaults to 30.
             pix_fmt (str, optional): Pixel format for the input frames. Defaults to 'bgr24'. Can be 'rgb24'.
+            gop_size (int, optional): GOP size for the video stream. Defaults to 50.
             verbose (bool, optional): If True, shows FFmpeg output in the console. Defaults to False.
         """
         self._width = width
@@ -840,6 +931,7 @@ class VideoStreamer:
                 rtsp_transport="tcp",
                 fflags="nobuffer",
                 max_delay=0,
+                g=gop_size,
             )
             .global_args("-loglevel", "info" if verbose else "quiet")
             .run_async(pipe_stdin=True, quiet=not verbose)
@@ -854,6 +946,9 @@ class VideoStreamer:
 
             Pixel format must match the one specified in the constructor (default is 'bgr24').
         """
+
+        if not self._process:
+            return
 
         im_sz = image_size(img)
 
