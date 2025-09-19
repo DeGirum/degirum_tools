@@ -7,9 +7,6 @@
 
 import json, os, degirum as dg, numpy as np
 from typing import List, Optional
-import faster_coco_eval
-
-faster_coco_eval.init_as_pycocotools()
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 from pycocotools.mask import encode
