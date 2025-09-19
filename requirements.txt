@@ -15,7 +15,6 @@ degirum>=0.16.2
 ipython
 pafy
 youtube-dl==2020.12.2
-faster-coco-eval
 pycocotools
 pyyaml
 ffmpegcv>=0.3.15;platform_system!='Windows'
