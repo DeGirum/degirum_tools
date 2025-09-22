@@ -23,6 +23,9 @@ def pytest_addoption(parser):
         default=None,
         help="Set log level (e.g. DEBUG, INFO, WARNING)",
     )
+    parser.addoption(
+        "--token", action="store", default="", help="cloud server token value to use"
+    )
 
 
 def pytest_configure(config):
@@ -31,6 +34,17 @@ def pytest_configure(config):
     loglevel = config.getoption("--loglevel")
     if loglevel:
         dg.enable_default_logger(getattr(logging, loglevel.upper(), logging.ERROR))
+
+
+@pytest.fixture(scope="session", autouse=True)
+def cloud_token(request):
+    """Get cloud server token passed from the command line and install it system-wide"""
+    token = request.config.getoption("--token")
+    if token:
+        from degirum._tokens import TokenManager
+
+        TokenManager().token_install(token, True)
+    return token
 
 
 @pytest.fixture(scope="session")
