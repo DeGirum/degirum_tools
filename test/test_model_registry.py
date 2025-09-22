@@ -10,9 +10,167 @@
 import pytest
 import yaml
 import requests
+import shutil
 from pathlib import Path
 from unittest.mock import patch, mock_open
 from degirum_tools.model_registry import ModelSpec, ModelRegistry
+import degirum as dg
+
+
+def test_model_spec_basics():
+    """Test ModelSpec class initialization, validation, and methods"""
+
+    # Test basic initialization with valid parameters
+    spec = ModelSpec(
+        model_name="test_model",
+        zoo_url="test_zoo",
+        inference_host_address="@cloud",
+        token="test_token",
+        model_properties={"confidence": 0.8},
+        metadata={"fps": 30.0, "accuracy": 0.95},
+    )
+
+    assert spec.model_name == "test_model"
+    assert spec.zoo_url == "test_zoo"
+    assert spec.inference_host_address == "@cloud"
+    assert spec.token == "test_token"
+    assert spec.model_properties == {"confidence": 0.8}
+    assert spec.metadata == {"fps": 30.0, "accuracy": 0.95}
+
+    # Test initialization with model_url (should parse into model_name and zoo_url)
+    spec_with_url = ModelSpec(
+        model_url="test_zoo/parsed_model", inference_host_address="@local"
+    )
+
+    assert spec_with_url.model_name == "parsed_model"
+    assert spec_with_url.zoo_url == "test_zoo"
+    assert spec_with_url.inference_host_address == "@local"
+    assert spec_with_url.model_url == "test_zoo/parsed_model"
+
+    # Test validation errors
+
+    # Empty model_name should raise ValueError
+    with pytest.raises(ValueError, match="model_name cannot be empty"):
+        ModelSpec(model_name="", zoo_url="test_zoo")
+
+    # Empty zoo_url should raise ValueError
+    with pytest.raises(ValueError, match="zoo_url cannot be empty"):
+        ModelSpec(model_name="test_model", zoo_url="")
+
+    # Empty inference_host_address should raise ValueError
+    with pytest.raises(ValueError, match="inference_host_address cannot be empty"):
+        ModelSpec(
+            model_name="test_model", zoo_url="test_zoo", inference_host_address=""
+        )
+
+    # model_url with model_name should raise ValueError
+    with pytest.raises(
+        ValueError,
+        match="If `model_url` is provided, `model_name` and `zoo_url` must be empty",
+    ):
+        ModelSpec(model_url="test_zoo/test_model", model_name="conflicting_name")
+
+    # model_url with zoo_url should raise ValueError
+    with pytest.raises(
+        ValueError,
+        match="If `model_url` is provided, `model_name` and `zoo_url` must be empty",
+    ):
+        ModelSpec(model_url="test_zoo/test_model", zoo_url="conflicting_zoo")
+
+    # Invalid model_url format should raise ValueError
+    with pytest.raises(
+        ValueError,
+        match="`model_url` must contain both model name and zoo URL separated by '/'",
+    ):
+        ModelSpec(model_url="invalid_url_format")
+
+    # Test default values
+    default_spec = ModelSpec(model_name="test_model", zoo_url="test_zoo")
+    assert default_spec.inference_host_address == "@cloud"
+    assert default_spec.token is None
+    assert default_spec.model_properties == {}
+    assert default_spec.metadata == {}
+
+    # Test __repr__ method
+    repr_str = repr(spec)
+    assert "ModelSpec" in repr_str
+    assert "test_model" in repr_str
+    assert "test_zoo" in repr_str
+    assert "@cloud" in repr_str
+    assert "confidence" in repr_str
+    assert "fps" in repr_str
+
+
+def test_model_spec_load_models(cloud_token):
+    """Test ModelSpec class load model methods"""
+
+    model_name = "mobilenet_v1_imagenet--224x224_quant_n2x_cpu_1"
+    zoo_url = "degirum/public_daily_test"
+
+    model_spec = ModelSpec(
+        model_name=model_name,
+        zoo_url=zoo_url,
+        inference_host_address="@cloud",
+        token=cloud_token,
+    )
+
+    # test zoo connection
+    zoo = model_spec.zoo_connect()
+    assert zoo is not None
+
+    # test model loading
+    model = model_spec.load_model()
+    assert model is not None
+    model = model_spec.load_model(zoo)
+    assert model is not None
+
+    # test model downloading
+    base_path = Path(dg._misc.get_app_data_dir()) / "models"
+    try:
+        # check download to default location
+        model_path = model_spec.download_model()
+        assert (
+            model_path is not None
+            and Path(model_path).exists()
+            and model_path == base_path / model_name
+        )
+        shutil.rmtree(base_path / model_name)
+
+        # check download to custom location
+        custom_path = base_path / "__custom_dir"
+        model_path = model_spec.download_model(custom_path)
+        assert (
+            model_path is not None
+            and Path(model_path).exists()
+            and model_path == custom_path / model_name
+        )
+        shutil.rmtree(custom_path)
+
+        # check ensure_local
+        spec2 = model_spec.ensure_local()
+        assert spec2.model_name == model_spec.model_name
+        assert (
+            Path(spec2.zoo_url) == base_path / model_name
+            and Path(spec2.zoo_url).exists()
+        )
+        assert spec2.inference_host_address == "@local"
+
+        # ensure_local should be idempotent
+        spec3 = model_spec.ensure_local()
+        assert spec3 == spec2
+
+        # check cloud_sync
+        model_spec.token = "bad_token"
+        assert model_spec.ensure_local(cloud_sync=False) is not None
+        with pytest.raises(dg.exceptions.DegirumException):
+            model_spec.ensure_local(cloud_sync=True)
+
+    finally:
+        # cleanup downloaded models
+        if (base_path / model_name).exists():
+            shutil.rmtree(base_path / model_name)
+        if (base_path / "__custom_dir").exists():
+            shutil.rmtree(base_path / "__custom_dir")
 
 
 @pytest.fixture
