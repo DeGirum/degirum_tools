@@ -521,3 +521,75 @@ def model_time_profile(
         parameters=model.model_info,
         time_stats=stats,
     )
+
+
+def warmup_model(model: dg.model.Model):
+    """
+    Warms up a model by performing one inference on a dummy input frame.
+
+    This is useful for initializing the model internals and hardware, which can
+    reduce latency on the first real inference.
+
+    Args:
+        model (dg.model.Model): The DeGirum PySDK model object to warm up.
+    """
+
+    dummy_inputs = []
+    for i, input_type in enumerate(model._model_parameters.InputType):
+        shape = model.input_shape[i]
+        dummy_data = None
+
+        # Map our types to NumPy types.
+        dtype_map = {
+            "DG_FLT": np.float32,
+            "DG_UINT8": np.uint8,
+            "DG_INT8": np.int8,
+            "DG_UINT16": np.uint16,
+            "DG_INT16": np.int16,
+            "DG_INT32": np.int32,
+            "DG_INT64": np.int64,
+            "DG_DBL": np.float64,
+            "DG_UINT32": np.uint32,
+            "DG_UINT64": np.uint64,
+        }
+
+        if input_type == "Image":
+            dummy_data = np.zeros((10, 10, 3), np.uint8)
+
+        elif input_type == "Audio":
+            # Audio preprocessor expects a 1D tensor of type InputRawDataType length InputWaveformSize
+            waveform_size = model._model_parameters.InputWaveformSize[i]
+            if waveform_size <= 0:
+                raise dg.exceptions.DegirumException(
+                    f"Cannot create dummy audio for warmup: invalid InputWaveformSize ({waveform_size})."
+                )
+
+            raw_dtype = model._model_parameters.InputRawDataType[i]
+            dtype = dtype_map.get(raw_dtype)
+            if dtype is None:
+                raise dg.exceptions.DegirumException(
+                    f"Cannot create dummy audio for warmup: unsupported data type '{raw_dtype}'."
+                )
+
+            # Create a 1D array of the required waveform size.
+            dummy_data = np.zeros((waveform_size,), dtype=dtype)
+
+        elif input_type == "Tensor":
+            # Tensor preprocessor expects a tensor of type InputRawDataType
+            raw_dtype = model._model_parameters.InputRawDataType[i]
+            dtype = dtype_map.get(raw_dtype)
+            if dtype is None:
+                raise dg.exceptions.DegirumException(
+                    f"Cannot create dummy tensor for warmup: unsupported data type '{raw_dtype}'."
+                )
+            dummy_data = np.zeros(shape, dtype=dtype)
+
+        else:
+            raise dg.exceptions.DegirumException(
+                f"Warmup is not implemented for the model input type: '{input_type}'."
+            )
+
+        dummy_inputs.append(dummy_data)
+
+    predict_input = dummy_inputs[0] if len(dummy_inputs) == 1 else dummy_inputs
+    model.predict(predict_input)
