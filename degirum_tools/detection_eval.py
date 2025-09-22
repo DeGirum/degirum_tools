@@ -7,9 +7,6 @@
 
 import json, os, degirum as dg, numpy as np
 from typing import List, Optional
-import faster_coco_eval
-
-faster_coco_eval.init_as_pycocotools()
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 from pycocotools.mask import encode
@@ -54,6 +51,10 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
             "SegmentationYoloV8",
         ]:
             raise Exception("Model loaded for evaluation is not a Detection Model")
+
+        self.is_segmentation_model: bool = model.output_postprocess_type in [
+            "SegmentationYoloV8"
+        ]
 
         # base constructor assigns kwargs to model or to self
         super().__init__(model, **kwargs)
@@ -101,6 +102,7 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
             sorted_path_list = sorted_path_list[0:max_images]
             sorted_img_id_list = sorted_img_id_list[0:max_images]
 
+        # run the model inference on the images
         with self.model:
             results_list = []
             if self.show_progress:
@@ -110,9 +112,29 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
             ):
                 if self.show_progress:
                     progress.step()
+                # segmentation model addition
+                if self.is_segmentation_model:
+                    image = predictions._input_image
+                    image_shape = (
+                        getattr(image, "shape", (-1, -1))
+                        or (
+                            getattr(image, "height", -1),
+                            getattr(image, "width", -1),
+                        )
+                    )[:2]
+                    if any([s == -1 for s in image_shape]):
+                        raise Exception("Cannot retrieve image shape.")
+                    for ridx in range(len(predictions.results)):
+                        predictions.results[ridx]["segmentation"] = (
+                            ObjectDetectionModelEvaluator._process_segmentation(
+                                predictions.results[ridx]["mask"], image_shape
+                            )
+                        )
+                        del predictions.results[ridx]["mask"]
                 results_list.append(
                     {"image_id": image_id, "results": predictions.results}
                 )
+            # convert the predictions to COCO json format
             ObjectDetectionModelEvaluator._convert_results_coco_json(
                 results_list, jdict, self.classmap
             )
@@ -172,17 +194,26 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
         return rle
 
     @staticmethod
-    def _process_segmentation(segmentation_res: List[dict]) -> List[float]:
+    def _process_segmentation(
+        segmentation_res: dict, image_shape: tuple[int, int]
+    ) -> List[float]:
         """
         Convert PySDK segmentation results format to pycocotools segmentation format
 
         Args:
             segmentation_res: The segmentation results dictionary output from PySDK.
+            image_shape: The dimensions of the image for the given segmentation results, as a tuple (height, width)
 
         Returns:
-            segmentation: The segmentation results in pycocotools format.
+            The segmentation results in pycocotools format.
         """
-        return ObjectDetectionModelEvaluator._run_length_encode(segmentation_res)
+        mask = np.zeros(image_shape, dtype=np.uint8)
+        x_min = segmentation_res["x_min"]
+        y_min = segmentation_res["y_min"]
+        data = segmentation_res["data"]
+        data_shape = data.shape
+        mask[y_min : y_min + data_shape[0], x_min : x_min + data_shape[1]] = data
+        return ObjectDetectionModelEvaluator._run_length_encode(mask)
 
     @staticmethod
     def _convert_results_coco_json(res_list, jdict, class_map=None):
@@ -217,12 +248,8 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
                         )
                     )
                 # segmentation model addition
-                if "mask" in result:
-                    detected_elem["segmentation"] = (
-                        ObjectDetectionModelEvaluator._process_segmentation(
-                            result["mask"]
-                        )
-                    )
+                if "segmentation" in result:
+                    detected_elem["segmentation"] = result["segmentation"]
 
                 jdict.append(detected_elem)
                 max_category_id = max(max_category_id, category_id)
