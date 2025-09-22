@@ -44,6 +44,7 @@ def cloud_token(request):
         from degirum._tokens import TokenManager
 
         TokenManager().token_install(token, True)
+    return token
 
 
 @pytest.fixture(scope="session")
