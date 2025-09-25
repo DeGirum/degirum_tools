@@ -156,7 +156,7 @@ def connect_model_zoo(
 
     Args:
         inference_option (int):
-            One of ``CloudInference``, ``AIServerInference``, or ``LocalHWInference``.
+            One of ``CloudInference``, ``AIServerInference``, or ``LocalHWInference``
 
     Raises:
         Exception: If an invalid ``inference_option`` is provided.
@@ -521,3 +521,87 @@ def model_time_profile(
         parameters=model.model_info,
         time_stats=stats,
     )
+
+
+def _build_dummy_input(model: dg.model.Model):
+    """Helper to build one dummy input tuple/list matching the model's inputs"""
+
+    info = model.model_info
+    dummy_inputs = []
+    dtype_map = {
+        "DG_FLT": np.float32,
+        "DG_DBL": np.float64,
+        "DG_UINT8": np.uint8,
+        "DG_INT8": np.int8,
+        "DG_UINT16": np.uint16,
+        "DG_INT16": np.int16,
+        "DG_UINT32": np.uint32,
+        "DG_INT32": np.int32,
+        "DG_UINT64": np.uint64,
+        "DG_INT64": np.int64,
+    }
+
+    for i, input_type in enumerate(info.InputType):
+        shape = model.input_shape[i]
+
+        if input_type == "Image":
+            dummy_inputs.append(np.zeros((10, 10, 3), np.uint8))
+
+        elif input_type == "Audio":
+            waveform_size = info.InputWaveformSize[i]
+            if waveform_size <= 0:
+                raise dg.exceptions.DegirumException(
+                    f"Cannot create dummy audio for warmup: invalid InputWaveformSize ({waveform_size})."
+                )
+            raw_dtype = info.InputRawDataType[i]
+            dtype = dtype_map.get(raw_dtype)
+            if dtype is None:
+                raise dg.exceptions.DegirumException(
+                    f"Cannot create dummy audio for warmup: unsupported data type '{raw_dtype}'."
+                )
+            dummy_inputs.append(np.zeros((waveform_size,), dtype=dtype))
+
+        elif input_type == "Tensor":
+            raw_dtype = info.InputRawDataType[i]
+            dtype = dtype_map.get(raw_dtype)
+            if dtype is None:
+                raise dg.exceptions.DegirumException(
+                    f"Cannot create dummy tensor for warmup: unsupported data type '{raw_dtype}'."
+                )
+            dummy_inputs.append(np.zeros(shape, dtype=dtype))
+
+        else:
+            raise dg.exceptions.DegirumException(
+                f"Warmup is not implemented for the model input type: '{input_type}'."
+            )
+
+    return dummy_inputs[0] if len(dummy_inputs) == 1 else dummy_inputs
+
+
+def warmup_device(model: dg.model.Model, chosen_device: int):
+    """Warm up given model on the given device in devices_available"""
+    assert (
+        chosen_device in model.devices_available
+    ), f"Device {chosen_device} is not in model.devices_available: {model.devices_available}"
+    previously_selected = model.devices_selected
+    model.devices_selected = [chosen_device]
+    model.predict(_build_dummy_input(model))
+    model.devices_selected = previously_selected
+
+
+def warmup_model(model: dg.model.Model):
+    """
+    Warms up a model by performing one inference on a dummy input frame on each device selected.
+
+    This is useful for initializing the model internals and hardware, which can
+    reduce latency on the first real inference.
+
+    Args:
+        model (dg.model.Model): The DeGirum PySDK model object to warm up.
+    """
+    # For cloud models, we enforce a single-device warmup.
+    if isinstance(model, dg.model._CloudServerModel):
+        model.devices_selected = [0]
+
+    for device in model.devices_selected:
+        warmup_device(model, device)
