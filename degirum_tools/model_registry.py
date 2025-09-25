@@ -9,7 +9,7 @@
 # loading them from a YAML configuration file, and querying based on tasks and hardware.
 #
 """
-Model Registry Support Module Overview
+Model Registry Overview
 ======================================
 
 Use this module when you want to use a working model without memorizing model
