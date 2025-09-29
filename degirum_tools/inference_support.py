@@ -140,16 +140,16 @@ AIServerInference = 2  # use AI server deployed in LAN/VPN
 LocalHWInference = 3  # use locally-installed AI HW accelerator
 
 DTYPE_MAP: Final = {
-    "DG_FLT":   np.float32,
-    "DG_DBL":   np.float64,
+    "DG_FLT": np.float32,
+    "DG_DBL": np.float64,
     "DG_UINT8": np.uint8,
-    "DG_INT8":  np.int8,
+    "DG_INT8": np.int8,
     "DG_UINT16": np.uint16,
-    "DG_INT16":  np.int16,
+    "DG_INT16": np.int16,
     "DG_UINT32": np.uint32,
-    "DG_INT32":  np.int32,
+    "DG_INT32": np.int32,
     "DG_UINT64": np.uint64,
-    "DG_INT64":  np.int64,
+    "DG_INT64": np.int64,
 }
 
 
@@ -592,7 +592,6 @@ def warmup_device(model: dg.model.Model, chosen_device: int):
         model.predict(_build_dummy_input(model))
     finally:
         model.devices_selected = previous_selection
-
 
 
 def warmup_model(model: dg.model.Model):
