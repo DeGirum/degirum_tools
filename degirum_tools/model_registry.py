@@ -30,6 +30,7 @@ class ModelSpec:
     Attributes:
         model_name: Exact model name to load
         zoo_url: Zoo URL where this model is hosted
+        model_url: Direct URL to model file (optional, overrides both model_name and zoo_url if provided)
         inference_host_address: Where to run inference for this model
         token: Optional token for zoo connection
         model_properties: a dictionary of arbitrary model properties to be assigned to the model object
@@ -45,8 +46,9 @@ class ModelSpec:
         ... )
     """
 
-    model_name: str
-    zoo_url: str = "degirum/public"
+    model_name: str = ""
+    zoo_url: str = ""
+    model_url: str = ""
     inference_host_address: str = "@cloud"
     token: Optional[str] = None
     model_properties: Dict[str, Any] = field(default_factory=dict)
@@ -54,6 +56,20 @@ class ModelSpec:
 
     def __post_init__(self):
         """Validate model specification after initialization."""
+
+        if self.model_url:
+            if self.model_name or self.zoo_url:
+                raise ValueError(
+                    "If `model_url` is provided, `model_name` and `zoo_url` must be empty"
+                )
+            parts = self.model_url.rsplit("/", 1)
+            if len(parts) == 2:
+                self.zoo_url, self.model_name = parts
+            else:
+                raise ValueError(
+                    "`model_url` must contain both model name and zoo URL separated by '/'"
+                )
+
         if not self.model_name:
             raise ValueError("model_name cannot be empty")
         if not self.zoo_url:
@@ -97,6 +113,80 @@ class ModelSpec:
             f"ModelSpec(name={self.model_name!r}, zoo={self.zoo_url!r}, "
             f"host={self.inference_host_address!r}, props={list(self.model_properties.keys())}, "
             f"meta_keys={list(self.metadata.keys()) if isinstance(self.metadata, dict) else None})"
+        )
+
+    def download_model(
+        self,
+        destination: Union[str, Path, None] = None,
+        *,
+        cloud_sync=False,
+    ):
+        """
+        Download the model file to a local directory.
+
+        Args:
+            destination: Destination directory or path. If a directory is provided,
+                the model will be saved into the subdirectory named after the model name.
+                If None, saves to the default application data directory.
+            cloud_sync: If True, checks the cloud zoo for updated model version
+                and downloads it if the local copy is missing or outdated.
+
+        Returns:
+            Path to the downloaded model assets directory.
+        """
+
+        if not destination:
+            destination = Path(dg._misc.get_app_data_dir()) / "models"
+        else:
+            destination = Path(destination)
+
+        destination /= self.model_name
+
+        need_download = False
+        cloud_zoo: Optional[dg.ZooManager] = None
+
+        if not destination.exists():
+            need_download = True  # no model
+        else:
+            # check model checksum
+            try:
+                local_zoo = dg.connect(dg.LOCAL, str(destination))
+                local_checksum = local_zoo.model_info(self.model_name).Checksum
+            except Exception:
+                need_download = True  # model corrupted
+
+            if not need_download and cloud_sync:
+                cloud_zoo = dg.connect(dg.CLOUD, self.zoo_url, self.token)
+                cloud_checksum = cloud_zoo.model_info(self.model_name).Checksum
+                if local_checksum != cloud_checksum:
+                    need_download = True  # checksum mismatch
+
+        if need_download:
+            if not cloud_zoo:
+                cloud_zoo = dg.connect(dg.CLOUD, self.zoo_url, self.token)
+            cloud_zoo._zoo.download_model(self.model_name, destination.parent)
+
+        return destination
+
+    def ensure_local(self, cloud_sync=False) -> "ModelSpec":
+        """
+        Ensures the model is present locally; downloads if needed.
+        Returns a **new** ModelSpec with zoo_url set to local path and inference_host_address to '@local'.
+
+        Args:
+            cloud_sync: If True, checks the cloud zoo for updated model version
+                and downloads it if the local copy is missing or outdated.
+        """
+
+        local_path = self.download_model(cloud_sync=cloud_sync)
+
+        return ModelSpec(
+            model_name=self.model_name,
+            zoo_url=str(local_path),
+            inference_host_address="@local",
+            token=self.token,
+            model_properties=self.model_properties,
+            metadata=self.metadata,
         )
 
 
