@@ -933,7 +933,7 @@ class VideoStreamer:
                 "fflags": "nobuffer",
                 "max_delay": 0,
                 "g": gop_size,
-                "format": "flv", # Format FLV for RTMP
+                "format": "flv",  # Format FLV for RTMP
                 "flvflags": "no_duration_filesize",
             }
         elif stream_url.startswith("rtsp://"):
