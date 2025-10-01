@@ -119,4 +119,4 @@ def test_video_streamer():
 
         # test RTMP streaming
         do_rtmp_test(15, 10)
-        do_rtmp_test(20, 15)    
+        do_rtmp_test(20, 15)
