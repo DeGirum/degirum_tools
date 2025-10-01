@@ -102,12 +102,12 @@ def test_video_streamer():
         src_composition.start(wait=False)
 
         # Allow more time for RTMP stream to establish and be available
-        time.sleep(3)  
+        time.sleep(3)
 
-        # For RTMP, we'll just verify the streaming works by checking 
+        # For RTMP, we'll just verify the streaming works by checking
         # that the composition runs without errors for a bit
         time.sleep(2)  # Let it stream for a few seconds
-        
+
         src_composition.stop()
         print("RTMP streaming test completed successfully")
 
