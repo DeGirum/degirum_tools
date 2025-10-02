@@ -53,31 +53,20 @@ For more performant applications requiring better scalability and more flexible 
 
 **Detection + Classification**:
 ```python
-import degirum as dg
-from degirum_tools import ModelSpec
+from degirum_tools import ModelSpec, remote_assets
 from degirum_tools.compound_models import CroppingAndClassifyingCompoundModel
-
-# Declaring variables
-your_detection_model = "<your_detection_model>"
-your_classification_model = "<your_classification_model>"
-your_host_address = "@cloud"  # Can be '@cloud', host:port, or '@local'
-your_model_zoo = "degirum/degirum"
-
-# Specify images for inference
-your_image = "<image_path>"
-your_images = ["<image_path_2>", "<image_path_3>"]
 
 # Describe the individual models once
 detector_spec = ModelSpec(
-    model_name=your_detection_model,
-    inference_host_address=your_host_address,
-    zoo_url=your_model_zoo
+    model_name="<your_detection_model>",
+    inference_host_address="@cloud",  # Can be '@cloud', host:port, or '@local'
+    zoo_url="degirum/degirum",
 )
 
 classifier_spec = ModelSpec(
-    model_name=your_classification_model,
-    inference_host_address=your_host_address,
-    zoo_url=your_model_zoo
+    model_name="<your_classification_model>",
+    inference_host_address="@cloud",
+    zoo_url="degirum/degirum",
 )
 
 with detector_spec.load_model() as detector, classifier_spec.load_model() as classifier:
@@ -86,42 +75,33 @@ with detector_spec.load_model() as detector, classifier_spec.load_model() as cla
 
     # Single frame inference using predict()
     print("Using predict():")
-    single_result = compound_model(your_image)
+    single_result = compound_model(remote_assets.cat)
     print(single_result)
 
     # Batch inference using predict_batch()
     print("Using predict_batch():")
-    for batch_result in compound_model.predict_batch(your_images):
+    for batch_result in compound_model.predict_batch(
+        [remote_assets.cat, remote_assets.two_cats]
+    ):
         print(batch_result)
 ```
 
 **Detection + Detection**:
 ```python
-import degirum as dg
-from degirum_tools import ModelSpec
+from degirum_tools import ModelSpec, remote_assets
 from degirum_tools.compound_models import CombiningCompoundModel
-
-# Declaring variables
-your_detection_model_1 = "<your_first_detection_model>"
-your_detection_model_2 = "<your_second_detection_model>"
-your_host_address = "@cloud"  # Can be '@cloud', host:port, or '@local'
-your_model_zoo = "degirum/degirum"
-
-# Specify images for inference
-your_image = "<image_path>"
-your_images = ["<image_path_2>", "<image_path_3>"]
 
 # Describe the detectors up front
 detector1_spec = ModelSpec(
-    model_name=your_detection_model_1,
-    inference_host_address=your_host_address,
-    zoo_url=your_model_zoo
+    model_name="<your_first_detection_model>",
+    inference_host_address="@cloud",  # Can be '@cloud', host:port, or '@local'
+    zoo_url="degirum/degirum",
 )
 
 detector2_spec = ModelSpec(
-    model_name=your_detection_model_2,
-    inference_host_address=your_host_address,
-    zoo_url=your_model_zoo
+    model_name="<your_second_detection_model>",
+    inference_host_address="@cloud",
+    zoo_url="degirum/degirum",
 )
 
 with detector1_spec.load_model() as detector1, detector2_spec.load_model() as detector2:
@@ -130,12 +110,14 @@ with detector1_spec.load_model() as detector1, detector2_spec.load_model() as de
 
     # Single frame inference using predict()
     print("Using predict():")
-    single_result = compound_detector(your_image)
+    single_result = compound_detector(remote_assets.cat)
     print(single_result.results)
 
     # Batch inference using predict_batch()
     print("Using predict_batch():")
-    for batch_result in compound_detector.predict_batch(your_images):
+    for batch_result in compound_detector.predict_batch(
+        [remote_assets.cat, remote_assets.two_cats]
+    ):
         print(batch_result.results)
 ```
 

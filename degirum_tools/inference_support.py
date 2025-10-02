@@ -43,22 +43,13 @@ Key Concepts
 Basic Usage Example
 -------------------
 ```python
-import degirum as dg
-from degirum_tools import ModelSpec
+from degirum_tools import ModelSpec, remote_assets
 from degirum_tools.inference_support import (
     attach_analyzers,
     annotate_video,
     model_time_profile,
 )
 from degirum_tools.result_analyzer_base import ResultAnalyzerBase
-
-# Declaring model variable
-# If you will use the DeGirum AI Hub model zoo, set the CLOUD_ZOO_URL environmental variable to a model zoo path such as degirum/degirum,
-# and ensure the DEGIRUM_CLOUD_TOKEN environmental variable is set to your AI Hub token.
-# CLOUD_ZOO_URL will default to degirum/public if left empty.
-your_detection_model = "<your_model_name>"
-your_video = "<path_to_video_or_stream>"
-your_output_video_path = "<output_video_path>"
 
 
 # Define a simple analyzer that draws text on each frame
@@ -85,9 +76,9 @@ class MyDummyAnalyzer(ResultAnalyzerBase):
 
 # Describe the model once so the configuration is reusable.
 model_spec = ModelSpec(
-    model_name=your_detection_model,
+    model_name="<your_model_name>",
     zoo_url="degirum/degirum",
-    inference_host_address="@cloud"
+    inference_host_address="@cloud",
 )
 
 with model_spec.load_model() as model:
@@ -97,8 +88,8 @@ with model_spec.load_model() as model:
     # Annotate a video with detection results + dummy analyzer and set a path to save the video
     annotate_video(
         model,
-        video_source_id=your_video,
-        output_video_path=your_output_video_path,
+        video_source_id=remote_assets.store_short,
+        output_video_path="annotated_output.mp4",
         show_progress=True,      # Show a progress bar in console
         visual_display=True,     # Open an OpenCV window to display frames
         show_ai_overlay=True,    # Use model's overlay with bounding boxes
