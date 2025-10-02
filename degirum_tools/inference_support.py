@@ -44,8 +44,8 @@ Basic Usage Example
 -------------------
 ```python
 import degirum as dg
+from degirum_tools import ModelSpec
 from degirum_tools.inference_support import (
-    connect_model_zoo,
     attach_analyzers,
     annotate_video,
     model_time_profile,
@@ -56,9 +56,9 @@ from degirum_tools.result_analyzer_base import ResultAnalyzerBase
 # If you will use the DeGirum AI Hub model zoo, set the CLOUD_ZOO_URL environmental variable to a model zoo path such as degirum/degirum,
 # and ensure the DEGIRUM_CLOUD_TOKEN environmental variable is set to your AI Hub token.
 # CLOUD_ZOO_URL will default to degirum/public if left empty.
-your_detection_model = "yolov8n_relu6_coco--640x640_quant_n2x_orca1_1"
-your_video = "<path to your video>"
-your_output_video_path = "<path to where the annotated output should be saved>"
+your_detection_model = "<your_model_name>"
+your_video = "<path_to_video_or_stream>"
+your_output_video_path = "<output_video_path>"
 
 
 # Define a simple analyzer that draws text on each frame
@@ -83,35 +83,34 @@ class MyDummyAnalyzer(ResultAnalyzerBase):
         )
         return image
 
-# Connect to a model zoo.
-# Set to 1 for CloudInference, 2 for AIServerInference, and 3 for LocalHWInference.
-inference_manager = connect_model_zoo(1)
-
-# Load a single detection model (example: YOLO-based detection)
-model = inference_manager.load_model(
-    model_name=your_detection_model
+# Describe the model once so the configuration is reusable.
+model_spec = ModelSpec(
+    model_name=your_detection_model,
+    zoo_url="degirum/degirum",
+    inference_host_address="@cloud"
 )
 
-# Attach dummy analyzer
-attach_analyzers(model, MyDummyAnalyzer())
+with model_spec.load_model() as model:
+    # Attach dummy analyzer
+    attach_analyzers(model, MyDummyAnalyzer())
 
-# Annotate a video with detection results + dummy analyzer and set a path to save the video
-annotate_video(
-    model,
-    video_source_id=your_video,
-    output_video_path=your_output_video_path,
-    show_progress=True,      # Show a progress bar in console
-    visual_display=True,     # Open an OpenCV window to display frames
-    show_ai_overlay=True,    # Use model's overlay with bounding boxes
-    fps=None                 # Use the source's native frame rate
-)
+    # Annotate a video with detection results + dummy analyzer and set a path to save the video
+    annotate_video(
+        model,
+        video_source_id=your_video,
+        output_video_path=your_output_video_path,
+        show_progress=True,      # Show a progress bar in console
+        visual_display=True,     # Open an OpenCV window to display frames
+        show_ai_overlay=True,    # Use model's overlay with bounding boxes
+        fps=None                 # Use the source's native frame rate
+    )
 
-# Time-profile the model
-profile = model_time_profile(model, iterations=100)
-print("Time profiling results:")
-print(f"  Elapsed time: {profile.elapsed:.3f} s")
-print(f"  Observed FPS: {profile.observed_fps:.2f}")
-print(f"  Max possible FPS: {profile.max_possible_fps:.2f}")
+    # Time-profile the model
+    profile = model_time_profile(model, iterations=100)
+    print("Time profiling results:")
+    print(f"  Elapsed time: {profile.elapsed:.3f} s")
+    print(f"  Observed FPS: {profile.observed_fps:.2f}")
+    print(f"  Max possible FPS: {profile.max_possible_fps:.2f}")
 ```
 """
 

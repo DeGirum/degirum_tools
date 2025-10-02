@@ -73,29 +73,29 @@ Basic Usage Example
 A simple pipeline might look like this:
 
 ```python
-import degirum as dg
-from degirum_tools.streams import Composition
-from degirum_tools.streams_gizmos import VideoSourceGizmo, VideoDisplayGizmo
-import cv2
 import time
+import cv2
+import degirum_tools.streams as streams
 
-# Create gizmos. If you are on a laptop or have a webcam attached, VideoSourceGizmo(0) will typically create a gizmo that uses your camera as a video source.
-video_source = VideoSourceGizmo(0)
-video_display = VideoDisplayGizmo("Camera Preview")
+# Create gizmos. If you are on a laptop or have a webcam attached,
+# VideoSourceGizmo(0) will typically select the default camera.
+video_source = streams.VideoSourceGizmo(0)
+video_display = streams.VideoDisplayGizmo("Camera Preview")
 
 # Connect them
 video_source >> video_display
 
 # Build composition
-comp = Composition(video_source, video_display)
-comp.start(wait=False)  # Don't block main thread
+composition = streams.Composition(video_source, video_display)
+composition.start(wait=False)  # Don't block main thread
 
-start_time = time.time()
-while time.time() - start_time < 10:  # Run for 10 seconds
-    cv2.waitKey(5)  # Wait time of 5 ms. Let OpenCV handle window events
-
-comp.stop()
-cv2.destroyAllWindows()
+try:
+    start_time = time.time()
+    while time.time() - start_time < 10:  # Run for 10 seconds
+        cv2.waitKey(5)  # Let OpenCV handle window events
+finally:
+    composition.stop()
+    cv2.destroyAllWindows()
 ```
 
 Key Steps
