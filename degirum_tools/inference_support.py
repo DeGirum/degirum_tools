@@ -437,7 +437,7 @@ class ModelTimeProfile:
 
 
 def model_time_profile(
-    model: dg.model.Model, iterations: int = 100
+    model: dg.model.Model, iterations: int = 100, input_image_format: str = "JPEG"
 ) -> ModelTimeProfile:
     """
     Profile the inference performance of a DeGirum PySDK model by running a specified
@@ -486,7 +486,7 @@ def model_time_profile(
 
     try:
         # Configure model for time measurement
-        model.input_image_format = "JPEG"
+        model.input_image_format = input_image_format
         model.measure_time = True
         model.image_backend = "opencv"
 
