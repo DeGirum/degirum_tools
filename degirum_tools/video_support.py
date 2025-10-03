@@ -769,7 +769,7 @@ class ClipSaver:
                         # save video clip
                         w, h = image_size(context._clip_buffer[0].image)
                         with open_video_writer(
-                            tempfilename + self._file_ext, w, h, context._target_fps
+                            tempfilename + context._file_ext, w, h, context._target_fps
                         ) as writer:
 
                             for result in context._clip_buffer:
@@ -780,8 +780,10 @@ class ClipSaver:
                                 )
 
                 finally:
-                    if os.path.exists(tempfilename + self._file_ext):
-                        os.rename(tempfilename + self._file_ext, context._filenames[0])
+                    if os.path.exists(tempfilename + context._file_ext):
+                        os.rename(
+                            tempfilename + context._file_ext, context._filenames[0]
+                        )
                     if context._save_ai_result_json and os.path.exists(
                         tempfilename + ".json"
                     ):
