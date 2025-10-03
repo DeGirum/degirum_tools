@@ -591,7 +591,9 @@ class Composition:
         self._threads: List[threading.Thread] = []
 
         def check_requirements(g, connected):
-            required_tags = {tag for inp in range(len(g.get_inputs())) for tag in g.require_tags(inp)}
+            required_tags = {
+                tag for inp in range(len(g.get_inputs())) for tag in g.require_tags(inp)
+            }
             upstream_tags = {tag for c in connected if c != g for tag in c.get_tags()}
             if not required_tags.issubset(upstream_tags):
                 raise Exception(
@@ -789,4 +791,6 @@ class Composition:
 
         Automatically calls `wait()` to ensure all threads have completed.
         """
+        if exc_type is not None:
+            self.request_stop()
         self.wait()

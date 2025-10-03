@@ -678,7 +678,9 @@ class EventNotifier(ResultAnalyzerBase):
                             else NotificationServer.Job.job_file_reference
                         )
                         dependent_job = (
-                            notification_job_id if ".mp4" in clip_filename else None
+                            notification_job_id
+                            if ".mp4" in clip_filename or ".jpg" in clip_filename
+                            else None
                         )
 
                         if new_files or dependent_job is not None:
