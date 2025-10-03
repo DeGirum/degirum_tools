@@ -898,28 +898,28 @@ class MediaServer:
 
 
 class VideoStreamer:
-    """Streams video frames to an RTSP server using FFmpeg.
+    """Streams video frames to an RTMP or RTSP server using FFmpeg.
     This class uses FFmpeg to stream video frames to an RTSP server.
     FFmpeg must be installed and available in the system path.
     """
 
     def __init__(
         self,
-        rtsp_url: str,
+        stream_url: str,
         width: int,
         height: int,
         *,
         fps: float = 30.0,
         pix_fmt="bgr24",
         gop_size: int = 50,
-        verbose: bool = False,
+        verbose: bool = True,
     ):
         """Initializes the video streamer.
 
         Args:
-            rtsp_url (str): RTSP URL to stream to (e.g., 'rtsp://user:password@hostname:port/stream').
+            stream_url (str): RTMP/RTSP URL to stream to (e.g., 'rtsp://user:password@hostname:port/stream').
                             Typically you use `MediaServer` class to start media server and
-                            then use its RTSP URL like `rtsp://localhost:8554/mystream`
+                            then use its RTMP/RTSP URL like `rtsp://localhost:8554/mystream`
             width (int): Width of the video frames in pixels.
             height (int): Height of the video frames in pixels.
             fps (float, optional): Frames per second for the stream. Defaults to 30.
@@ -930,26 +930,44 @@ class VideoStreamer:
         self._width = width
         self._height = height
 
+        # Common FFmpeg input arguments
+        input_stream = ffmpeg.input(
+            "pipe:0",
+            format="rawvideo",
+            pix_fmt="bgr24",
+            s=f"{width}x{height}",
+            framerate=fps,
+        )
+
+        output_args = {}
+
+        if stream_url.startswith("rtmp://"):
+            output_args = {
+                "pix_fmt": "yuv420p",
+                "vcodec": "libx264",
+                "preset": "ultrafast",
+                "tune": "zerolatency",
+                "fflags": "nobuffer",
+                "max_delay": 0,
+                "g": gop_size,
+                "format": "flv",  # Format FLV for RTMP
+                "flvflags": "no_duration_filesize",
+            }
+        elif stream_url.startswith("rtsp://"):
+            output_args = {
+                "format": "rtsp",
+                "pix_fmt": "yuv420p",
+                "vcodec": "libx264",
+                "preset": "ultrafast",
+                "tune": "zerolatency",
+                "rtsp_transport": "tcp",
+                "fflags": "nobuffer",
+                "max_delay": 0,
+                "g": gop_size,
+            }
+
         self._process = (
-            ffmpeg.input(
-                "pipe:0",
-                format="rawvideo",
-                pix_fmt="bgr24",
-                s=f"{width}x{height}",
-                framerate=fps,
-            )
-            .output(
-                rtsp_url,
-                format="rtsp",
-                pix_fmt="yuv420p",
-                vcodec="libx264",
-                preset="ultrafast",
-                tune="zerolatency",
-                rtsp_transport="tcp",
-                fflags="nobuffer",
-                max_delay=0,
-                g=gop_size,
-            )
+            input_stream.output(stream_url, **output_args)
             .global_args("-loglevel", "info" if verbose else "quiet")
             .run_async(pipe_stdin=True, quiet=not verbose)
         )

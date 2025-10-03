@@ -60,9 +60,7 @@ def test_video_streamer():
                 self.composition.stop()
             assert cnt == self._nframes, f"Expected {self._nframes} frames, got {cnt}"
 
-    def do_test(in_frames, out_frames, do_detect_test):
-        port = 8554
-        url = f"rtsp://{localhost}:{port}/mystream"
+    def do_test(*, in_frames, out_frames, port, url, sleep_time, do_detect_test):
 
         src = TestSourceGizmo(in_frames)
         dst = streams.VideoStreamerGizmo(url, fps=fps)
@@ -73,7 +71,7 @@ def test_video_streamer():
         src_composition = streams.Composition(src >> dst)
         src_composition.start(wait=False)
 
-        time.sleep(1)  # Allow some time for the stream to start
+        time.sleep(sleep_time)  # Allow some time for the stream to start
 
         # test detect_rtsp_cameras()
         if do_detect_test:
@@ -91,7 +89,57 @@ def test_video_streamer():
         src_composition.stop()
 
     with degirum_tools.MediaServer():
+
+        #
+        # test RTSP streaming
+        #
+
+        port = 8554
+        url = f"rtsp://{localhost}:{port}/mystream"
+        sleep_time = 1
+
         # test infinite source + camera detection
-        do_test(-1, 10, True)
+        do_test(
+            in_frames=-1,
+            out_frames=10,
+            port=port,
+            url=url,
+            sleep_time=sleep_time,
+            do_detect_test=True,
+        )
         # test ability to recover when source is dead
-        do_test(10, 40, False)
+        do_test(
+            in_frames=10,
+            out_frames=40,
+            port=port,
+            url=url,
+            sleep_time=sleep_time,
+            do_detect_test=False,
+        )
+
+        #
+        # test RTMP streaming
+        #
+
+        port = 1935
+        url = f"rtmp://{localhost}:{port}/live/mystream"
+        sleep_time = 3
+
+        # test infinite source
+        do_test(
+            in_frames=-1,
+            out_frames=10,
+            port=port,
+            url=url,
+            sleep_time=sleep_time,
+            do_detect_test=False,
+        )
+        # test ability to recover when source is dead
+        do_test(
+            in_frames=10,
+            out_frames=40,
+            port=port,
+            url=url,
+            sleep_time=sleep_time,
+            do_detect_test=False,
+        )

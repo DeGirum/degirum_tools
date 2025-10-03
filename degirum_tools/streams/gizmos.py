@@ -424,13 +424,13 @@ class VideoSaverGizmo(Gizmo):
 class VideoStreamerGizmo(Gizmo):
     """Video streaming gizmo.
 
-    Streams incoming frames to RTSP stream using ffmpeg.
+    Streams incoming frames to RTSP/RTMP stream using ffmpeg.
     `MediaServer` must be running to accept the stream.
     """
 
     def __init__(
         self,
-        rtsp_url: str,
+        stream_url: str,
         *,
         fps: float = 0,
         show_ai_overlay: bool = False,
@@ -440,16 +440,16 @@ class VideoStreamerGizmo(Gizmo):
         """Constructor.
 
         Args:
-            rtsp_url (str): RTSP URL to stream to (e.g., 'rtsp://user:password@hostname:port/stream').
+            stream_url (str): RTMP/RTSP URL to stream to (e.g., 'rtsp://user:password@hostname:port/stream').
                             Typically you use `MediaServer` class to start media server and
-                            then use its RTSP URL like `rtsp://localhost:8554/mystream`
+                            then use its RTMP/RTSP URL like `rtsp://localhost:8554/mystream`
             fps (float, optional): Frames per second for the stream. Defaults to 0, meaning to deduce from upstream video source.
             show_ai_overlay (bool, optional): If True, overlay AI inference results on frames before saving (when available). Defaults to False.
             stream_depth (int, optional): Depth of the input frame queue. Defaults to 10.
             allow_drop (bool, optional): If True, allow dropping frames if the input queue is full. Defaults to False.
         """
         super().__init__([(stream_depth, allow_drop)])
-        self._rtsp_url = rtsp_url
+        self._stream_url = stream_url
         self._fps = fps
         self._show_ai_overlay = show_ai_overlay
 
@@ -489,7 +489,7 @@ class VideoStreamerGizmo(Gizmo):
         avg_duration_s = 1.0 / self._fps  # initialize with target FPS
 
         with VideoStreamer(
-            self._rtsp_url,
+            self._stream_url,
             w,
             h,
             fps=self._fps,
