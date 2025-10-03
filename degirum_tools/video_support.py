@@ -61,7 +61,7 @@ from pathlib import Path
 from . import environment as env
 from .ui_support import Progress
 from .image_tools import ImageType, image_size, resize_image, to_opencv
-from typing import Union, Generator, Optional, Callable, Any, List, Dict, Tuple
+from typing import Union, Generator, Optional, Callable, Any, List, Tuple
 
 
 def create_video_stream(
@@ -634,6 +634,7 @@ class ClipSaver:
         self._start_frame = 0
         self._frame_counter = 0
         self._thread_name = "dgtools_ClipSaverThread_" + str(uuid.uuid4())
+        self._file_ext = ".mp4" if self._clip_duration > 1 else ".jpg"
 
     def forward(self, result, triggers: List[str] = []) -> Tuple[List[str], bool]:
         """Process a frame and save clips if triggers occur.
@@ -670,7 +671,7 @@ class ClipSaver:
                 self._start_frame = self._frame_counter - self._pre_trigger_delay
                 self._triggered_by = triggers
                 filename = f"{self._file_prefix}{'' if self._file_prefix.endswith('/') else '_'}{self._start_frame:08d}"
-                self._filenames = [filename + ".mp4"]
+                self._filenames = [filename + self._file_ext]
                 if self._save_ai_result_json:
                     self._filenames.append(filename + ".json")
                 new_files = True
@@ -685,7 +686,7 @@ class ClipSaver:
 
         self._frame_counter += 1
 
-        return (self._filenames if triggered else [], new_files)
+        return (list(self._filenames) if triggered else [], new_files)
 
     def _save_clip(self):
         """Save a video clip with pre-trigger frames.
@@ -698,75 +699,89 @@ class ClipSaver:
 
         def save(context):
             if context._clip_buffer:
-                w, h = image_size(context._clip_buffer[0].image)
 
                 tempfilename = str(
                     Path(context._filenames[0]).parent / str(uuid.uuid4())
                 )
-                try:
-                    with open_video_writer(
-                        tempfilename + ".mp4", w, h, context._target_fps
-                    ) as writer:
 
-                        json_result: Dict[str, Any] = {}
-                        if context._save_ai_result_json:
-                            json_result["properties"] = dict(
+                try:
+                    # save AI results as JSON if requested
+                    if context._save_ai_result_json:
+                        json_result = dict(
+                            properties=dict(
                                 timestamp=time.ctime(),
                                 start_frame=context._start_frame,
                                 triggered_by=context._triggered_by,
                                 duration=len(context._clip_buffer),
                                 pre_trigger_delay=context._pre_trigger_delay,
                                 target_fps=context._target_fps,
+                            ),
+                            results=[
+                                {
+                                    k: v
+                                    for k, v in result.__dict__.items()
+                                    if (
+                                        not k.startswith("_")
+                                        or k == "_inference_results"
+                                    )
+                                    and isinstance(v, builtin_types)
+                                }
+                                for result in context._clip_buffer
+                            ],
+                        )
+
+                        def custom_serializer(obj):
+                            if isinstance(obj, set):
+                                return list(obj)
+                            if isinstance(obj, np.ndarray):
+                                return obj.tolist()
+                            if isinstance(obj, np.integer):
+                                return int(obj)
+                            if isinstance(obj, np.floating):
+                                return float(obj)
+                            if hasattr(obj, "to_dict"):
+                                return obj.to_dict()
+                            raise TypeError(
+                                f"Object of type {obj.__class__.__name__} is not JSON serializable: implement to_dict() method"
                             )
-                            json_result["results"] = []
 
-                        for result in context._clip_buffer:
-                            if context._embed_ai_annotations:
-                                writer.write(result.image_overlay)
-                            else:
-                                writer.write(result.image)
+                        with open(tempfilename + ".json", "w") as f:
+                            json.dump(
+                                json_result,
+                                f,
+                                indent=2,
+                                default=custom_serializer,
+                            )
 
-                            if context._save_ai_result_json:
-                                json_result["results"].append(
-                                    {
-                                        k: v
-                                        for k, v in result.__dict__.items()
-                                        if (
-                                            not k.startswith("_")
-                                            or k == "_inference_results"
-                                        )
-                                        and isinstance(v, builtin_types)
-                                    }
-                                )
+                    # save video clip or single frame
+                    if context._clip_duration == 1:
+                        # save single frame as JPEG image
+                        result = context._clip_buffer[0]
+                        cv2.imwrite(
+                            tempfilename + context._file_ext,
+                            (
+                                result.image_overlay
+                                if context._embed_ai_annotations
+                                else result.image
+                            ),
+                        )
+                    else:
+                        # save video clip
+                        w, h = image_size(context._clip_buffer[0].image)
+                        with open_video_writer(
+                            tempfilename + self._file_ext, w, h, context._target_fps
+                        ) as writer:
 
-                        if context._save_ai_result_json:
-
-                            def custom_serializer(obj):
-                                if isinstance(obj, set):
-                                    return list(obj)
-                                if isinstance(obj, np.ndarray):
-                                    return obj.tolist()
-                                if isinstance(obj, np.integer):
-                                    return int(obj)
-                                if isinstance(obj, np.floating):
-                                    return float(obj)
-                                if hasattr(obj, "to_dict"):
-                                    return obj.to_dict()
-                                raise TypeError(
-                                    f"Object of type {obj.__class__.__name__} is not JSON serializable: implement to_dict() method"
-                                )
-
-                            with open(tempfilename + ".json", "w") as f:
-                                json.dump(
-                                    json_result,
-                                    f,
-                                    indent=2,
-                                    default=custom_serializer,
+                            for result in context._clip_buffer:
+                                writer.write(
+                                    result.image_overlay
+                                    if context._embed_ai_annotations
+                                    else result.image
                                 )
 
                 finally:
-                    if os.path.exists(tempfilename + ".mp4"):
-                        os.rename(tempfilename + ".mp4", context._filenames[0])
+                    if os.path.exists(tempfilename + self._file_ext):
+                        os.rename(tempfilename + self._file_ext, context._filenames[0])
                     if context._save_ai_result_json and os.path.exists(
                         tempfilename + ".json"
                     ):
