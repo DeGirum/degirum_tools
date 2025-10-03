@@ -60,9 +60,7 @@ def test_video_streamer():
                 self.composition.stop()
             assert cnt == self._nframes, f"Expected {self._nframes} frames, got {cnt}"
 
-    def do_rtsp_test(in_frames, out_frames, do_detect_test):
-        port = 8554
-        url = f"rtsp://{localhost}:{port}/mystream"
+    def do_test(*, in_frames, out_frames, port, url, sleep_time, do_detect_test):
 
         src = TestSourceGizmo(in_frames)
         dst = streams.VideoStreamerGizmo(url, fps=fps)
@@ -73,7 +71,7 @@ def test_video_streamer():
         src_composition = streams.Composition(src >> dst)
         src_composition.start(wait=False)
 
-        time.sleep(1)  # Allow some time for the stream to start
+        time.sleep(sleep_time)  # Allow some time for the stream to start
 
         # test detect_rtsp_cameras()
         if do_detect_test:
@@ -90,33 +88,58 @@ def test_video_streamer():
         rcv_composition.start()
         src_composition.stop()
 
-    def do_rtmp_test(in_frames, out_frames):
+    with degirum_tools.MediaServer():
+
+        #
+        # test RTSP streaming
+        #
+
+        port = 8554
+        url = f"rtsp://{localhost}:{port}/mystream"
+        sleep_time = 1
+
+        # test infinite source + camera detection
+        do_test(
+            in_frames=-1,
+            out_frames=10,
+            port=port,
+            url=url,
+            sleep_time=sleep_time,
+            do_detect_test=True,
+        )
+        # test ability to recover when source is dead
+        do_test(
+            in_frames=10,
+            out_frames=40,
+            port=port,
+            url=url,
+            sleep_time=sleep_time,
+            do_detect_test=False,
+        )
+
+        #
+        # test RTMP streaming
+        #
+
         port = 1935
         url = f"rtmp://{localhost}:{port}/live/mystream"
+        sleep_time = 3
 
-        src = TestSourceGizmo(in_frames)
-        dst = streams.VideoStreamerGizmo(url, fps=fps)
-
-        # start streaming of red frames to RTMP server
-        src_composition = streams.Composition(src >> dst)
-        src_composition.start(wait=False)
-
-        # Allow more time for RTMP stream to establish and be available
-        time.sleep(3)
-
-        # For RTMP, we'll just verify the streaming works by checking
-        # that the composition runs without errors for a bit
-        time.sleep(2)  # Let it stream for a few seconds
-
-        src_composition.stop()
-        print("RTMP streaming test completed successfully")
-
-    with degirum_tools.MediaServer():
-        # test infinite source + camera detection
-        do_rtsp_test(-1, 10, True)
+        # test infinite source
+        do_test(
+            in_frames=-1,
+            out_frames=10,
+            port=port,
+            url=url,
+            sleep_time=sleep_time,
+            do_detect_test=False,
+        )
         # test ability to recover when source is dead
-        do_rtsp_test(10, 40, False)
-
-        # test RTMP streaming
-        do_rtmp_test(15, 10)
-        do_rtmp_test(20, 15)
+        do_test(
+            in_frames=10,
+            out_frames=40,
+            port=port,
+            url=url,
+            sleep_time=sleep_time,
+            do_detect_test=False,
+        )
