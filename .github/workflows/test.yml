@@ -33,6 +33,10 @@ jobs:
 
   test:
     name: Unit Tests
+    strategy:
+      fail-fast: false
+      matrix:
+        python: [3.9, 3.12]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
