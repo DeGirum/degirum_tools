@@ -1,11 +1,13 @@
 import pytest
 
+
 def test_import_gi():
     try:
         import gi
     except ImportError:
         pytest.skip("gi module not available")
     assert hasattr(gi, "require_version")
+
 
 def test_import_gst():
     import gi
@@ -16,6 +18,7 @@ def test_import_gst():
         pytest.skip("Gst namespace not available")
     assert hasattr(Gst, "init")
 
+
 def test_gst_init_and_version():
     import gi
     gi.require_version("Gst", "1.0")
@@ -25,6 +28,7 @@ def test_gst_init_and_version():
     version = Gst.version_string()
     assert isinstance(version, str)
     assert version.count('.') >= 2
+
 
 def test_gst_parse_launch_pipeline():
     import gi
