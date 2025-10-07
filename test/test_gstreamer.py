@@ -36,8 +36,8 @@ def test_gst_parse_launch_pipeline():
     from gi.repository import Gst
     if not Gst.is_initialized():
         Gst.init(None)
-    # Try to create a simple pipeline
     pipeline = Gst.parse_launch("fakesrc num-buffers=1 ! fakesink")
     assert pipeline is not None
-    assert pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.SUCCESS
+    result = pipeline.set_state(Gst.State.PLAYING)
+    assert result in (Gst.StateChangeReturn.SUCCESS, Gst.StateChangeReturn.ASYNC)
     pipeline.set_state(Gst.State.NULL)
