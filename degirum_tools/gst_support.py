@@ -129,7 +129,6 @@ def build_gst_pipeline(source):
     else:
         # Not a camera source, skip to other checks
         device_index = None
-    
     if device_index is not None:
         device = detect_camera_type(device_index)
         print(f"Detected platform: {platform}, camera type: {device}")
@@ -165,6 +164,5 @@ def build_gst_pipeline(source):
             f'video/x-raw, format={format} ! '
             f'appsink name=sink'
         )
-    
     else:
         raise ValueError(f"Unknown source type or file not found: {source}")
