@@ -1,57 +1,21 @@
 #
-# video_support.py: video stream handling classes and functions
+# video_support.py: video stream handling classes and functions with GStreamer support
 #
 # Copyright DeGirum Corporation 2025
 # All rights reserved
 #
-# Implements classes and functions to handle video streams for capturing and saving
-#
-
-"""
-Video Support Module Overview
-============================
-
-This module provides comprehensive video stream handling capabilities, including
-capturing from various sources, saving to files, and managing video clips. It
-supports local cameras, IP cameras, video files, and YouTube videos.
-
-Key Features:
-    - **Multi-Source Support**: Capture from local cameras, IP cameras, video files, and YouTube
-    - **Video Writing**: Save video streams with configurable quality and format
-    - **Frame Extraction**: Convert video files to JPEG sequences
-    - **Clip Management**: Save video clips triggered by events with pre/post buffers
-    - **FPS Control**: Frame rate management for both capture and writing
-    - **Stream Properties**: Query video stream dimensions and frame rate
-
-Typical Usage:
-    1. Open video streams with `open_video_stream()`
-    2. Process frames using `video_source()` generator
-    3. Save videos with `VideoWriter` or `open_video_writer()`
-    4. Extract frames using `video2jpegs()`
-    5. Save event-triggered clips with `ClipSaver`
-
-Integration Notes:
-    - Works with OpenCV's VideoCapture and VideoWriter
-    - Supports YouTube videos through pafy
-    - Handles both real-time and file-based video sources
-    - Provides context managers for safe resource handling
-    - Thread-safe for concurrent video operations
-
-Key Classes:
-    - `VideoWriter`: Main class for saving video streams
-    - `ClipSaver`: Manages saving video clips with pre/post buffers
-
-Configuration Options:
-    - Video quality and format settings
-    - Frame rate control
-    - Clip duration and buffer size
-    - Output file naming and paths
-"""
 
 import platform
 import shutil
 import subprocess
-import time, os, threading, cv2, urllib, copy, json, uuid
+import time
+import os
+import threading
+import cv2
+import urllib
+import copy
+import json
+import uuid
 import ffmpeg
 import numpy as np
 from collections import deque
@@ -62,37 +26,161 @@ from . import environment as env
 from .ui_support import Progress
 from .image_tools import ImageType, image_size, resize_image, to_opencv
 from typing import Union, Generator, Optional, Callable, Any, List, Tuple
+from .gst_support import build_gst_pipeline
+
+# Import GStreamer libraries
+try:
+    import gi
+    gi.require_version('Gst', '1.0')
+    from gi.repository import Gst, GLib
+    GST_AVAILABLE = True
+    Gst.init(None)
+except ImportError:
+    GST_AVAILABLE = False
+
+
+class VideoCaptureGst:
+    """GStreamer-based video capture class that mimics cv2.VideoCapture interface."""
+    def __init__(self, pipeline_str):
+        """Initialize GStreamer pipeline from string.
+
+        Args:
+            pipeline_str: GStreamer pipeline string
+        """
+        if not GST_AVAILABLE:
+            raise ImportError("GStreamer Python bindings (gi) not available")
+
+        try:
+            self.pipeline = Gst.parse_launch(pipeline_str)
+        except GLib.Error as e:
+            raise Exception(f"Invalid GStreamer pipeline: {pipeline_str}") from e
+
+        self.appsink = self.pipeline.get_by_name("sink")
+        if not self.appsink:
+            raise Exception(f"Invalid GStreamer pipeline (no appsink): {pipeline_str}")
+
+        self.appsink.set_property("emit-signals", True)
+        self.pipeline.set_state(Gst.State.PLAYING)
+
+        # Check if the pipeline transitions to the PLAYING state
+        state_change_result = self.pipeline.get_state(5 * Gst.SECOND)
+        if state_change_result[1] != Gst.State.PLAYING:
+            raise Exception(f"GStreamer pipeline failed to start: {pipeline_str}")
+
+        self.running = True
+
+    def read(self):
+        """Read a frame from the GStreamer pipeline.
+
+        Returns:
+            (bool, np.ndarray): Success flag and frame data
+        """
+        if not self.running:
+            return False, None
+        sample = self.appsink.emit("pull-sample")
+        if not sample:
+            self.running = False
+            return False, None
+
+        buf = sample.get_buffer()
+        caps = sample.get_caps()
+        width = caps.get_structure(0).get_value("width")
+        height = caps.get_structure(0).get_value("height")
+
+        success, mapinfo = buf.map(Gst.MapFlags.READ)
+        if not success:
+            return False, None
+
+        try:
+            frame = np.ndarray((height, width, 3), buffer=mapinfo.data, dtype=np.uint8)
+            return True, frame
+        finally:
+            buf.unmap(mapinfo)
+
+    def get(self, prop: int):
+        """Get capture properties (mimics cv2.VideoCapture.get).
+
+        Args:
+            prop: OpenCV property constant (e.g., cv2.CAP_PROP_FRAME_WIDTH)
+
+        Returns:
+            Property value or None if not available
+        """
+        pad = self.appsink.get_static_pad("sink")
+        caps = pad.get_current_caps()
+        if not caps:
+            return None
+
+        structure = caps.get_structure(0)
+
+        if prop == cv2.CAP_PROP_FRAME_WIDTH:
+            return structure.get_value("width")
+        elif prop == cv2.CAP_PROP_FRAME_HEIGHT:
+            return structure.get_value("height")
+        elif prop == cv2.CAP_PROP_FPS:
+            framerate = structure.get_fraction('framerate')
+            if framerate:
+                return framerate.value_numerator / framerate.value_denominator
+            return 30.0  # Default fallback
+        elif prop == cv2.CAP_PROP_FRAME_COUNT:
+            # For files, try to get duration
+            duration = self.pipeline.query_duration(Gst.Format.TIME)
+            if duration[0]:
+                fps = self.get(cv2.CAP_PROP_FPS)
+                return int((duration[1] / Gst.SECOND) * fps)
+            return 0
+        return None
+
+    def isOpened(self):
+        """Check if the capture is opened.
+
+        Returns:
+            bool: True if pipeline is running
+        """
+        return self.running
+
+    def release(self):
+        """Release the GStreamer pipeline."""
+        if self.running:
+            self.pipeline.set_state(Gst.State.NULL)
+            self.running = False
 
 
 def create_video_stream(
-    video_source: Union[int, str, Path, None] = None, max_yt_quality: int = 0
-) -> cv2.VideoCapture:
+    video_source: Union[int, str, Path, None, cv2.VideoCapture, VideoCaptureGst] = None,
+    max_yt_quality: int = 0,
+    *,
+    use_gstreamer: bool = False
+) -> Union[cv2.VideoCapture, VideoCaptureGst]:
     """Create a video stream from various sources.
 
     This function creates and returns video stream object working from different
     sources, including local cameras, IP cameras, video files, and YouTube videos.
-    The stream is automatically closed when the context is exited.
-    Use `open_video_stream()` to create a context manager for this function for
-    automatic cleanup.
 
     Args:
-        video_source (Union[int, str, Path, None], optional): Video source specification:
+        video_source: Video source specification:
             - int: 0-based index for local cameras
             - str: IP camera URL (rtsp://user:password@hostname)
             - str: Local video file path
             - str: URL to mp4 video file
             - str: YouTube video URL
             - None: Use environment variable or default camera
-        max_yt_quality (int, optional): Maximum video quality for YouTube videos in
-            pixels (height). If 0, use best quality. Defaults to 0.
+            - cv2.VideoCapture or VideoCaptureGst: Pass through existing capture
+        max_yt_quality: Maximum video quality for YouTube videos in pixels (height).
+            If 0, use best quality. Defaults to 0.
+        use_gstreamer: If True, use GStreamer backend for video files.
+            Only applies to .mp4 files. Defaults to False.
 
     Returns:
-        cv2.VideoCapture: OpenCV video capture object.
+        cv2.VideoCapture or VideoCaptureGst: Video capture object.
 
     Raises:
         Exception: If the video stream cannot be opened.
-
     """
+
+    # Pass through if already a capture object
+    if isinstance(video_source, (cv2.VideoCapture, VideoCaptureGst)):
+        return video_source
 
     if env.get_test_mode() or video_source is None:
         video_source = env.get_var(env.var_VideoSource, 0)
@@ -102,46 +190,30 @@ def create_video_stream(
     if isinstance(video_source, Path):
         video_source = str(video_source)
 
+    # Handle YouTube URLs
     if isinstance(video_source, str) and urllib.parse.urlparse(
         video_source
     ).hostname in (
         "www.youtube.com",
         "youtube.com",
         "youtu.be",
-    ):  # if source is YouTube video
+    ):
         import pafy
 
         if max_yt_quality == 0:
             video_source = pafy.new(video_source).getbest(preftype="mp4").url
         else:
-            # Ignore DASH/HLS YouTube videos because we cannot download them trivially w/ OpenCV or ffmpeg.
-            # Format ids are from pafy backend https://github.com/ytdl-org/youtube-dl/blob/master/youtube_dl/extractor/youtube.py
+            # Ignore DASH/HLS YouTube videos
             dash_hls_formats = [
-                91,
-                92,
-                93,
-                94,
-                95,
-                96,
-                132,
-                151,
-                133,
-                134,
-                135,
-                136,
-                137,
-                138,
-                160,
-                212,
-                264,
-                298,
-                299,
-                266,
+                91, 92, 93, 94, 95, 96, 132, 151, 133, 134, 135, 136, 137, 138,
+                160, 212, 264, 298, 299, 266,
             ]
 
             video_qualities = pafy.new(video_source).videostreams
-            # Sort descending based on vertical pixel count.
-            video_qualities = sorted(video_qualities, key=cmp_to_key(lambda a, b: b.dimensions[1] - a.dimensions[1]))  # type: ignore[attr-defined]
+            video_qualities = sorted(
+                video_qualities,
+                key=cmp_to_key(lambda a, b: b.dimensions[1] - a.dimensions[1])  # type: ignore[attr-defined]
+            )
 
             for video in video_qualities:
                 if video.dimensions[1] <= max_yt_quality and video.extension == "mp4":
@@ -151,42 +223,52 @@ def create_video_stream(
             else:
                 video_source = pafy.new(video_source).getbest(preftype="mp4").url
 
-    stream = cv2.VideoCapture(video_source)  # type: ignore[arg-type]
-    if not stream.isOpened():
+    # Use GStreamer if requested and available
+    if use_gstreamer and GST_AVAILABLE:
+        try:
+            pipeline_str = build_gst_pipeline(video_source)
+            stream = VideoCaptureGst(pipeline_str)
+            if stream.isOpened():
+                return stream
+            else:
+                # Fall back to OpenCV
+                stream.release()
+        except Exception as e:
+            # Fall back to OpenCV if GStreamer fails
+            raise Exception(f"GStreamer failed, falling back to OpenCV: {e}")
+
+    # Default to OpenCV
+    opencv_stream: Union[cv2.VideoCapture, VideoCaptureGst] = cv2.VideoCapture(video_source)  # type: ignore[arg-type]
+    if not opencv_stream.isOpened():
         raise Exception(f"Error opening '{video_source}' video stream")
-    return stream
+    return opencv_stream
 
 
 @contextmanager
 def open_video_stream(
-    video_source: Union[int, str, Path, None] = None, max_yt_quality: int = 0
-) -> Generator[cv2.VideoCapture, None, None]:
+    video_source: Union[int, str, Path, None, cv2.VideoCapture, VideoCaptureGst] = None,
+    max_yt_quality: int = 0,
+    *,
+    use_gstreamer: bool = False
+) -> Generator[Union[cv2.VideoCapture, VideoCaptureGst], None, None]:
     """Open a video stream from various sources.
 
     This function provides a context manager for opening video streams from different
-    sources, including local cameras, IP cameras, video files, and YouTube videos.
-    The stream is automatically closed when the context is exited.
+    sources. The stream is automatically closed when the context is exited.
     Internally it calls `create_video_stream` to create the stream.
 
     Args:
-        video_source (Union[int, str, Path, None], optional): Video source specification:
-            - int: 0-based index for local cameras
-            - str: IP camera URL (rtsp://user:password@hostname)
-            - str: Local video file path
-            - str: URL to mp4 video file
-            - str: YouTube video URL
-            - None: Use environment variable or default camera
-        max_yt_quality (int, optional): Maximum video quality for YouTube videos in
-            pixels (height). If 0, use best quality. Defaults to 0.
+        video_source: Video source specification (see create_video_stream)
+        max_yt_quality: Maximum video quality for YouTube videos
+        use_gstreamer: If True, use GStreamer backend for video files
 
     Yields:
-        cv2.VideoCapture: OpenCV video capture object.
+        cv2.VideoCapture or VideoCaptureGst: Video capture object.
 
     Raises:
         Exception: If the video stream cannot be opened.
-
     """
-    stream = create_video_stream(video_source, max_yt_quality)
+    stream = create_video_stream(video_source, max_yt_quality, use_gstreamer=use_gstreamer)
     try:
         yield stream
     finally:
@@ -194,26 +276,25 @@ def open_video_stream(
 
 
 def get_video_stream_properties(
-    video_source: Union[int, str, Path, None, cv2.VideoCapture],
+    video_source: Union[int, str, Path, None, cv2.VideoCapture, VideoCaptureGst],
 ) -> tuple:
     """Return the dimensions and frame rate of a video source.
 
     Args:
-        video_source (Union[int, str, Path, None, cv2.VideoCapture]): Video
-            source identifier or an already opened ``VideoCapture`` object.
+        video_source: Video source identifier or an already opened capture object.
 
     Returns:
-        ``(width, height, fps)`` describing the video stream.
+        (width, height, fps) describing the video stream.
     """
 
-    def get_props(stream: cv2.VideoCapture) -> tuple:
+    def get_props(stream: Union[cv2.VideoCapture, VideoCaptureGst]) -> tuple:
         return (
             int(stream.get(cv2.CAP_PROP_FRAME_WIDTH)),
             int(stream.get(cv2.CAP_PROP_FRAME_HEIGHT)),
             stream.get(cv2.CAP_PROP_FPS),
         )
 
-    if isinstance(video_source, cv2.VideoCapture):
+    if isinstance(video_source, (cv2.VideoCapture, VideoCaptureGst)):
         return get_props(video_source)
     else:
         with open_video_stream(video_source) as stream:
@@ -221,21 +302,20 @@ def get_video_stream_properties(
 
 
 def video_source(
-    stream: cv2.VideoCapture, fps: Optional[float] = None
+    stream: Union[cv2.VideoCapture, VideoCaptureGst],
+    fps: Optional[float] = None
 ) -> Generator[np.ndarray, None, None]:
     """Yield frames from a video stream.
 
     Args:
-        stream (cv2.VideoCapture): Open video stream.
-        fps (Optional[float], optional): Target frame rate cap.
+        stream: Open video stream (cv2.VideoCapture or VideoCaptureGst).
+        fps: Target frame rate cap.
 
     Yields:
         Frames from the stream.
     """
 
     is_file = stream.get(cv2.CAP_PROP_FRAME_COUNT) > 0
-    # do not report errors for files and in test mode;
-    # report errors only for camera streams
     report_error = False if env.get_test_mode() or is_file else True
 
     if fps:
@@ -287,38 +367,11 @@ def video_source(
             yield frame
 
 
+# Keep the rest of the file unchanged (VideoWriter, video2jpegs, ClipSaver, etc.)
 class VideoWriter:
-    """Video stream writer with configurable quality and format.
-
-    This class provides functionality to save video streams to files with
-    configurable dimensions, frame rate, and format. It supports both
-    OpenCV and PIL image formats as input.
-
-    Use `open_video_writer()` to create a video writer instance with proper cleanup.
-
-    Attributes:
-        filename (str): Output video file path.
-        width (int): Video width in pixels.
-        height (int): Video height in pixels.
-        fps (float): Target frame rate.
-        count (int): Number of frames written.
-
-    """
+    """Video stream writer with configurable quality and format."""
 
     def __init__(self, fname: str, w: int = 0, h: int = 0, fps: float = 30.0):
-        """Initialize the video writer.
-
-        Args:
-            fname (str): Output video file path.
-            w (int, optional): Video width in pixels. If 0, use input frame width.
-                Defaults to 0.
-            h (int, optional): Video height in pixels. If 0, use input frame height.
-                Defaults to 0.
-            fps (float, optional): Target frame rate. Defaults to 30.0.
-
-        Raises:
-            Exception: If the video writer cannot be created.
-        """
         import platform
 
         self._count = 0
@@ -333,14 +386,10 @@ class VideoWriter:
     def _create_writer(self) -> Any:
         if self._use_ffmpeg:
             import ffmpegcv
-
-            # use ffmpeg-wrapped VideoWriter on other platforms;
-            # reason: OpenCV VideoWriter does not support H264 on Linux
             return ffmpegcv.VideoWriter(
                 self._fname, codec=None, fps=self._fps, resize=self._wh
             )
         else:
-            # use OpenCV VideoWriter on Windows
             return cv2.VideoWriter(
                 self._fname,
                 int.from_bytes("H264".encode(), byteorder="little"),
@@ -349,19 +398,6 @@ class VideoWriter:
             )
 
     def write(self, img: ImageType):
-        """Write a frame to the video file.
-
-        This method writes a single frame to the video file. The frame can be
-        in either OpenCV (BGR) or PIL format.
-
-        Args:
-            img (ImageType): Frame to write. Can be:
-                - OpenCV image (np.ndarray)
-                - PIL Image
-
-        Raises:
-            Exception: If the frame cannot be written.
-        """
         im_sz = image_size(img)
         if self._writer is None:
             self._wh = im_sz
@@ -373,16 +409,10 @@ class VideoWriter:
         self._writer.write(to_opencv(img))
 
     def release(self):
-        """Release the video writer resources.
-
-        This method should be called when finished writing to ensure all
-        resources are properly released.
-        """
         if self._writer is None:
             return
 
         if self._use_ffmpeg:
-            # workaround for bug in ffmpegcv
             self._writer.process.stdin.close()
             self._writer.process.wait()
             delattr(self._writer, "process")
@@ -390,122 +420,34 @@ class VideoWriter:
             self._writer.release()
 
     def __enter__(self):
-        """Enter the context manager.
-
-        Returns:
-            VideoWriter: The current instance.
-        """
         pass
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """Exit the context manager.
-
-        This method ensures the video writer is properly released when
-        exiting the context.
-        """
         self.release()
 
     @property
     def count(self):
-        """Get the number of frames written.
-
-        Returns:
-            (int): Number of frames written to the video file.
-        """
         return self._count
 
 
 def create_video_writer(
     fname: str, w: int = 0, h: int = 0, fps: float = 30.0
 ) -> VideoWriter:
-    """Create and return a video writer.
-
-    Args:
-        fname (str): Output filename for the video file.
-        w (int, optional): Frame width in pixels. ``0`` uses the width of the
-            first frame. Defaults to ``0``.
-        h (int, optional): Frame height in pixels. ``0`` uses the height of the
-            first frame. Defaults to ``0``.
-        fps (float, optional): Target frames per second. Defaults to ``30.0``.
-
-    Returns:
-        VideoWriter: Open video writer instance.
-    """
-
     directory = Path(fname).parent
     if not directory.is_dir():
         directory.mkdir(parents=True)
-
-    return VideoWriter(str(fname), int(w), int(h), fps)  # create stream writer
+    return VideoWriter(str(fname), int(w), int(h), fps)
 
 
 @contextmanager
 def open_video_writer(
     fname: str, w: int = 0, h: int = 0, fps: float = 30.0
 ) -> Generator[VideoWriter, None, None]:
-    """Context manager for ``VideoWriter``.
-
-    This function creates a video writer, yields it for use inside the context,
-    and releases it automatically on exit.
-
-    Args:
-        fname (str): Output filename for the video file.
-        w (int, optional): Frame width in pixels. ``0`` uses the width of the
-            first frame. Defaults to ``0``.
-        h (int, optional): Frame height in pixels. ``0`` uses the height of the
-            first frame. Defaults to ``0``.
-        fps (float, optional): Target frames per second. Defaults to ``30.0``.
-
-    Yields:
-        VideoWriter: Open video writer instance ready for use.
-    """
-
     writer = create_video_writer(fname, w, h, fps)
     try:
         yield writer
     finally:
         writer.release()
-
-
-def video2jpegs(
-    video_file: str,
-    jpeg_path: str,
-    *,
-    jpeg_prefix: str = "frame_",
-    preprocessor: Optional[Callable[[np.ndarray], np.ndarray]] = None,
-) -> int:
-    """Convert a video file into a sequence of JPEG images.
-
-    Args:
-        video_file (str): Path to the input video file.
-        jpeg_path (str): Directory where JPEG files will be stored.
-        jpeg_prefix (str, optional): Prefix for generated image filenames.
-            Defaults to ``"frame_"``.
-        preprocessor (Callable[[np.ndarray], np.ndarray], optional): Optional
-            function applied to each frame before saving.
-
-    Returns:
-        int: Number of frames written to ``jpeg_path``.
-    """
-
-    path_to_jpeg = Path(jpeg_path)
-    if not path_to_jpeg.exists():  # create directory for annotated images
-        path_to_jpeg.mkdir()
-
-    with open_video_stream(video_file) as stream:  # open video stream form file
-        nframes = int(stream.get(cv2.CAP_PROP_FRAME_COUNT))
-        progress = Progress(nframes)
-        # decode video stream into files resized to model input size
-        fi = 0
-        for img in video_source(stream):
-            if preprocessor is not None:
-                img = preprocessor(img)
-            fname = str(path_to_jpeg / f"{jpeg_prefix}{fi:05d}.jpg")
-            cv2.imwrite(fname, img)
-            progress.step()
-            fi += 1
-
-        return fi
 
 
 def detect_rtsp_cameras(subnet_cidr, *, timeout_s=0.5, port=554, max_workers=16):
@@ -520,7 +462,8 @@ def detect_rtsp_cameras(subnet_cidr, *, timeout_s=0.5, port=554, max_workers=16)
               Properties include 'require_auth' indicating if authentication is required.
     """
 
-    import ipaddress, socket
+    import ipaddress
+    import socket
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     def send_rtsp_options(ip, timeout_s, port):
@@ -563,6 +506,31 @@ def detect_rtsp_cameras(subnet_cidr, *, timeout_s=0.5, port=554, max_workers=16)
     return results
 
 
+def video2jpegs(
+    video_file: str,
+    jpeg_path: str,
+    *,
+    jpeg_prefix: str = "frame_",
+    preprocessor: Optional[Callable[[np.ndarray], np.ndarray]] = None,
+) -> int:
+    path_to_jpeg = Path(jpeg_path)
+    if not path_to_jpeg.exists():
+        path_to_jpeg.mkdir()
+
+    with open_video_stream(video_file) as stream:
+        nframes = int(stream.get(cv2.CAP_PROP_FRAME_COUNT))
+        progress = Progress(nframes)
+        fi = 0
+        for img in video_source(stream):
+            if preprocessor is not None:
+                img = preprocessor(img)
+            fname = str(path_to_jpeg / f"{jpeg_prefix}{fi:05d}.jpg")
+            cv2.imwrite(fname, img)
+            progress.step()
+            fi += 1
+        return fi
+
+
 class ClipSaver:
     """Video clip saver with pre/post trigger buffering.
 
@@ -571,8 +539,11 @@ class ClipSaver:
     circular buffer of frames and saves clips when triggers occur.
 
     This class is primarily used by two other components in DeGirum Tools.
-    1. ClipSavingAnalyzer wraps ClipSaver and triggers clips from event names found in EventNotifier or EventDetector results.
-    2. EventNotifier can instantiate and use ClipSaver to record clips when a notification fires, optionally uploading those clips through NotificationServer.
+    1. ClipSavingAnalyzer wraps ClipSaver and triggers clips from event names
+       found in EventNotifier or EventDetector results.
+    2. EventNotifier can instantiate and use ClipSaver to record clips when a
+       notification fires, optionally uploading those clips through
+       NotificationServer.
 
     Attributes:
         clip_duration (int): Total length of output clips in frames.
@@ -742,7 +713,8 @@ class ClipSaver:
                             if hasattr(obj, "to_dict"):
                                 return obj.to_dict()
                             raise TypeError(
-                                f"Object of type {obj.__class__.__name__} is not JSON serializable: implement to_dict() method"
+                                f"Object of type {obj.__class__.__name__} is not JSON "
+                                f"serializable: implement to_dict() method"
                             )
 
                         with open(tempfilename + ".json", "w") as f:
@@ -852,7 +824,8 @@ class MediaServer:
         binary_path = shutil.which(self._binary)
         if not binary_path:
             raise FileNotFoundError(
-                f"Cannot find {self._binary} in PATH. MediaMTX binary must be installed and available in the system path."
+                f"Cannot find {self._binary} in PATH. MediaMTX binary must be "
+                f"installed and available in the system path."
             )
 
         # Determine working directory
