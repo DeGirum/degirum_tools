@@ -92,7 +92,7 @@ class VideoCaptureGst:
             return False, None
 
         try:
-            frame = np.ndarray((height, width, 3), buffer=mapinfo.data, dtype=np.uint8)
+            frame: np.ndarray = np.ndarray((height, width, 3), buffer=mapinfo.data, dtype=np.uint8)
             return True, frame
         finally:
             buf.unmap(mapinfo)

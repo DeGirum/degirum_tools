@@ -34,6 +34,7 @@ from ..video_support import (
     get_video_stream_properties,
     open_video_writer,
     VideoStreamer,
+    VideoCaptureGst,
 )
 
 # predefined meta tags
@@ -78,7 +79,7 @@ class VideoSourceGizmo(Gizmo):
         self._video_source = video_source
         self._stop_composition_on_end = stop_composition_on_end and not get_test_mode()
         self._retry_on_error = retry_on_error
-        self._stream: Optional[cv2.VideoCapture] = None
+        self._stream: Optional[Union[cv2.VideoCapture, VideoCaptureGst]] = None
 
     def get_video_properties(self) -> tuple:
         self._open_video_source()

@@ -121,8 +121,17 @@ def build_gst_pipeline(source):
     format = "BGR"  # Default format for OpenCV compatibility
 
     # ==================== CAMERA SOURCE ====================
-    if isinstance(source, int) or (isinstance(source, str) and source.isdigit()):
-        device = detect_camera_type(source)
+    # 1. if source is int or str but has digit, convert it to int
+    if isinstance(source, int):
+        device_index = source
+    elif isinstance(source, str) and source.isdigit():
+        device_index = int(source)
+    else:
+        # Not a camera source, skip to other checks
+        device_index = None
+    
+    if device_index is not None:
+        device = detect_camera_type(device_index)
         print(f"Detected platform: {platform}, camera type: {device}")
         if device == "rpi_csi" and platform == "raspberrypi":
             # Raspberry Pi CSI Camera
@@ -132,8 +141,21 @@ def build_gst_pipeline(source):
             else:
                 logger.warning("libcamerasrc not available, trying v4l2src")
         # USB/Webcam (or RPi fallback)
-        return f"v4l2src device=/dev/video{source} ! videoscale ! videoconvert ! video/x-raw,format={format} ! appsink name=sink"
+        return f"v4l2src device=/dev/video{device_index} ! videoscale ! videoconvert ! video/x-raw,format={format} ! appsink name=sink"
+
+    # ==================== RTSP SOURCE ====================
+    # 3. if source is str and starts with rtsp
+    elif isinstance(source, str) and source.lower().startswith("rtsp://"):
+        logger.info(f"Building RTSP pipeline for: {source}")
+        # Use decodebin for automatic format handling
+        return (
+            f'rtspsrc location="{source}" latency=0 protocols=tcp ! '
+            f'decodebin ! videoconvert ! videoscale ! '
+            f'appsink name=sink'
+        )
+
     # ==================== FILE SOURCE ====================
+    # 2. if source is str (and not RTSP, not digits)
     elif isinstance(source, str) and os.path.exists(source):
         logger.info(f"Building file pipeline for: {source}")
         # Always use decodebin for maximum compatibility
@@ -143,15 +165,6 @@ def build_gst_pipeline(source):
             f'video/x-raw, format={format} ! '
             f'appsink name=sink'
         )
-
-    # ==================== RTSP SOURCE ====================
-    elif isinstance(source, str) and source.lower().startswith("rtsp://"):
-        logger.info(f"Building RTSP pipeline for: {source}")
-        # Use decodebin for automatic format handling
-        return (
-            f'rtspsrc location="{source}" latency=0 protocols=tcp ! '
-            f'decodebin ! videoconvert ! videoscale ! '
-            f'appsink name=sink'
-        )
+    
     else:
         raise ValueError(f"Unknown source type or file not found: {source}")
