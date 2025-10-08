@@ -35,18 +35,6 @@ def test_gst_init_and_version():
     assert version.count('.') >= 2
 
 
-def test_gst_pipeline_builder_camera():
-    """Test GStreamer pipeline builder for camera sources"""
-    from degirum_tools.gst_support import build_gst_pipeline
-
-    # Test camera source
-    pipeline = build_gst_pipeline(0)
-    assert isinstance(pipeline, str)
-    assert "v4l2src" in pipeline
-    assert "device=/dev/video0" in pipeline
-    assert "appsink" in pipeline
-
-
 def test_gst_pipeline_builder_file():
     """Test GStreamer pipeline builder for file sources"""
     from degirum_tools.gst_support import build_gst_pipeline

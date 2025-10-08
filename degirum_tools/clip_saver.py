@@ -115,7 +115,6 @@ class ClipSavingAnalyzer(ResultAnalyzerBase):
 
         # check trigger
         triggered = set()
-        
         # Use delayed import to avoid circular dependency
         from .notifier import EventNotifier
         notifications = getattr(result, EventNotifier.key_notifications, None)
