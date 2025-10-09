@@ -47,6 +47,7 @@ class VideoCaptureGst:
         Args:
             pipeline_str: GStreamer pipeline string
         """
+        print(f"Initializing VideoCaptureGst with pipeline: {pipeline_str}")
         if not GST_AVAILABLE:
             raise ImportError("GStreamer Python bindings (gi) not available")
 
@@ -69,6 +70,68 @@ class VideoCaptureGst:
 
         self.running = True
 
+    def _get_format_info(self, format_str: str, width: int, height: int) -> tuple[int, int]:
+        """Get channel count and expected buffer size for a given format.
+        Args:
+            format_str: GStreamer format string (e.g., 'BGR', 'RGB', 'I420')
+            width: Frame width
+            height: Frame height
+        Returns:
+            (channels, expected_size): Number of channels and expected buffer size
+        """
+        if not format_str:
+            # Default to 3 channels if format is unknown
+            return 3, width * height * 3
+        # Common format mappings
+        format_info = {
+            # 3-channel formats
+            'BGR': (3, width * height * 3),
+            'RGB': (3, width * height * 3),
+            'BGRx': (4, width * height * 4),
+            'RGBx': (4, width * height * 4),
+            'BGRA': (4, width * height * 4),
+            'RGBA': (4, width * height * 4),
+            # Grayscale
+            'GRAY8': (1, width * height),
+            'GRAY16_LE': (1, width * height * 2),
+            'GRAY16_BE': (1, width * height * 2),
+            # YUV formats (planar)
+            'I420': (1, width * height * 3 // 2),  # 4:2:0 planar
+            'YV12': (1, width * height * 3 // 2),  # 4:2:0 planar
+            'NV12': (1, width * height * 3 // 2),  # 4:2:0 semi-planar
+            'NV21': (1, width * height * 3 // 2),  # 4:2:0 semi-planar
+            # Other common formats
+            'YUY2': (2, width * height * 2),  # 4:2:2 packed
+            'UYVY': (2, width * height * 2),  # 4:2:2 packed
+        }
+        return format_info.get(format_str, (3, width * height * 3))
+
+    def _handle_buffer_mismatch(self, data, width: int, height: int, expected_channels: int, actual_size: int, expected_size: int) -> np.ndarray:
+        """Handle cases where buffer size doesn't match expected size.
+        Args:
+            data: Buffer data
+            width: Frame width
+            height: Frame height
+            expected_channels: Expected number of channels
+            actual_size: Actual buffer size
+            expected_size: Expected buffer size
+        Returns:
+            np.ndarray: Frame data
+        """
+        # Try to determine actual channels from buffer size
+        actual_channels = actual_size // (width * height)
+        if actual_channels > 0:
+            # Use actual channels - this preserves content
+            if actual_channels == 1:
+                frame : np.ndarray = np.ndarray((height, width), buffer=data, dtype=np.uint8)
+            else:
+                frame = np.ndarray((height, width, actual_channels), buffer=data, dtype=np.uint8)
+        else:
+            # Log warning and fail rather than corrupting data
+            # logger.warning(f"Buffer size mismatch: expected {expected_size}, got {actual_size}") # Original code had this line commented out
+            raise ValueError(f"Cannot handle buffer size mismatch for {width}x{height} frame")
+        return frame
+
     def read(self):
         """Read a frame from the GStreamer pipeline.
 
@@ -84,15 +147,65 @@ class VideoCaptureGst:
 
         buf = sample.get_buffer()
         caps = sample.get_caps()
-        width = caps.get_structure(0).get_value("width")
-        height = caps.get_structure(0).get_value("height")
-
+        structure = caps.get_structure(0)
+        width = structure.get_value("width")
+        height = structure.get_value("height")
+        # Get format details
+        format_str = structure.get_string("format")[1] if structure.get_string("format")[0] else None
         success, mapinfo = buf.map(Gst.MapFlags.READ)
         if not success:
             return False, None
 
         try:
-            frame: np.ndarray = np.ndarray((height, width, 3), buffer=mapinfo.data, dtype=np.uint8)
+            # Calculate expected buffer size and channels based on format
+            channels, expected_size = self._get_format_info(format_str or "", width, height)
+            # Check if buffer size matches expected size
+            actual_size = mapinfo.size
+            if actual_size != expected_size:
+                # Try to handle different buffer layouts
+                frame = self._handle_buffer_mismatch(mapinfo.data, width, height, channels, actual_size, expected_size)
+            else:
+                # Standard case - buffer size matches expected
+                if channels == 1:
+                    frame = np.ndarray((height, width), buffer=mapinfo.data, dtype=np.uint8)
+                elif channels == 3:
+                    frame = np.ndarray((height, width, 3), buffer=mapinfo.data, dtype=np.uint8)
+                elif channels == 4:
+                    frame = np.ndarray((height, width, 4), buffer=mapinfo.data, dtype=np.uint8)
+                else:
+                    # Fallback: try to determine channels from buffer size
+                    channels = actual_size // (width * height)
+                    if channels > 0:
+                        frame = np.ndarray((height, width, channels), buffer=mapinfo.data, dtype=np.uint8)
+                    else:
+                        return False, None
+            # Convert to BGR if needed (OpenCV standard)
+            if len(frame.shape) == 3 and frame.shape[2] == 3:
+                # Check if it's RGB and convert to BGR
+                if format_str in ['RGB', 'RGBx']:
+                    frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                elif format_str in ['I420', 'YV12', 'NV12', 'NV21']:
+                    # YUV formats - convert to BGR
+                    frame = cv2.cvtColor(frame, cv2.COLOR_YUV2BGR_I420)
+                # BGR, BGRx formats are already correct
+            elif len(frame.shape) == 3 and frame.shape[2] == 4:
+                # RGBA/BGRA - convert to BGR
+                if format_str in ['RGBA', 'RGBx']:
+                    frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
+                else:  # BGRA
+                    frame = frame[:, :, :3]  # Remove alpha channel
+            elif len(frame.shape) == 3 and frame.shape[2] == 2:
+                # YUY2/UYVY packed formats - convert to BGR
+                if format_str in ['YUY2']:
+                    frame = cv2.cvtColor(frame, cv2.COLOR_YUV2BGR_YUY2)
+                elif format_str in ['UYVY']:
+                    frame = cv2.cvtColor(frame, cv2.COLOR_YUV2BGR_UYVY)
+                else:
+                    # Fallback: duplicate the 2 channels to make 3
+                    frame = np.repeat(frame, 3 // 2 + 1, axis=2)[:, :, :3]
+            elif len(frame.shape) == 2:
+                # Grayscale - convert to BGR
+                frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
             return True, frame
         finally:
             buf.unmap(mapinfo)

@@ -120,6 +120,12 @@ def build_gst_pipeline(source):
     platform = detect_platform()
     format = "BGR"  # Default format for OpenCV compatibility
 
+    # ==================== CUSTOM GSTREAMER PIPELINE ====================
+    # 4. if source is string and contains GStreamer elements, treat as custom pipeline
+    if isinstance(source, str) and _is_gstreamer_pipeline(source):
+        logger.info(f"Using custom GStreamer pipeline: {source}")
+        return source
+
     # ==================== CAMERA SOURCE ====================
     # 1. if source is int or str but has digit, convert it to int
     if isinstance(source, int):
@@ -154,7 +160,7 @@ def build_gst_pipeline(source):
         )
 
     # ==================== FILE SOURCE ====================
-    # 2. if source is str (and not RTSP, not digits)
+    # 2. if source is str (and not RTSP, not digits, not custom pipeline)
     elif isinstance(source, str) and os.path.exists(source):
         logger.info(f"Building file pipeline for: {source}")
         # Always use decodebin for maximum compatibility
@@ -166,3 +172,34 @@ def build_gst_pipeline(source):
         )
     else:
         raise ValueError(f"Unknown source type or file not found: {source}")
+
+
+def _is_gstreamer_pipeline(source: str) -> bool:
+    """
+    Detect if the source string is a custom GStreamer pipeline.
+    Args:
+        source: String to check
+    Returns:
+        True if the string appears to be a GStreamer pipeline
+    """
+    # Check for common GStreamer elements and patterns
+    gst_indicators = [
+        '!',  # Pipeline separator
+        'src',  # Source elements
+        'sink',  # Sink elements
+        'videoconvert',  # Common video element
+        'appsink',  # Common sink for applications
+        'v4l2src',  # Video source
+        'filesrc',  # File source
+        'rtspsrc',  # RTSP source
+        'decodebin',  # Decoder
+        'videoscale',  # Video scaler
+        'video/x-raw',  # Video format
+        'audio/x-raw',  # Audio format
+    ]
+    # Must contain pipeline separator and at least one GStreamer element
+    has_pipeline_sep = '!' in source
+    has_gst_element = any(indicator in source.lower() for indicator in gst_indicators)
+    # Additional check: should not look like a simple file path or URL
+    is_simple_path = (not source.startswith(('http://', 'https://', 'rtsp://', 'rtmp://')) and not source.startswith('/') and not source.startswith('./') and not source.startswith('../') and '.' in source and len(source.split('.')) == 2)
+    return has_pipeline_sep and has_gst_element and not is_simple_path
