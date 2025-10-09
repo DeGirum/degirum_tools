@@ -18,7 +18,7 @@ SOURCE = 0  # Change to "Traffic.mp4" for video file, or 0, 1, 2... for camera
 # SOURCE = "v4l2src device=/dev/video0 ! video/x-raw,format=YUY2 ! videoconvert ! queue max-size-buffers=5 leaky=downstream ! videoscale ! video/x-raw,width=512,height=384 ! appsink name=sink"
 # Model configuration
 MODEL_NAME = 'yolov8n_relu6_coco--640x640_quant_openvino_multidevice_1'
-TOKEN = "dg_9FX1BGergbVpB8YfhHhhGJEfagbL339ffPBKk"
+TOKEN = ""
 
 # =============================================================================
 
