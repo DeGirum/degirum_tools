@@ -118,6 +118,7 @@ from .video_support import (
     get_video_stream_properties,
     video_source,
     open_video_writer,
+    VideoCaptureGst
 )
 from .ui_support import Progress, Display, Timer
 from .result_analyzer_base import ResultAnalyzerBase, subclass_result_with_analyzers
@@ -190,7 +191,8 @@ def connect_model_zoo(
 
     else:
         raise Exception(
-            "Invalid value of inference_option parameter. Should be one of CloudInference, AIServerInference, or LocalHWInference"
+            "Invalid value of inference_option parameter. Should be one of "
+            "CloudInference, AIServerInference, or LocalHWInference"
         )
 
     return zoo
@@ -252,6 +254,7 @@ def attach_analyzers(
 def predict_stream(
     model: dg.model.Model,
     video_source_id: Union[int, str, Path, None],
+    source_type: str = "auto",
     *,
     fps: Optional[float] = None,
     analyzers: Union[ResultAnalyzerBase, List[ResultAnalyzerBase], None] = None,
@@ -296,7 +299,10 @@ def predict_stream(
     if analyzers is not None:
         attach_analyzers(model, analyzers)
 
-    with open_video_stream(video_source_id) as stream:
+    # Determine if we should use GStreamer based on source_type
+    use_gstreamer = (source_type == "gstream")
+
+    with open_video_stream(video_source_id, use_gstreamer=use_gstreamer) as stream:
         for res in model.predict_batch(video_source(stream, fps=fps)):
             yield res
 
@@ -373,7 +379,7 @@ def annotate_video(
             display = stack.enter_context(Display(win_name))
 
         if isinstance(video_source_id, cv2.VideoCapture):
-            stream = video_source_id
+            stream: Union[cv2.VideoCapture, VideoCaptureGst] = video_source_id
         else:
             stream = stack.enter_context(open_video_stream(video_source_id))
 
