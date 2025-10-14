@@ -1094,6 +1094,229 @@ class CropCombiningGizmo(Gizmo):
         return clone
 
 
+class SequentialGatherGizmo(Gizmo):
+    """Gizmo to gather sequential crop results from the same frame into one combined result.
+
+    This gizmo collects multiple inference results that originate from the same source frame
+    (e.g., after cropping multiple detected objects) and combines them back into a single
+    result containing all objects. This is useful after pipelines that split each detected
+    object into separate processing streams.
+
+    The gizmo relies on the `is_last_crop` flag set by `AiObjectDetectionCroppingGizmo` to
+    determine when all crops from a frame have been processed.
+
+    Typical pipeline:
+        source >> detector >> cropper >> processor >> SequentialGatherGizmo >> sink
+
+    Without SequentialGatherGizmo:
+        Frame with 3 faces → 3 separate results → 3 separate outputs
+
+    With SequentialGatherGizmo:
+        Frame with 3 faces → 3 results buffered → 1 combined output with all 3 faces
+
+    Example:
+        ```python
+        from degirum_tools.streams import SequentialGatherGizmo
+
+        # Face recognition pipeline
+        pipeline = (
+            source
+            >> AiSimpleGizmo(face_detector)
+            >> AiObjectDetectionCroppingGizmo(labels=["face"])
+            >> AiSimpleGizmo(face_embedder)
+            >> SequentialGatherGizmo()  # Gather all faces back into one result
+            >> sink
+        )
+        ```
+    """
+
+    def __init__(
+        self,
+        *,
+        stream_depth: int = 10,
+        allow_drop: bool = False,
+    ):
+        """Constructor.
+
+        Args:
+            stream_depth (int): Depth of the input queue. Defaults to 10.
+            allow_drop (bool): If True, allow dropping frames on overflow. Defaults to False.
+        """
+        super().__init__([(stream_depth, allow_drop)])
+        self._buffer: List[StreamData] = []
+
+    def get_tags(self) -> List[str]:
+        """Get list of tags assigned to this gizmo.
+
+        Returns:
+            List[str]: Tags for this gizmo (its name and the inference tag).
+        """
+        return [self.name, tag_inference]
+
+    def require_tags(self, inp: int) -> List[str]:
+        """Get the list of meta tags this gizmo requires in upstream meta for a specific input.
+
+        Returns:
+            List[str]: Tags required by this gizmo in upstream meta for the specified input.
+        """
+        return [tag_crop, tag_inference]
+
+    def run(self):
+        """Run the sequential gather loop.
+
+        Buffers incoming results until the `is_last_crop` flag is detected, then merges
+        all buffered inference results into a single combined result and sends it downstream.
+        """
+        for data in self.get_input(0):
+            if self._abort:
+                break
+
+            # Extract crop metadata to check if this is the last crop
+            crop_meta = data.meta.find_last(tag_crop)
+            if crop_meta is None:
+                # No crop metadata - this shouldn't happen in normal operation
+                # Pass through as-is
+                self.send_result(data)
+                continue
+
+            # Check if this result should be buffered or if we should gather
+            is_last_crop = crop_meta.get(
+                AiObjectDetectionCroppingGizmo.key_is_last_crop, False
+            )
+
+            # Check if this is a "no objects detected" case
+            cropped_index = crop_meta.get(
+                AiObjectDetectionCroppingGizmo.key_cropped_index, -1
+            )
+
+            if cropped_index == -1 and is_last_crop:
+                # No objects were detected in the frame - pass through as-is
+                self.send_result(data)
+                continue
+
+            # Buffer this result
+            self._buffer.append(data)
+
+            # If this is the last crop, merge all buffered results and emit
+            if is_last_crop:
+                merged = self._merge_buffered_results()
+                self.send_result(merged)
+                self._buffer = []  # Clear buffer for next frame
+
+    def _merge_buffered_results(self) -> StreamData:
+        """Merge all buffered inference results into a single StreamData.
+
+        Takes all buffered results (one per cropped object) and combines their inference
+        results into a single result, using the original frame image and the first result's
+        metadata as the base.
+
+        Returns:
+            StreamData: A single StreamData containing all merged inference results.
+        """
+        if not self._buffer:
+            raise Exception(
+                f"{self.__class__.__name__}: cannot merge empty buffer"
+            )
+
+        # Use the first result as the base
+        base_data = self._buffer[0]
+
+        # Get the original frame from crop metadata
+        crop_meta = base_data.meta.find_last(tag_crop)
+        if crop_meta is None:
+            raise Exception(
+                f"{self.__class__.__name__}: crop metadata not found in buffered result"
+            )
+
+        original_result = crop_meta.get(
+            AiObjectDetectionCroppingGizmo.key_original_result
+        )
+        if original_result is None:
+            raise Exception(
+                f"{self.__class__.__name__}: original_result not found in crop metadata"
+            )
+
+        # Clone the original detection result (which has all objects)
+        merged_result = clone_result(original_result)
+
+        # Clear the original inference results - we'll replace with processed ones
+        merged_result._inference_results = []
+
+        # Collect all inference results from buffered data
+        for buffered_data in self._buffer:
+            inference_meta = buffered_data.meta.find_last(tag_inference)
+            if inference_meta is None:
+                continue  # Skip if no inference results
+
+            # Get the crop metadata to find which object this corresponds to
+            buf_crop_meta = buffered_data.meta.find_last(tag_crop)
+            if buf_crop_meta is None:
+                continue
+
+            cropped_result = buf_crop_meta.get(
+                AiObjectDetectionCroppingGizmo.key_cropped_result
+            )
+
+            # Collect all metadata tags from this crop result (excluding structural tags)
+            # Access _tags directly to get ALL tags (including application-specific ones)
+            # Exclude all degirum-tools structural tags (dgt_*) and only merge application-specific metadata
+            structural_tags = {tag_crop, tag_inference, tag_video, tag_resize, tag_preprocess, tag_analyzer}
+            all_tags = list(buffered_data.meta._tags.keys()) if hasattr(buffered_data.meta, '_tags') else []
+            application_metadata = {}
+            
+            for tag in all_tags:
+                if tag not in structural_tags:
+                    meta = buffered_data.meta.find_last(tag)
+                    if meta is not None and isinstance(meta, dict):
+                        # Merge this metadata into our collection
+                        application_metadata.update(meta)
+            
+            # Add the inference results from this crop
+            # The inference results from post-crop processing (e.g., face embedding, OCR)
+            # are combined with the original detection info
+            for res in inference_meta._inference_results:
+                # Strategy: Start with cropped_result (detection info), then merge processed attributes
+                if cropped_result:
+                    # Start with all attributes from the original detection
+                    merged_res = copy.deepcopy(cropped_result)
+                    
+                    # Now overlay the processed result attributes (from face/OCR processing)
+                    # Don't overwrite keys that already exist (preserves detection info)
+                    # but DO add missing keys (allows downstream gizmos to add track_id, etc.)
+                    for key, value in res.items():
+                        if key not in merged_res:
+                            merged_res[key] = value
+                    
+                    # Merge all application-specific metadata (face_search, lpr, etc.)
+                    # Again, only add if not already present
+                    for key, value in application_metadata.items():
+                        if key not in merged_res:
+                            merged_res[key] = value
+                else:
+                    # No cropped result, just use the processed result as-is
+                    merged_res = copy.deepcopy(res)
+
+                merged_result._inference_results.append(merged_res)
+
+        # Create new metadata with the merged result
+        # Start from the original frame's metadata (before cropping)
+        new_meta = base_data.meta.clone()
+
+        # Remove crop-related tags since we're now back to full frame
+        while new_meta.find_last(tag_crop) is not None:
+            new_meta.remove_last(tag_crop)
+
+        # Remove old inference results
+        while new_meta.find_last(tag_inference) is not None:
+            new_meta.remove_last(tag_inference)
+
+        # Append the merged result
+        new_meta.append(merged_result, self.get_tags())
+
+        # Return with the original frame image
+        return StreamData(original_result.image, new_meta)
+
+
 class AiResultCombiningGizmo(Gizmo):
     """Gizmo to combine inference results from multiple AI gizmos of the same type."""
 
