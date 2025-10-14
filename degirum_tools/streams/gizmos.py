@@ -1263,14 +1263,14 @@ class SequentialGatherGizmo(Gizmo):
             structural_tags = {tag_crop, tag_inference, tag_video, tag_resize, tag_preprocess, tag_analyzer}
             all_tags = list(buffered_data.meta._tags.keys()) if hasattr(buffered_data.meta, '_tags') else []
             application_metadata = {}
-            
+
             for tag in all_tags:
                 if tag not in structural_tags:
                     meta = buffered_data.meta.find_last(tag)
                     if meta is not None and isinstance(meta, dict):
                         # Merge this metadata into our collection
                         application_metadata.update(meta)
-            
+
             # Add the inference results from this crop
             # The inference results from post-crop processing (e.g., face embedding, OCR)
             # are combined with the original detection info
@@ -1279,14 +1279,14 @@ class SequentialGatherGizmo(Gizmo):
                 if cropped_result:
                     # Start with all attributes from the original detection
                     merged_res = copy.deepcopy(cropped_result)
-                    
+
                     # Now overlay the processed result attributes (from face/OCR processing)
                     # Don't overwrite keys that already exist (preserves detection info)
                     # but DO add missing keys (allows downstream gizmos to add track_id, etc.)
                     for key, value in res.items():
                         if key not in merged_res:
                             merged_res[key] = value
-                    
+
                     # Merge all application-specific metadata (face_search, lpr, etc.)
                     # Again, only add if not already present
                     for key, value in application_metadata.items():
