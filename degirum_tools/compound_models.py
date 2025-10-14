@@ -53,92 +53,72 @@ For more performant applications requiring better scalability and more flexible 
 
 **Detection + Classification**:
 ```python
-import degirum as dg
+from degirum_tools import ModelSpec, remote_assets
 from degirum_tools.compound_models import CroppingAndClassifyingCompoundModel
 
-# Declaring variables
-your_detection_model = "yolov8n_relu6_coco--640x640_quant_n2x_orca1_1"
-your_classification_model = "resnet50_imagenet--224x224_pruned_quant_n2x_orca1_1"
-your_host_address = dg.CLOUD  # Can be dg.CLOUD, host:port, or dg.LOCAL
-your_model_zoo = "degirum/degirum"
-your_token = "<token>"
-
-# Specify images for inference
-your_image = "path/image1.jpg"
-your_images = ["path/image2.jpg", "path/image3.jpg"]
-
-# Loading the individual models
-detector = dg.load_model(
-    model_name=your_detection_model,
-    inference_host_address=your_host_address,
-    zoo_url=your_model_zoo,
-    token=your_token
+# Describe the individual models once
+detector_spec = ModelSpec(
+    model_name="<your_detection_model>",
+    inference_host_address="@cloud",  # Can be '@cloud', host:port, or '@local'
+    zoo_url="degirum/degirum",
 )
 
-classifier = dg.load_model(
-    model_name=your_classification_model,
-    inference_host_address=your_host_address,
-    zoo_url=your_model_zoo,
-    token=your_token
+classifier_spec = ModelSpec(
+    model_name="<your_classification_model>",
+    inference_host_address="@cloud",
+    zoo_url="degirum/degirum",
 )
 
-# Creating a compound model pipeline
-compound_model = CroppingAndClassifyingCompoundModel(detector, classifier)
+with detector_spec.load_model() as detector, classifier_spec.load_model() as classifier:
+    # Creating a compound model pipeline
+    compound_model = CroppingAndClassifyingCompoundModel(detector, classifier)
 
-# Single frame inference using predict()
-print("Using predict():")
-single_result = compound_model(your_image)
-print(single_result)
+    # Single frame inference using predict()
+    print("Using predict():")
+    single_result = compound_model(remote_assets.cat)
+    print(single_result)
 
-# Batch inference using predict_batch()
-print("Using predict_batch():")
-for batch_result in compound_model.predict_batch(your_images):
-    print(batch_result)
+    # Batch inference using predict_batch()
+    print("Using predict_batch():")
+    for batch_result in compound_model.predict_batch(
+        [remote_assets.cat, remote_assets.two_cats]
+    ):
+        print(batch_result)
 ```
 
 **Detection + Detection**:
 ```python
-import degirum as dg
+from degirum_tools import ModelSpec, remote_assets
 from degirum_tools.compound_models import CombiningCompoundModel
 
-# Declaring variables
-your_detection_model_1 = "yolov8n_relu6_car--640x640_quant_n2x_orca1_1"
-your_detection_model_2 = "yolov8n_relu6_coco--640x640_quant_n2x_orca1_1"
-your_host_address = dg.CLOUD  # Can be dg.CLOUD, host:port, or dg.LOCAL
-your_model_zoo = "degirum/degirum"
-your_token = "<token>"
-
-# Specify images for inference
-your_image = "path/image1.jpg"
-your_images = ["path/image2.jpg", "path/image3.jpg"]
-
-# Loading the individual detection models
-detector1 = dg.load_model(
-    model_name=your_detection_model_1,
-    inference_host_address=your_host_address,
-    zoo_url=your_model_zoo,
-    token=your_token
+# Describe the detectors up front
+detector1_spec = ModelSpec(
+    model_name="<your_first_detection_model>",
+    inference_host_address="@cloud",  # Can be '@cloud', host:port, or '@local'
+    zoo_url="degirum/degirum",
 )
 
-detector2 = dg.load_model(
-    model_name=your_detection_model_2,
-    inference_host_address=your_host_address,
-    zoo_url=your_model_zoo,
-    token=your_token
+detector2_spec = ModelSpec(
+    model_name="<your_second_detection_model>",
+    inference_host_address="@cloud",
+    zoo_url="degirum/degirum",
 )
 
-# Creating a compound model that merges results from both detectors
-compound_detector = CombiningCompoundModel(detector1, detector2)
+with detector1_spec.load_model() as detector1, detector2_spec.load_model() as detector2:
+    # Creating a compound model that merges results from both detectors
+    compound_detector = CombiningCompoundModel(detector1, detector2)
 
-# Single frame inference using predict()
-print("Using predict():")
-single_result = compound_detector(your_image)
-print(single_result.results)
+    # Single frame inference using predict()
+    print("Using predict():")
+    single_result = compound_detector(remote_assets.cat)
+    print(single_result.results)
 
-# Batch inference using predict_batch()
-print("Using predict_batch():")
-for batch_result in compound_detector.predict_batch(your_images):
-    print(batch_result.results)
+    # Batch inference using predict_batch()
+    print("Using predict_batch():")
+    for batch_result in compound_detector.predict_batch(
+        [remote_assets.cat, remote_assets.two_cats]
+    ):
+        print(batch_result.results)
 ```
 
 See class-level documentation below for details on individual classes and additional configuration options.

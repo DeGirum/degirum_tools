@@ -726,6 +726,8 @@ class Progress:
         speed_units (str): Units to display for speed (e.g., "FPS", "items/s").
     """
 
+    utf8_supported = sys.stdout.encoding.lower() == "utf-8"
+
     def __init__(
         self,
         last_step: Optional[int] = None,
@@ -832,11 +834,17 @@ class Progress:
         bars = int(self._percent / 100 * self._len)
         elapsed_s = time.time() - self._start_time
 
-        tips = "−\\/"
+        if Progress.utf8_supported:
+            tips = "−\\/"
+            bar_char = "█"
+        else:
+            tips = "-\\/"
+            bar_char = "#"
+
         tip = tips[self._tip_phase] if bars < self._len else ""
         self._tip_phase = (self._tip_phase + 1) % len(tips)
 
-        prog_str = f"{round(self._percent):4d}% |{'█' * bars}{tip}{'-' * (self._len - bars - 1)}|"
+        prog_str = f"{round(self._percent):4d}% |{bar_char * bars}{tip}{'-' * (self._len - bars - 1)}|"
         if self._last_step is not None:
             prog_str += f" {self._step}/{self._last_step}"
 

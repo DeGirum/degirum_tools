@@ -11,11 +11,10 @@ python-dotenv
 requests
 psutil
 opencv-python
-degirum>=0.16.2
+degirum>=0.18.3
 ipython
 pafy
 youtube-dl==2020.12.2
-faster-coco-eval
 pycocotools
 pyyaml
 ffmpegcv>=0.3.15;platform_system!='Windows'

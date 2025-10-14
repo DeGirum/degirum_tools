@@ -43,22 +43,13 @@ Key Concepts
 Basic Usage Example
 -------------------
 ```python
-import degirum as dg
+from degirum_tools import ModelSpec, remote_assets
 from degirum_tools.inference_support import (
-    connect_model_zoo,
     attach_analyzers,
     annotate_video,
     model_time_profile,
 )
 from degirum_tools.result_analyzer_base import ResultAnalyzerBase
-
-# Declaring model variable
-# If you will use the DeGirum AI Hub model zoo, set the CLOUD_ZOO_URL environmental variable to a model zoo path such as degirum/degirum,
-# and ensure the DEGIRUM_CLOUD_TOKEN environmental variable is set to your AI Hub token.
-# CLOUD_ZOO_URL will default to degirum/public if left empty.
-your_detection_model = "yolov8n_relu6_coco--640x640_quant_n2x_orca1_1"
-your_video = "<path to your video>"
-your_output_video_path = "<path to where the annotated output should be saved>"
 
 
 # Define a simple analyzer that draws text on each frame
@@ -83,35 +74,34 @@ class MyDummyAnalyzer(ResultAnalyzerBase):
         )
         return image
 
-# Connect to a model zoo.
-# Set to 1 for CloudInference, 2 for AIServerInference, and 3 for LocalHWInference.
-inference_manager = connect_model_zoo(1)
-
-# Load a single detection model (example: YOLO-based detection)
-model = inference_manager.load_model(
-    model_name=your_detection_model
+# Describe the model once so the configuration is reusable.
+model_spec = ModelSpec(
+    model_name="<your_model_name>",
+    zoo_url="degirum/degirum",
+    inference_host_address="@cloud",
 )
 
-# Attach dummy analyzer
-attach_analyzers(model, MyDummyAnalyzer())
+with model_spec.load_model() as model:
+    # Attach dummy analyzer
+    attach_analyzers(model, MyDummyAnalyzer())
 
-# Annotate a video with detection results + dummy analyzer and set a path to save the video
-annotate_video(
-    model,
-    video_source_id=your_video,
-    output_video_path=your_output_video_path,
-    show_progress=True,      # Show a progress bar in console
-    visual_display=True,     # Open an OpenCV window to display frames
-    show_ai_overlay=True,    # Use model's overlay with bounding boxes
-    fps=None                 # Use the source's native frame rate
-)
+    # Annotate a video with detection results + dummy analyzer and set a path to save the video
+    annotate_video(
+        model,
+        video_source_id=remote_assets.store_short,
+        output_video_path="annotated_output.mp4",
+        show_progress=True,      # Show a progress bar in console
+        visual_display=True,     # Open an OpenCV window to display frames
+        show_ai_overlay=True,    # Use model's overlay with bounding boxes
+        fps=None                 # Use the source's native frame rate
+    )
 
-# Time-profile the model
-profile = model_time_profile(model, iterations=100)
-print("Time profiling results:")
-print(f"  Elapsed time: {profile.elapsed:.3f} s")
-print(f"  Observed FPS: {profile.observed_fps:.2f}")
-print(f"  Max possible FPS: {profile.max_possible_fps:.2f}")
+    # Time-profile the model
+    profile = model_time_profile(model, iterations=100)
+    print("Time profiling results:")
+    print(f"  Elapsed time: {profile.elapsed:.3f} s")
+    print(f"  Observed FPS: {profile.observed_fps:.2f}")
+    print(f"  Max possible FPS: {profile.max_possible_fps:.2f}")
 ```
 """
 
@@ -120,7 +110,7 @@ import numpy as np
 import degirum as dg  # import DeGirum PySDK
 from contextlib import ExitStack
 from pathlib import Path
-from typing import Union, List, Optional, Iterator
+from typing import Union, List, Optional, Iterator, Final
 from dataclasses import dataclass
 from .compound_models import CompoundModelBase
 from .video_support import (
@@ -139,6 +129,19 @@ CloudInference = 1  # use DeGirum cloud server for inference
 AIServerInference = 2  # use AI server deployed in LAN/VPN
 LocalHWInference = 3  # use locally-installed AI HW accelerator
 
+DTYPE_MAP: Final = {
+    "DG_FLT": np.float32,
+    "DG_DBL": np.float64,
+    "DG_UINT8": np.uint8,
+    "DG_INT8": np.int8,
+    "DG_UINT16": np.uint16,
+    "DG_INT16": np.int16,
+    "DG_UINT32": np.uint32,
+    "DG_INT32": np.int32,
+    "DG_UINT64": np.uint64,
+    "DG_INT64": np.int64,
+}
+
 
 def connect_model_zoo(
     inference_option: int = CloudInference,
@@ -156,7 +159,7 @@ def connect_model_zoo(
 
     Args:
         inference_option (int):
-            One of ``CloudInference``, ``AIServerInference``, or ``LocalHWInference``.
+            One of ``CloudInference``, ``AIServerInference``, or ``LocalHWInference``
 
     Raises:
         Exception: If an invalid ``inference_option`` is provided.
@@ -434,7 +437,7 @@ class ModelTimeProfile:
 
 
 def model_time_profile(
-    model: dg.model.Model, iterations: int = 100
+    model: dg.model.Model, iterations: int = 100, input_image_format: str = "JPEG"
 ) -> ModelTimeProfile:
     """
     Profile the inference performance of a DeGirum PySDK model by running a specified
@@ -483,7 +486,7 @@ def model_time_profile(
 
     try:
         # Configure model for time measurement
-        model.input_image_format = "JPEG"
+        model.input_image_format = input_image_format
         model.measure_time = True
         model.image_backend = "opencv"
 
@@ -521,3 +524,80 @@ def model_time_profile(
         parameters=model.model_info,
         time_stats=stats,
     )
+
+
+def _build_dummy_input(model: dg.model.Model):
+    """Helper to build one dummy input tuple/list matching the model's inputs"""
+
+    info = model.model_info
+    dummy_inputs = []
+
+    for i, input_type in enumerate(info.InputType):
+        shape = model.input_shape[i]
+
+        if input_type == "Image":
+            dummy_inputs.append(np.zeros((10, 10, 3), np.uint8))
+
+        elif input_type == "Audio":
+            waveform_size = info.InputWaveformSize[i]
+            if waveform_size <= 0:
+                raise dg.exceptions.DegirumException(
+                    f"Cannot create dummy audio for warmup: invalid InputWaveformSize ({waveform_size})."
+                )
+            raw_dtype = info.InputRawDataType[i]
+            dtype = DTYPE_MAP.get(raw_dtype)
+            if dtype is None:
+                raise dg.exceptions.DegirumException(
+                    f"Cannot create dummy audio for warmup: unsupported data type '{raw_dtype}'."
+                )
+            dummy_inputs.append(np.zeros((waveform_size,), dtype=dtype))
+
+        elif input_type == "Tensor":
+            raw_dtype = info.InputRawDataType[i]
+            dtype = DTYPE_MAP.get(raw_dtype)
+            if dtype is None:
+                raise dg.exceptions.DegirumException(
+                    f"Cannot create dummy tensor for warmup: unsupported data type '{raw_dtype}'."
+                )
+            dummy_inputs.append(np.zeros(shape, dtype=dtype))
+
+        else:
+            raise dg.exceptions.DegirumException(
+                f"Warmup is not implemented for the model input type: '{input_type}'."
+            )
+
+    return dummy_inputs[0] if len(dummy_inputs) == 1 else dummy_inputs
+
+
+def warmup_device(model: dg.model.Model, chosen_device: int):
+    """Warm up given model on the given device in devices_available"""
+    if chosen_device not in model.devices_available:
+        raise dg.exceptions.DegirumException(
+            f"Device {chosen_device} is not in model.devices_available: {model.devices_available}"
+        )
+
+    previous_selection = model.devices_selected
+    try:
+        model.devices_selected = [chosen_device]
+        model.predict(_build_dummy_input(model))
+    finally:
+        model.devices_selected = previous_selection
+
+
+def warmup_model(model: dg.model.Model):
+    """
+    Warms up a model by performing one inference on a dummy input frame on each device selected.
+
+    This is useful for initializing the model internals and hardware, which can
+    reduce latency on the first real inference.
+
+    Args:
+        model (dg.model.Model): The DeGirum PySDK model object to warm up.
+    """
+    # For cloud models, we enforce a single-device warmup.
+    if isinstance(model, dg.model._CloudServerModel):
+        warmup_device(model, 0)
+        return
+
+    for device in model.devices_selected:
+        warmup_device(model, device)
