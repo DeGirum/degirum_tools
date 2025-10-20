@@ -281,27 +281,32 @@ def put_text(
             li.y -= max_y
 
     for li in lines:
-        if bg_color is not None:
-            sz_h = li.line_height
-            sz_w = max_width
+        sz_h = int(max(0, li.line_height))
+        sz_w = int(max(0, max_width))
+        if bg_color is not None and sz_h > 0 and sz_w > 0:
+            # Desired rectangle
+            x0_req, y0_req = int(li.x), int(li.y)
+            x1_req, y1_req = x0_req + sz_w, y0_req + sz_h
 
-            # add background mask to image
-            if sz_h > 0 and sz_w > 0:
-                bg_mask = np.zeros((sz_h, sz_w, 3), np.uint8)
-                bg_mask[:, :] = np.array(bg_color)
-                image[
-                    li.y : li.y + sz_h,
-                    li.x : li.x + sz_w,
-                ] = bg_mask
+            # Clip to image bounds
+            x0 = max(0, min(im_w, x0_req))
+            y0 = max(0, min(im_h, y0_req))
+            x1 = max(0, min(im_w, x1_req))
+            y1 = max(0, min(im_h, y1_req))
 
-        # add text to image
+            tw, th = x1 - x0, y1 - y0
+            if tw > 0 and th > 0:
+                patch = np.empty((th, tw, 3), dtype=image.dtype)
+                patch[...] = bg_color
+                image[y0:y1, x0:x1] = patch  # safe assignment
+
+        # Draw text (OpenCV will clip text that overflows)
+        text_x = int(li.x + margin // 2)
+        text_y = int(li.y + li.line_height_no_baseline + margin // 2)  # baseline origin
         image = cv2.putText(
             image,
             li.line,
-            (
-                li.x + margin // 2,
-                li.y + li.line_height_no_baseline + margin // 2,
-            ),  # putText start bottom-left
+            (text_x, text_y),                 # bottom-left origin
             font_face,
             font_scale,
             font_color,
