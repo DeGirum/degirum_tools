@@ -222,7 +222,45 @@ def put_text(
     top_left_xy = corner_xy
     lines: List[LineInfo] = []
     max_width = max_height = 0
-    for line in label.splitlines():
+
+    # Helper function that measures how much width and height to use for font
+    def _measure_block(lines, font_face, font_scale, font_thickness, margin, line_spacing):
+        max_w = 0
+        total_h = 0
+        for i, line in enumerate(lines):
+            (w, h_no), baseline = cv2.getTextSize(line, font_face, font_scale, font_thickness)
+            line_h = h_no + baseline + margin
+            max_w = max(max_w, w + margin)  # add right margin (matches your drawing)
+            total_h += line_h if i == 0 else int(line_h * line_spacing)
+        return max_w, total_h
+
+    lines_text = label.splitlines()
+
+    # 1) initial measure at requested font_scale
+    req_scale = float(font_scale)
+    block_w, block_h = _measure_block(
+        lines_text, font_face, req_scale, font_thickness, margin=6, line_spacing=line_spacing
+    )
+
+    # 2) compute available space (whole image; change if you want a smaller box)
+    avail_w, avail_h = image.shape[1], image.shape[0]
+
+    # 3) compute fit scale (≤ 1.0 means shrink)
+    def _safe_ratio(num, den): 
+        return num / den if den > 0 else 1.0
+
+    scale_w = _safe_ratio(avail_w, block_w) if block_w > 0 else 1.0
+    scale_h = _safe_ratio(avail_h, block_h) if block_h > 0 else 1.0
+    fit_scale = min(1.0, scale_w, scale_h)
+
+    # 4) apply (with a tiny safety margin to avoid off-by-one overflows)
+    font_scale = max(0.1, req_scale * fit_scale * 0.98)
+
+    # (optional) adjust thickness proportionally, keep ≥1
+    if font_thickness > 0:
+        font_thickness = max(1, int(round(font_thickness * (font_scale / max(req_scale, 1e-6)))))
+
+    for line in lines_text:
         li = LineInfo()
         li.line = line
         (line_width, li.line_height_no_baseline), baseline = cv2.getTextSize(
