@@ -8,7 +8,6 @@
 #
 
 import queue, copy, time, cv2, numpy as np
-from types import ModuleType
 import degirum as dg
 from abc import abstractmethod
 from typing import Iterator, Optional, List, Union
@@ -20,7 +19,6 @@ except ImportError:
     Image = None
 
 from .base import Stream, StreamData, StreamMeta, Gizmo
-
 from ..crop_extent import CropExtentOptions, extend_bbox
 from ..environment import get_test_mode, get_token
 from ..event_detector import EventDetector
@@ -35,6 +33,7 @@ from ..video_support import (
     VideoStreamer,
     VideoCaptureGst,
 )
+from ..inference_support import VideoSourceType
 
 # predefined meta tags
 tag_video = "dgt_video"  # tag for video source data
@@ -46,9 +45,20 @@ tag_analyzer = "dgt_analyzer"  # tag for analyzer result
 
 
 class VideoSourceGizmo(Gizmo):
-    """OpenCV-based video source gizmo.
+    """Video source gizmo with OpenCV and GStreamer support.
 
     Captures frames from a video source (camera, video file, etc.) and outputs them as [StreamData](streams_base.md#streamdata) into the pipeline.
+    Supports both OpenCV and GStreamer backends for maximum compatibility and performance.
+
+    Example:
+    ```python
+    # Using enum (recommended)
+    source = VideoSourceGizmo("video.mp4", source_type=VideoSourceType.GSTREAMER)
+    # Using string (backward compatible)
+    source = VideoSourceGizmo("video.mp4", source_type="gstream")
+    # Auto-detect best backend (default)
+    source = VideoSourceGizmo("video.mp4")
+    ```
     """
 
     # meta keys for video frame information
@@ -63,6 +73,7 @@ class VideoSourceGizmo(Gizmo):
         self,
         video_source=None,
         *,
+        source_type: Union[str, VideoSourceType] = VideoSourceType.AUTO,
         stop_composition_on_end: bool = False,
         retry_on_error: bool = False,
     ):
@@ -71,11 +82,16 @@ class VideoSourceGizmo(Gizmo):
         Args:
             video_source (int or str, optional): A cv2.VideoCapture-compatible video source
                 (device index as int, or file path/URL as str). Defaults to None.
+            source_type (Union[str, VideoSourceType]): Video backend to use. Options:
+                - VideoSourceType.AUTO or "auto": Automatically choose best backend
+                - VideoSourceType.GSTREAMER or "gstream": Force GStreamer backend
+                - VideoSourceType.OPENCV or "opencv": Force OpenCV backend
             stop_composition_on_end (bool): If True, stop the [Composition](streams_base.md#composition) when the video source is over. Defaults to False.
             retry_on_error (bool): If True, retry opening the video source on error after some time. Defaults to False.
         """
         super().__init__()
         self._video_source = video_source
+        self._source_type = source_type
         self._stop_composition_on_end = stop_composition_on_end and not get_test_mode()
         self._retry_on_error = retry_on_error
         self._stream: Optional[Union[cv2.VideoCapture, VideoCaptureGst]] = None
@@ -87,7 +103,10 @@ class VideoSourceGizmo(Gizmo):
     def _open_video_source(self):
         """Open the video source if it is not opened."""
         if self._stream is None:
-            self._stream = create_video_stream(self._video_source)
+            # Convert source_type to enum and determine backend
+            source_type_enum = VideoSourceType.from_string(self._source_type)
+            use_gstreamer = (source_type_enum == VideoSourceType.GSTREAMER)
+            self._stream = create_video_stream(self._video_source, use_gstreamer=use_gstreamer)
 
     def _close_video_source(self):
         """Open the video source if it is not opened."""
