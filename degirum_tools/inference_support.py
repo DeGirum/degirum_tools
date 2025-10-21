@@ -314,6 +314,7 @@ def annotate_video(
     model: dg.model.Model,
     video_source_id: Union[int, str, Path, None, cv2.VideoCapture],
     output_video_path: str,
+    source_type: str = "auto",  # Add this parameter
     *,
     show_progress: bool = True,
     visual_display: bool = True,
@@ -378,10 +379,13 @@ def annotate_video(
         if visual_display:
             display = stack.enter_context(Display(win_name))
 
+        # Determine if we should use GStreamer based on source_type
+        use_gstreamer = (source_type == "gstream")
+
         if isinstance(video_source_id, cv2.VideoCapture):
             stream: Union[cv2.VideoCapture, VideoCaptureGst] = video_source_id
         else:
-            stream = stack.enter_context(open_video_stream(video_source_id))
+            stream = stack.enter_context(open_video_stream(video_source_id, use_gstreamer=use_gstreamer))
 
         w, h, video_fps = get_video_stream_properties(stream)
 

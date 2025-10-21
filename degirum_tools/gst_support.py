@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Simple GStreamer Pipeline Builder
 Focus: Compatibility over optimization
@@ -8,26 +7,25 @@ import os
 import subprocess
 from pathlib import Path
 from typing import Tuple
-import logging
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from . import logger_get
 
 
-def run_command(cmd: list, timeout: int = 5) -> Tuple[str, str, int]:
+def _run_command(cmd: list, timeout: int = 5, check_for_lingering_process: bool = False) -> Tuple[str, str, int]:
     """Run command and return stdout, stderr, returncode"""
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        # After running, check for lingering v4l2-ctl processes
-        lingering = subprocess.run(["pgrep", "v4l2-ctl"], capture_output=True, text=True)
-        if lingering.stdout.strip():
-            print("Warning: v4l2-ctl process still running!")
+        # Check for lingering processes if requested
+        if check_for_lingering_process and cmd:
+            process_name = cmd[0]  # Use the first part of the command as process name
+            lingering = subprocess.run(["pgrep", process_name], capture_output=True, text=True)
+            if lingering.stdout.strip():
+                logger_get().warning(f"{process_name} process still running!")
         return result.stdout, result.stderr, result.returncode
     except Exception as e:
         return "", str(e), 1
 
 
-def detect_camera_type(device_index: int) -> str:
+def _detect_camera_type(device_index: int) -> str:
     """
     Detect camera type using multiple methods
     Returns: 'rpi_csi', 'usb', or 'unknown'
@@ -36,7 +34,7 @@ def detect_camera_type(device_index: int) -> str:
     if not os.path.exists(device_path):
         raise FileNotFoundError(f"Camera device {device_path} not found")
     # Method 1: Check v4l2-ctl device info
-    stdout, stderr, ret = run_command(["v4l2-ctl", "-d", device_path, "--info"])
+    stdout, stderr, ret = _run_command(["v4l2-ctl", "-d", device_path, "--info"], check_for_lingering_process=True)
     if ret == 0:
         info_lower = stdout.lower()
         # Raspberry Pi indicators (more comprehensive list)
@@ -46,10 +44,10 @@ def detect_camera_type(device_index: int) -> str:
         ]
         for indicator in rpi_indicators:
             if indicator in info_lower:
-                logger.info(f"Found RPi indicator '{indicator}' in device info")
+                logger_get().info(f"Found RPi indicator '{indicator}' in device info")
                 return "rpi_csi"
     else:
-        logger.warning(f"v4l2-ctl failed for {device_path}: {stderr}")
+        logger_get().warning(f"v4l2-ctl failed for {device_path}: {stderr}")
     # Method 2: Check device path in /sys (fallback)
     try:
         device_name = Path(device_path).name  # e.g., 'video19'
@@ -61,37 +59,37 @@ def detect_camera_type(device_index: int) -> str:
             rpi_path_indicators = ['platform/axi:csi', 'platform/soc/csi', 'platform/rp1', 'bcm2835', 'unicam', 'cfe']
             for indicator in rpi_path_indicators:
                 if indicator in real_path:
-                    logger.info(f"Found RPi path indicator '{indicator}' in sys path")
+                    logger_get().info(f"Found RPi path indicator '{indicator}' in sys path")
                     return "rpi_csi"
     except Exception as e:
-        logger.debug(f"Sys path check failed: {e}")
+        logger_get().debug(f"Sys path check failed: {e}")
     try:
-        stdout, stderr, ret = run_command(["v4l2-ctl", "-d", device_path, "--list-formats"])
+        stdout, stderr, ret = _run_command(["v4l2-ctl", "-d", device_path, "--list-formats"])
         if ret == 0:
             formats_lower = stdout.lower()
             # logger.info(f"v4l2-ctl formats for {device_path}: {stdout}")
             #  RPi cameras often have specific format patterns
             if any(indicator in formats_lower for indicator in ['bayer', 'rggb', 'grbg']):
-                logger.info("Found raw Bayer format - likely RPi CSI camera")
+                logger_get().info("Found raw Bayer format - likely RPi CSI camera")
                 return "rpi_csi"
     except Exception as e:
-        logger.debug(f"Format check failed: {e}")
+        logger_get().debug(f"Format check failed: {e}")
     # Method 4: Check high device numbers (RPi cameras often get high numbers)
     if device_index >= 10:
-        logger.info(f"High device number {device_index} - likely RPi camera")
+        logger_get().info(f"High device number {device_index} - likely RPi camera")
         # But still need confirmation from other methods, so this is just a hint
     # Everything else is treated as USB/webcam
-    logger.info(f"No RPi indicators found - assuming USB/Webcam for {device_path}")
+    logger_get().info(f"No RPi indicators found - assuming USB/Webcam for {device_path}")
     return "usb"
 
 
-def check_element_exists(element_name: str) -> bool:
+def _check_element_exists(element_name: str) -> bool:
     """Check if a GStreamer element exists"""
-    stdout, stderr, ret = run_command(["gst-inspect-1.0", element_name])
+    stdout, stderr, ret = _run_command(["gst-inspect-1.0", element_name])
     return ret == 0
 
 
-def detect_platform() -> str:
+def _detect_platform() -> str:
     """Simple platform detection"""
     try:
         # Check device tree for ARM devices
@@ -117,13 +115,13 @@ def detect_platform() -> str:
 
 
 def build_gst_pipeline(source):
-    platform = detect_platform()
+    platform = _detect_platform()
     format = "BGR"  # Default format for OpenCV compatibility
 
     # ==================== CUSTOM GSTREAMER PIPELINE ====================
     # 4. if source is string and contains GStreamer elements, treat as custom pipeline
     if isinstance(source, str) and _is_gstreamer_pipeline(source):
-        logger.info(f"Using custom GStreamer pipeline: {source}")
+        logger_get().info(f"Using custom GStreamer pipeline: {source}")
         return source
 
     # ==================== CAMERA SOURCE ====================
@@ -136,22 +134,22 @@ def build_gst_pipeline(source):
         # Not a camera source, skip to other checks
         device_index = None
     if device_index is not None:
-        device = detect_camera_type(device_index)
-        print(f"Detected platform: {platform}, camera type: {device}")
+        device = _detect_camera_type(device_index)
+        logger_get().info(f"Detected platform: {platform}, camera type: {device}")
         if device == "rpi_csi" and platform == "raspberrypi":
             # Raspberry Pi CSI Camera
-            if check_element_exists("libcamerasrc"):
-                logger.info("Using libcamerasrc for RPi CSI camera")
-                return "libcamerasrc ! videoconvert ! video/x-raw,format={format} ! appsink name=sink"
+            if _check_element_exists("libcamerasrc"):
+                logger_get().info("Using libcamerasrc for RPi CSI camera")
+                return f"libcamerasrc ! videoconvert ! video/x-raw,format={format} ! appsink name=sink"
             else:
-                logger.warning("libcamerasrc not available, trying v4l2src")
+                logger_get().warning("libcamerasrc not available, trying v4l2src")
         # USB/Webcam (or RPi fallback)
         return f"v4l2src device=/dev/video{device_index} ! videoscale ! videoconvert ! video/x-raw,format={format} ! appsink name=sink"
 
     # ==================== RTSP SOURCE ====================
     # 3. if source is str and starts with rtsp
     elif isinstance(source, str) and source.lower().startswith("rtsp://"):
-        logger.info(f"Building RTSP pipeline for: {source}")
+        logger_get().info(f"Building RTSP pipeline for: {source}")
         # Use decodebin for automatic format handling
         return (
             f'rtspsrc location="{source}" latency=0 protocols=tcp ! '
@@ -162,7 +160,7 @@ def build_gst_pipeline(source):
     # ==================== FILE SOURCE ====================
     # 2. if source is str (and not RTSP, not digits, not custom pipeline)
     elif isinstance(source, str) and os.path.exists(source):
-        logger.info(f"Building file pipeline for: {source}")
+        logger_get().info(f"Building file pipeline for: {source}")
         # Always use decodebin for maximum compatibility
         return (
             f'filesrc location="{source}" ! '
@@ -201,5 +199,10 @@ def _is_gstreamer_pipeline(source: str) -> bool:
     has_pipeline_sep = '!' in source
     has_gst_element = any(indicator in source.lower() for indicator in gst_indicators)
     # Additional check: should not look like a simple file path or URL
-    is_simple_path = (not source.startswith(('http://', 'https://', 'rtsp://', 'rtmp://')) and not source.startswith('/') and not source.startswith('./') and not source.startswith('../') and '.' in source and len(source.split('.')) == 2)
+    is_url = source.startswith(('http://', 'https://', 'rtsp://', 'rtmp://'))
+    is_absolute_path = source.startswith('/')
+    is_relative_path = source.startswith('./') or source.startswith('../')
+    has_dot = '.' in source
+    has_one_dot = len(source.split('.')) == 2
+    is_simple_path = (not is_url and not is_absolute_path and not is_relative_path and has_dot and has_one_dot)
     return has_pipeline_sep and has_gst_element and not is_simple_path

@@ -15,7 +15,6 @@ from typing import Iterator, Optional, List, Union
 from contextlib import ExitStack
 
 try:
-    Image: Optional[ModuleType] = None
     from PIL import Image
 except ImportError:
     Image = None

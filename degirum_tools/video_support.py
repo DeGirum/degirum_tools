@@ -4,6 +4,42 @@
 # Copyright DeGirum Corporation 2025
 # All rights reserved
 #
+# Implements classes and functions to handle video streams for capturing and saving
+
+"""
+Video Support Module Overview
+============================
+This module provides comprehensive video stream handling capabilities, including
+capturing from various sources, saving to files, and managing video clips. It
+supports local cameras, IP cameras, video files, and YouTube videos.
+Key Features:
+    - **Multi-Source Support**: Capture from local cameras, IP cameras, video files, and YouTube
+    - **Video Writing**: Save video streams with configurable quality and format
+    - **Frame Extraction**: Convert video files to JPEG sequences
+    - **Clip Management**: Save video clips triggered by events with pre/post buffers
+    - **FPS Control**: Frame rate management for both capture and writing
+    - **Stream Properties**: Query video stream dimensions and frame rate
+Typical Usage:
+    1. Open video streams with `open_video_stream()`
+    2. Process frames using `video_source()` generator
+    3. Save videos with `VideoWriter` or `open_video_writer()`
+    4. Extract frames using `video2jpegs()`
+    5. Save event-triggered clips with `ClipSaver`
+Integration Notes:
+    - Works with OpenCV's VideoCapture and VideoWriter
+    - Supports YouTube videos through pafy
+    - Handles both real-time and file-based video sources
+    - Provides context managers for safe resource handling
+    - Thread-safe for concurrent video operations
+Key Classes:
+    - `VideoWriter`: Main class for saving video streams
+    - `ClipSaver`: Manages saving video clips with pre/post buffers
+Configuration Options:
+    - Video quality and format settings
+    - Frame rate control
+    - Clip duration and buffer size
+    - Output file naming and paths
+"""
 
 import platform
 import shutil
@@ -52,23 +88,30 @@ class VideoCaptureGst:
             raise ImportError("GStreamer Python bindings (gi) not available")
 
         try:
-            self.pipeline = Gst.parse_launch(pipeline_str)
+            self._pipeline = Gst.parse_launch(pipeline_str)
         except GLib.Error as e:
             raise Exception(f"Invalid GStreamer pipeline: {pipeline_str}") from e
 
-        self.appsink = self.pipeline.get_by_name("sink")
-        if not self.appsink:
+        self._appsink = self._pipeline.get_by_name("sink")
+        if not self._appsink:
             raise Exception(f"Invalid GStreamer pipeline (no appsink): {pipeline_str}")
 
-        self.appsink.set_property("emit-signals", True)
-        self.pipeline.set_state(Gst.State.PLAYING)
+        self._appsink.set_property("emit-signals", True)
+        self._pipeline.set_state(Gst.State.PLAYING)
 
         # Check if the pipeline transitions to the PLAYING state
-        state_change_result = self.pipeline.get_state(5 * Gst.SECOND)
+        state_change_result = self._pipeline.get_state(5 * Gst.SECOND)
         if state_change_result[1] != Gst.State.PLAYING:
             raise Exception(f"GStreamer pipeline failed to start: {pipeline_str}")
 
-        self.running = True
+        self._running = True
+        # Add initialization flags
+        self._initialized = False
+        self._frame_format = None
+        self._frame_width: Optional[int] = None
+        self._frame_height: Optional[int] = None
+        self._frame_channels: Optional[int] = None
+        self._conversion_func = None
 
     def _get_format_info(self, format_str: str, width: int, height: int) -> tuple[int, int]:
         """Get channel count and expected buffer size for a given format.
@@ -106,30 +149,41 @@ class VideoCaptureGst:
         }
         return format_info.get(format_str, (3, width * height * 3))
 
-    def _handle_buffer_mismatch(self, data, width: int, height: int, expected_channels: int, actual_size: int, expected_size: int) -> np.ndarray:
-        """Handle cases where buffer size doesn't match expected size.
-        Args:
-            data: Buffer data
-            width: Frame width
-            height: Frame height
-            expected_channels: Expected number of channels
-            actual_size: Actual buffer size
-            expected_size: Expected buffer size
-        Returns:
-            np.ndarray: Frame data
-        """
-        # Try to determine actual channels from buffer size
-        actual_channels = actual_size // (width * height)
-        if actual_channels > 0:
-            # Use actual channels - this preserves content
-            if actual_channels == 1:
-                frame : np.ndarray = np.ndarray((height, width), buffer=data, dtype=np.uint8)
-            else:
-                frame = np.ndarray((height, width, actual_channels), buffer=data, dtype=np.uint8)
+    def _initialize_frame_processing(self, sample):
+        """Initialize frame processing parameters from the first frame."""
+        caps = sample.get_caps()
+        structure = caps.get_structure(0)
+        self._frame_width = structure.get_value("width")
+        self._frame_height = structure.get_value("height")
+        format_str = structure.get_string("format")[1] if structure.get_string("format")[0] else None
+        # Calculate format info once
+        self._frame_channels, _ = self._get_format_info(format_str or "", self._frame_width, self._frame_height)
+        # Determine conversion function once
+        self._conversion_func = self._get_conversion_function(format_str)
+        self._initialized = True
+
+    def _get_conversion_function(self, format_str):
+        """Get the appropriate conversion function for the format."""
+        if format_str in ['RGB', 'RGBx']:
+            return lambda frame: cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        elif format_str in ['I420', 'YV12', 'NV12', 'NV21']:
+            return lambda frame: cv2.cvtColor(frame, cv2.COLOR_YUV2BGR_I420)
+        elif format_str in ['RGBA', 'RGBx']:
+            return lambda frame: cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
+        elif format_str in ['YUY2']:
+            return lambda frame: cv2.cvtColor(frame, cv2.COLOR_YUV2BGR_YUY2)
+        elif format_str in ['UYVY']:
+            return lambda frame: cv2.cvtColor(frame, cv2.COLOR_YUV2BGR_UYVY)
+        elif format_str in ['BGRA']:
+            return lambda frame: frame[:, :, :3]  # Remove alpha channel
         else:
-            # Log warning and fail rather than corrupting data
-            # logger.warning(f"Buffer size mismatch: expected {expected_size}, got {actual_size}") # Original code had this line commented out
-            raise ValueError(f"Cannot handle buffer size mismatch for {width}x{height} frame")
+            # No conversion needed for BGR, BGRx, or unknown formats
+            return None
+
+    def _convert_frame(self, frame):
+        """Apply the pre-determined conversion to the frame."""
+        if self._conversion_func:
+            return self._conversion_func(frame)
         return frame
 
     def read(self):
@@ -138,74 +192,54 @@ class VideoCaptureGst:
         Returns:
             (bool, np.ndarray): Success flag and frame data
         """
-        if not self.running:
+        if not self._running:
             return False, None
-        sample = self.appsink.emit("pull-sample")
+        sample = self._appsink.emit("pull-sample")
         if not sample:
-            self.running = False
+            self._running = False
             return False, None
 
+        # Initialize frame processing on first frame
+        if not self._initialized:
+            self._initialize_frame_processing(sample)
+
+        # Ensure frame dimensions are properly initialized
+        if self._frame_width is None or self._frame_height is None or self._frame_channels is None:
+            raise RuntimeError("Frame dimensions not properly initialized")
+
         buf = sample.get_buffer()
-        caps = sample.get_caps()
-        structure = caps.get_structure(0)
-        width = structure.get_value("width")
-        height = structure.get_value("height")
-        # Get format details
-        format_str = structure.get_string("format")[1] if structure.get_string("format")[0] else None
         success, mapinfo = buf.map(Gst.MapFlags.READ)
         if not success:
             return False, None
 
         try:
-            # Calculate expected buffer size and channels based on format
-            channels, expected_size = self._get_format_info(format_str or "", width, height)
-            # Check if buffer size matches expected size
-            actual_size = mapinfo.size
-            if actual_size != expected_size:
-                # Try to handle different buffer layouts
-                frame = self._handle_buffer_mismatch(mapinfo.data, width, height, channels, actual_size, expected_size)
+            # Use cached format info - much faster!
+            if self._frame_channels == 1:
+                frame: np.ndarray = np.ndarray(
+                    (self._frame_height, self._frame_width),
+                    buffer=mapinfo.data,
+                    dtype=np.uint8
+                )
+            elif self._frame_channels == 3:
+                frame = np.ndarray(
+                    (self._frame_height, self._frame_width, 3),
+                    buffer=mapinfo.data,
+                    dtype=np.uint8
+                )
+            elif self._frame_channels == 4:
+                frame = np.ndarray(
+                    (self._frame_height, self._frame_width, 4),
+                    buffer=mapinfo.data,
+                    dtype=np.uint8
+                )
             else:
-                # Standard case - buffer size matches expected
-                if channels == 1:
-                    frame = np.ndarray((height, width), buffer=mapinfo.data, dtype=np.uint8)
-                elif channels == 3:
-                    frame = np.ndarray((height, width, 3), buffer=mapinfo.data, dtype=np.uint8)
-                elif channels == 4:
-                    frame = np.ndarray((height, width, 4), buffer=mapinfo.data, dtype=np.uint8)
-                else:
-                    # Fallback: try to determine channels from buffer size
-                    channels = actual_size // (width * height)
-                    if channels > 0:
-                        frame = np.ndarray((height, width, channels), buffer=mapinfo.data, dtype=np.uint8)
-                    else:
-                        return False, None
-            # Convert to BGR if needed (OpenCV standard)
-            if len(frame.shape) == 3 and frame.shape[2] == 3:
-                # Check if it's RGB and convert to BGR
-                if format_str in ['RGB', 'RGBx']:
-                    frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                elif format_str in ['I420', 'YV12', 'NV12', 'NV21']:
-                    # YUV formats - convert to BGR
-                    frame = cv2.cvtColor(frame, cv2.COLOR_YUV2BGR_I420)
-                # BGR, BGRx formats are already correct
-            elif len(frame.shape) == 3 and frame.shape[2] == 4:
-                # RGBA/BGRA - convert to BGR
-                if format_str in ['RGBA', 'RGBx']:
-                    frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
-                else:  # BGRA
-                    frame = frame[:, :, :3]  # Remove alpha channel
-            elif len(frame.shape) == 3 and frame.shape[2] == 2:
-                # YUY2/UYVY packed formats - convert to BGR
-                if format_str in ['YUY2']:
-                    frame = cv2.cvtColor(frame, cv2.COLOR_YUV2BGR_YUY2)
-                elif format_str in ['UYVY']:
-                    frame = cv2.cvtColor(frame, cv2.COLOR_YUV2BGR_UYVY)
-                else:
-                    # Fallback: duplicate the 2 channels to make 3
-                    frame = np.repeat(frame, 3 // 2 + 1, axis=2)[:, :, :3]
-            elif len(frame.shape) == 2:
-                # Grayscale - convert to BGR
-                frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+                frame = np.ndarray(
+                    (self._frame_height, self._frame_width, self._frame_channels),
+                    buffer=mapinfo.data,
+                    dtype=np.uint8
+                )
+            # Apply pre-determined conversion
+            frame = self._convert_frame(frame)
             return True, frame
         finally:
             buf.unmap(mapinfo)
@@ -219,7 +253,7 @@ class VideoCaptureGst:
         Returns:
             Property value or None if not available
         """
-        pad = self.appsink.get_static_pad("sink")
+        pad = self._appsink.get_static_pad("sink")
         caps = pad.get_current_caps()
         if not caps:
             return None
@@ -237,7 +271,7 @@ class VideoCaptureGst:
             return 30.0  # Default fallback
         elif prop == cv2.CAP_PROP_FRAME_COUNT:
             # For files, try to get duration
-            duration = self.pipeline.query_duration(Gst.Format.TIME)
+            duration = self._pipeline.query_duration(Gst.Format.TIME)
             if duration[0]:
                 fps = self.get(cv2.CAP_PROP_FPS)
                 return int((duration[1] / Gst.SECOND) * fps)
@@ -250,13 +284,13 @@ class VideoCaptureGst:
         Returns:
             bool: True if pipeline is running
         """
-        return self.running
+        return self._running
 
     def release(self):
         """Release the GStreamer pipeline."""
-        if self.running:
-            self.pipeline.set_state(Gst.State.NULL)
-            self.running = False
+        if self._running:
+            self._pipeline.set_state(Gst.State.NULL)
+            self._running = False
 
 
 def create_video_stream(
@@ -344,11 +378,10 @@ def create_video_stream(
             if stream.isOpened():
                 return stream
             else:
-                # Fall back to OpenCV
                 stream.release()
         except Exception as e:
-            # Fall back to OpenCV if GStreamer fails
-            raise Exception(f"GStreamer failed, falling back to OpenCV: {e}")
+            # GStreamer failed
+            raise Exception(f"GStreamer failed: {e}")
 
     # Default to OpenCV
     opencv_stream: Union[cv2.VideoCapture, VideoCaptureGst] = cv2.VideoCapture(video_source)  # type: ignore[arg-type]
