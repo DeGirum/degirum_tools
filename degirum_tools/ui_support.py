@@ -60,6 +60,15 @@ from enum import Enum
 from pathlib import Path
 
 
+@dataclass
+class _LineInfo:
+    line: str = ""
+    x: int = 0
+    y: int = 0
+    line_height: int = 0
+    line_height_no_baseline: int = 0
+
+
 def deduce_text_color(bg_color: tuple):
     """Return a readable text color.
 
@@ -211,19 +220,49 @@ def put_text(
     im_h, im_w = image.shape[:2]
     margin = 6
 
-    @dataclass
-    class LineInfo:
-        line: str = ""
-        x: int = 0
-        y: int = 0
-        line_height: int = 0
-        line_height_no_baseline: int = 0
-
     top_left_xy = corner_xy
-    lines: List[LineInfo] = []
+    lines: List[_LineInfo] = []
     max_width = max_height = 0
-    for line in label.splitlines():
-        li = LineInfo()
+
+    # Helper function that measures how much width and height to use for font
+    def _measure_block(lines, font_face, font_scale, font_thickness, margin, line_spacing):
+        max_w = 0
+        total_h = 0
+        for i, line in enumerate(lines):
+            (w, h_no), baseline = cv2.getTextSize(line, font_face, font_scale, font_thickness)
+            line_h = h_no + baseline + margin
+            max_w = max(max_w, w + margin)  # add right margin (matches your drawing)
+            total_h += line_h if i == 0 else int(line_h * line_spacing)
+        return max_w, total_h
+
+    lines_text = label.splitlines()
+
+    # 1) initial measure at requested font_scale
+    req_scale = float(font_scale)
+    block_w, block_h = _measure_block(
+        lines_text, font_face, req_scale, font_thickness, margin=6, line_spacing=line_spacing
+    )
+
+    # 2) compute available space (whole image; change if you want a smaller box)
+    avail_w, avail_h = image.shape[1], image.shape[0]
+
+    # 3) compute fit scale (≤ 1.0 means shrink)
+    def _safe_ratio(num, den):
+        return num / den if den > 0 else 1.0
+
+    scale_w = _safe_ratio(avail_w, block_w) if block_w > 0 else 1.0
+    scale_h = _safe_ratio(avail_h, block_h) if block_h > 0 else 1.0
+    fit_scale = min(1.0, scale_w, scale_h)
+
+    # 4) apply (with a tiny safety margin to avoid off-by-one overflows)
+    font_scale = max(0.1, req_scale * fit_scale * 0.98)
+
+    # (optional) adjust thickness proportionally, keep ≥1
+    if font_thickness > 0:
+        font_thickness = max(1, int(round(font_thickness * (font_scale / max(req_scale, 1e-6)))))
+
+    for line in lines_text:
+        li = _LineInfo()
         li.line = line
         (line_width, li.line_height_no_baseline), baseline = cv2.getTextSize(
             line,
@@ -281,27 +320,31 @@ def put_text(
             li.y -= max_y
 
     for li in lines:
-        if bg_color is not None:
-            sz_h = li.line_height
-            sz_w = max_width
+        sz_h = int(max(0, li.line_height))
+        sz_w = int(max(0, max_width))
+        if bg_color is not None and sz_h > 0 and sz_w > 0:
+            # Desired rectangle
+            x0_req, y0_req = int(li.x), int(li.y)
+            x1_req, y1_req = x0_req + sz_w, y0_req + sz_h
 
-            # add background mask to image
-            if sz_h > 0 and sz_w > 0:
-                bg_mask = np.zeros((sz_h, sz_w, 3), np.uint8)
-                bg_mask[:, :] = np.array(bg_color)
-                image[
-                    li.y : li.y + sz_h,
-                    li.x : li.x + sz_w,
-                ] = bg_mask
+            # Clip to image bounds
+            x0 = max(0, min(im_w, x0_req))
+            y0 = max(0, min(im_h, y0_req))
+            x1 = max(0, min(im_w, x1_req))
+            y1 = max(0, min(im_h, y1_req))
 
-        # add text to image
+            tw, th = x1 - x0, y1 - y0
+            if tw > 0 and th > 0:
+                patch = np.full((th, tw, 3), bg_color, dtype=image.dtype)
+                image[y0:y1, x0:x1] = patch  # safe assignment
+
+        # Draw text (OpenCV will clip text that overflows)
+        text_x = int(li.x + margin // 2)
+        text_y = int(li.y + li.line_height_no_baseline + margin // 2)  # baseline origin
         image = cv2.putText(
             image,
             li.line,
-            (
-                li.x + margin // 2,
-                li.y + li.line_height_no_baseline + margin // 2,
-            ),  # putText start bottom-left
+            (text_x, text_y),                 # bottom-left origin
             font_face,
             font_scale,
             font_color,
