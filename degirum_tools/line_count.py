@@ -366,7 +366,9 @@ class LineCounter(ResultAnalyzerBase):
                     increment_counts.bottom += 1
             else:
                 increment_counts = SingleVectorCounts()
-                cross_product = np.cross(trail_vector, line_vector)
+                cross_product = (
+                    trail_vector[0] * line_vector[1] - trail_vector[1] * line_vector[0]
+                )
                 if cross_product > 0:
                     increment_counts.left += 1
                 elif cross_product < 0:

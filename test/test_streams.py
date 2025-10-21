@@ -595,7 +595,7 @@ def test_streams_preprocess_ai(short_video, classification_model):
     model_shape = tuple(model.input_shape[0][1:])
 
     for frame in sink.frames:
-        assert isinstance(frame.data, bytes)
+        assert isinstance(frame.data, memoryview)
         pre_meta = frame.meta.find_last(streams.tag_preprocess)
         assert pre_meta is not None
         assert (

@@ -373,7 +373,9 @@ def test_model_registry_model_specs(sample_models_dict, sample_config_dict):
     for spec in specs:
         assert spec.inference_host_address == "@cloud"
         assert spec.token is None
-        assert spec.model_properties == {}
+        # Now device_type is automatically assigned from hardware list
+        expected_hardware = sample_models_dict[spec.model_name]["hardware"]
+        assert spec.model_properties == {"device_type": expected_hardware}
         model_metadata = sample_models_dict[spec.model_name].get("metadata", {})
         assert spec.metadata == model_metadata
 
@@ -394,7 +396,10 @@ def test_model_registry_model_specs(sample_models_dict, sample_config_dict):
         assert spec.zoo_url == "custom_zoo"  # Overridden
         assert spec.inference_host_address == "@localhost"
         assert spec.token == token
-        assert spec.model_properties == model_properties
+        # model_properties should now include both custom properties and device_type from hardware
+        expected_hardware = sample_models_dict[spec.model_name]["hardware"]
+        expected_props = {"confidence": 0.8, "device_type": expected_hardware}
+        assert spec.model_properties == expected_props
 
     # Test top_model_spec with single model
     single_model_registry = registry.for_task("face_detection").for_hardware(
@@ -406,7 +411,9 @@ def test_model_registry_model_specs(sample_models_dict, sample_config_dict):
     assert single_spec.zoo_url == "https://cs.degirum.com/degirum/orca"
     assert single_spec.inference_host_address == "@cloud"
     assert single_spec.token is None
-    assert single_spec.model_properties == {}
+    # Now device_type is automatically assigned from hardware list
+    expected_hardware = sample_models_dict[single_spec.model_name]["hardware"]
+    assert single_spec.model_properties == {"device_type": expected_hardware}
     model_metadata = sample_models_dict[single_spec.model_name].get("metadata", {})
     assert single_spec.metadata == model_metadata
 
@@ -439,7 +446,9 @@ def test_model_registry_model_specs(sample_models_dict, sample_config_dict):
     assert model_spec.zoo_url == "test_zoo"
     assert model_spec.inference_host_address == "@cloud"
     assert model_spec.token is None
-    assert model_spec.model_properties == {}
+    # Now device_type is automatically assigned from hardware list
+    expected_hardware = models_dict[model_spec.model_name]["hardware"]
+    assert model_spec.model_properties == {"device_type": expected_hardware}
     assert model_spec.metadata == models_dict[model_spec.model_name].get("metadata", {})
 
     for name, model in registry.config["models"].items():
@@ -468,12 +477,18 @@ def test_model_registry_model_specs(sample_models_dict, sample_config_dict):
         assert spec.inference_host_address == "@local"
         assert spec.token == "abc123"
         assert spec.zoo_url == "custom_zoo"
-        assert spec.model_properties == {"confidence": 0.8}
+        # model_properties should include both default properties and device_type from hardware
+        expected_hardware = sample_models_dict[spec.model_name]["hardware"]
+        expected_props = {"confidence": 0.8, "device_type": expected_hardware}
+        assert spec.model_properties == expected_props
     # Original registry should remain unchanged
     orig_specs = registry.all_model_specs()
     for spec in orig_specs:
         assert spec.inference_host_address == "@cloud"
         assert spec.token is None
+        # Original specs should still have device_type assigned from hardware
+        expected_hardware = sample_models_dict[spec.model_name]["hardware"]
+        assert spec.model_properties == {"device_type": expected_hardware}
 
     # test overrides
     specs = registry2.all_model_specs(
@@ -486,7 +501,51 @@ def test_model_registry_model_specs(sample_models_dict, sample_config_dict):
         assert spec.inference_host_address == "localhost"
         assert spec.token == "def456"
         assert spec.zoo_url == "private_zoo"
-        assert spec.model_properties == {"confidence": 0.8, "postprocess": "None"}
+        # model_properties should include all properties plus device_type from hardware
+        expected_hardware = sample_models_dict[spec.model_name]["hardware"]
+        expected_props = {
+            "confidence": 0.8,
+            "postprocess": "None",
+            "device_type": expected_hardware,
+        }
+        assert spec.model_properties == expected_props
+
+    # Test automatic device_type assignment from hardware list
+    registry = ModelRegistry(config=sample_config_dict)
+    specs = registry.all_model_specs()
+
+    # Verify that device_type is automatically assigned from hardware list
+    for spec in specs:
+        expected_hardware = sample_models_dict[spec.model_name]["hardware"]
+        assert "device_type" in spec.model_properties
+        assert spec.model_properties["device_type"] == expected_hardware
+
+    # Test that existing device_type is not overridden
+    specs_with_device_type = registry.all_model_specs(
+        model_properties={"device_type": ["CUSTOM/DEVICE"]}
+    )
+    for spec in specs_with_device_type:
+        # Should keep the explicitly provided device_type, not override with hardware list
+        assert spec.model_properties["device_type"] == ["CUSTOM/DEVICE"]
+
+    # Test with model that has non-list hardware (edge case)
+    config_with_non_list_hw = {
+        "models": {
+            "test_model_single_hw": {
+                "description": "Test model with single hardware",
+                "task": "detection",
+                "hardware": "N2X/CPU",  # String instead of list
+                "zoo_url": "test_zoo",
+            }
+        },
+        "defaults": sample_config_dict["defaults"],
+    }
+    registry_single_hw = ModelRegistry(config=config_with_non_list_hw)
+    specs_single_hw = registry_single_hw.all_model_specs()
+
+    # Should not assign device_type when hardware is not a list
+    for spec in specs_single_hw:
+        assert "device_type" not in spec.model_properties
 
 
 def test_model_registry_get_methods(sample_models_dict, sample_config_dict):
