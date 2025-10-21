@@ -589,7 +589,7 @@ def _build_dummy_input(model: dg.model.Model):
     """Helper to build one dummy input tuple/list matching the model's inputs"""
 
     info = model.model_info
-    dummy_inputs = []
+    dummy_inputs: list[np.ndarray] = []
 
     for i, input_type in enumerate(info.InputType):
         shape = model.input_shape[i]

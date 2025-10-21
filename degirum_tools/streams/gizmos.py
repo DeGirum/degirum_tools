@@ -16,7 +16,7 @@ from contextlib import ExitStack
 try:
     from PIL import Image
 except ImportError:
-    Image = None
+    Image = None  # type: ignore
 
 from .base import Stream, StreamData, StreamMeta, Gizmo
 from ..crop_extent import CropExtentOptions, extend_bbox
