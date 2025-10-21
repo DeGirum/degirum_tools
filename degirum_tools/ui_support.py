@@ -246,7 +246,7 @@ def put_text(
     avail_w, avail_h = image.shape[1], image.shape[0]
 
     # 3) compute fit scale (≤ 1.0 means shrink)
-    def _safe_ratio(num, den): 
+    def _safe_ratio(num, den):
         return num / den if den > 0 else 1.0
 
     scale_w = _safe_ratio(avail_w, block_w) if block_w > 0 else 1.0
