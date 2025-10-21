@@ -334,8 +334,7 @@ def put_text(
 
             tw, th = x1 - x0, y1 - y0
             if tw > 0 and th > 0:
-                patch = np.empty((th, tw, 3), dtype=image.dtype)
-                patch[...] = bg_color
+                patch = np.full((th, tw, 3), bg_color, dtype=image.dtype)
                 image[y0:y1, x0:x1] = patch  # safe assignment
 
         # Draw text (OpenCV will clip text that overflows)
