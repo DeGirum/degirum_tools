@@ -59,13 +59,15 @@ from typing import Optional, Union, Any, List, Callable
 from enum import Enum
 from pathlib import Path
 
+
 @dataclass
-class LineInfo:
+class _LineInfo:
     line: str = ""
     x: int = 0
     y: int = 0
     line_height: int = 0
     line_height_no_baseline: int = 0
+
 
 def deduce_text_color(bg_color: tuple):
     """Return a readable text color.
@@ -218,9 +220,8 @@ def put_text(
     im_h, im_w = image.shape[:2]
     margin = 6
 
-
     top_left_xy = corner_xy
-    lines: List[LineInfo] = []
+    lines: List[_LineInfo] = []
     max_width = max_height = 0
 
     # Helper function that measures how much width and height to use for font
@@ -261,7 +262,7 @@ def put_text(
         font_thickness = max(1, int(round(font_thickness * (font_scale / max(req_scale, 1e-6)))))
 
     for line in lines_text:
-        li = LineInfo()
+        li = _LineInfo()
         li.line = line
         (line_width, li.line_height_no_baseline), baseline = cv2.getTextSize(
             line,
