@@ -53,6 +53,7 @@ Configuration Options:
 
 from typing import Set
 from .result_analyzer_base import ResultAnalyzerBase
+from .notifier import EventNotifier
 from .event_detector import EventDetector
 from .video_support import ClipSaver
 
@@ -115,8 +116,6 @@ class ClipSavingAnalyzer(ResultAnalyzerBase):
 
         # check trigger
         triggered = set()
-        # Use delayed import to avoid circular dependency
-        from .notifier import EventNotifier
         notifications = getattr(result, EventNotifier.key_notifications, None)
         if notifications is not None:
             intersection = self._triggers & notifications

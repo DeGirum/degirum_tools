@@ -3,9 +3,10 @@ run-name: Tests ${{ github.ref_name }}
 
 on:
   push:
+    branches: [main]
   pull_request:
     branches: [main]
-    types: [opened, edited, reopen, synchronize, ready_for_review]
+    types: [opened, edited, reopened, synchronize, ready_for_review]
   workflow_dispatch:
 
 jobs:

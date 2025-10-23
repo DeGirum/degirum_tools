@@ -548,7 +548,7 @@ class FigureAnnotator:
 
             # Set window icon
             self.icon_image = self.imageTk.PhotoImage(
-                file=str(Path(__file__).parent) + "/assets/logo.ico"
+                file=str(Path(__file__).parent) + "/logo.ico"
             )
             self.root.iconphoto(True, self.icon_image)  # type: ignore
 

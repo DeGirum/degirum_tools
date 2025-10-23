@@ -293,20 +293,20 @@ class ModelSpec:
 class ModelRegistry:
     """Queryable collection of ``ModelSpec`` entries.
 
-Registry data is sourced from structured YAML files that describe the
-available models, their target tasks, and compatible hardware. Instances
-remain immutable, and filtering methods return new copies so intermediate
-views can be chained without side effects.
+    Registry data is sourced from structured YAML files that describe the
+    available models, their target tasks, and compatible hardware. Instances
+    remain immutable, and filtering methods return new copies so intermediate
+    views can be chained without side effects.
 
-Examples:
-```python
-registry = ModelRegistry(
-    config_file="https://assets.degirum.com/registry/models.yaml",
-)
-filtered = registry.for_task("coco_detection")
-first_spec = filtered.top_model_spec()
-print(first_spec.model_name)
-```
+    Examples:
+    ```python
+    registry = ModelRegistry(
+        config_file="https://assets.degirum.com/registry/models.yaml",
+    )
+    filtered = registry.for_task("coco_detection")
+    first_spec = filtered.top_model_spec()
+    print(first_spec.model_name)
+    ```
     """
 
     # configuration file dictionary keys
@@ -544,17 +544,31 @@ print(first_spec.model_name)
             model_properties = merged
 
         assert model_properties is not None
-        return [
-            ModelSpec(
-                model_name=model_name,
-                zoo_url=model_info[self.key_zoo_url] if zoo_url is None else zoo_url,
-                inference_host_address=inference_host_address,
-                token=token,
-                model_properties=model_properties,
-                metadata=model_info.get(self.key_metadata, {}),
+        ret = []
+        for model_name, model_info in self.config[self.key_models].items():
+            model_properties_adjusted = copy.copy(model_properties)
+
+            # assign device type list so the first available device from the list will be
+            # selected by the PySDK on model load
+            if "device_type" not in model_properties_adjusted:
+                hw = model_info.get(self.key_hardware)
+                if isinstance(hw, list):
+                    model_properties_adjusted["device_type"] = hw
+
+            ret.append(
+                ModelSpec(
+                    model_name=model_name,
+                    zoo_url=(
+                        model_info[self.key_zoo_url] if zoo_url is None else zoo_url
+                    ),
+                    inference_host_address=inference_host_address,
+                    token=token,
+                    model_properties=model_properties_adjusted,
+                    metadata=model_info.get(self.key_metadata, {}),
+                )
             )
-            for model_name, model_info in self.config[self.key_models].items()
-        ]
+
+        return ret
 
     def top_model_spec(self, **kwargs) -> ModelSpec:
         """Return the first model listed in the current registry view.
