@@ -366,7 +366,7 @@ class NotificationServer:
                     sys.stdout.flush()
                 else:
                     if not notifier.notify(
-                        body=message, title=notification_title, tag=notification_tags
+                        body=message, title=notification_title, tag=notification_tags, body_format=notifier.NotifyFormat.MARKDOWN
                     ):
                         raise Exception(
                             f"Notification failed: {notification_title} - {message}"
