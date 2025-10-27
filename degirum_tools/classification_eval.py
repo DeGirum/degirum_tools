@@ -42,8 +42,8 @@ class ImageClassificationModelEvaluator(ModelEvaluatorBase):
         # For example: {0: "person", 1: "car"}
         self.foldermap: Optional[dict] = None
 
-        if (not model.output_postprocess_type == "Classification" and
-            not model.inference_results_type == "Classification"):
+        if (not model.output_postprocess_type == "Classification"
+                and not model.inference_results_type == "Classification"):
             raise Exception("Model loaded for evaluation is not a Classification Model")
 
         # base constructor assigns kwargs to model or to self

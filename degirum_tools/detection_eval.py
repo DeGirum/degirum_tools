@@ -51,8 +51,8 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
             "SegmentationYoloV8",
         ]
 
-        if (model.output_postprocess_type not in allowed_model_types and
-            model.inference_results_type not in allowed_model_types):
+        if (model.output_postprocess_type not in allowed_model_types
+                and model.inference_results_type not in allowed_model_types):
             raise Exception("Model loaded for evaluation is not a Detection Model")
 
         self.is_segmentation_model: bool = model.output_postprocess_type in [
