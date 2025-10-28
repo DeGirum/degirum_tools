@@ -21,7 +21,8 @@ class ImageRegressionModelEvaluator(ModelEvaluatorBase):
                 show_progress (bool): show progress bar
         """
 
-        if not model.output_postprocess_type == "Classification":
+        if (not model.output_postprocess_type == "Classification"
+                and not model.inference_results_type == "Classification"):
             raise Exception("Model loaded for evaluation is not a Regression Model")
 
         # base constructor assigns kwargs to model or to self
