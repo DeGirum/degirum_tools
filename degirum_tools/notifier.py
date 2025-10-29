@@ -290,6 +290,8 @@ class NotificationServer:
                             raise ValueError(
                                 f"Invalid configuration URL: {notification_cfg}"
                             )
+
+                    apprise_obj.asset.body_format = apprise.NotifyFormat.MARKDOWN
                     return apprise_obj
                 except Exception as e:
                     response_queue.put(e)
@@ -366,7 +368,7 @@ class NotificationServer:
                     sys.stdout.flush()
                 else:
                     if not notifier.notify(
-                        body=message, title=notification_title, tag=notification_tags, body_format=notifier.NotifyFormat.MARKDOWN
+                        body=message, title=notification_title, tag=notification_tags
                     ):
                         raise Exception(
                             f"Notification failed: {notification_title} - {message}"
