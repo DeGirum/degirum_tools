@@ -601,7 +601,7 @@ class EventNotifier(ResultAnalyzerBase):
                 notification_tags=notification_tags,
                 storage_cfg=self._storage_cfg if clip_save else None,
                 pending_timeout_s=(
-                    2 * clip_duration / clip_target_fps
+                    max(1.0, 2 * clip_duration / clip_target_fps)
                     if notification_timeout_s is None
                     else notification_timeout_s
                 ),
