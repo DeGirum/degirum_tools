@@ -289,6 +289,15 @@ class TileExtractorPseudoModel(ModelLike):
                 # otherwise we treat data as frame data and if it is string, we set frame info equal to frame data
                 frame, frame_info = element, element if isinstance(element, str) else ""
 
+            if frame is None:
+                if self._non_blocking_batch_predict:
+                    yield None
+                    continue
+                else:
+                    raise Exception(
+                        "Model misconfiguration: input data iterator returns None but non-blocking batch predict mode is not enabled"
+                    )
+
             # do pre-processing
             preprocessed_data = preprocessor.forward(frame)
             image = preprocessed_data["image_input"]
