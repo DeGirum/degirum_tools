@@ -194,7 +194,7 @@ def _nms_custom(
     use_iou: bool,
     box_select: NmsBoxSelectionPolicy,
     max_wh: int,
-    agnostic: bool,
+    class_agnostic: bool,
 ):
     """
     Perform non-maximum suppression on a set of detections.
@@ -207,6 +207,7 @@ def _nms_custom(
         use_iou (bool): If True, IoU is used for detecting overlapping boxes. Otherwise, IoS is used.
         box_select (NmsBoxSelectionPolicy): bounding box selection policy
         max_wh (int): maximum width/height of an image. Used for category separation.
+        class_agnostic (bool, optional): If ``True`` perform class-agnostic NMS.
 
     Returns:
         np.ndarray: An array of indices of detections that have survived non-maximum suppression.
@@ -215,7 +216,7 @@ def _nms_custom(
     """
 
     # adjust bboxes by class offset so bboxes of different classes would never overlap
-    if not agnostic:
+    if not class_agnostic:
         class_offsets = classes * float(max_wh)
         bboxes[:, 0:4] += class_offsets[:, None]
 
@@ -250,13 +251,13 @@ def _nms_custom(
             pass
         elif box_select == NmsBoxSelectionPolicy.LARGEST_AREA:
             sel = order[overlap > iou_threshold]
-            if not agnostic:
+            if not class_agnostic:
                 bboxes[i] = bboxes[sel[np.argmax(areas[sel])]] - class_offsets[i]
             else:
                 bboxes[i] = bboxes[sel[np.argmax(areas[sel])]]
         elif box_select == NmsBoxSelectionPolicy.AVERAGE:
             sel = order[overlap > iou_threshold]
-            if not agnostic:
+            if not class_agnostic:
                 bboxes[i] = (
                     np.average(bboxes[sel], axis=0, weights=scores[sel])
                     - class_offsets[i]
@@ -268,7 +269,7 @@ def _nms_custom(
             enclosing_rect = np.array(
                 [np.min(x1[sel]), np.min(y1[sel]), np.max(x2[sel]), np.max(y2[sel])]
             )
-            if not agnostic:
+            if not class_agnostic:
                 bboxes[i] = enclosing_rect - class_offsets[i]
             else:
                 bboxes[i] = enclosing_rect
@@ -284,7 +285,7 @@ def nms(
     use_iou: bool = True,
     box_select: NmsBoxSelectionPolicy = NmsBoxSelectionPolicy.MOST_PROBABLE,
     max_wh: int = 10000,
-    agnostic: bool = False,
+    class_agnostic: bool = False,
 ):
     """Apply non-maximum suppression to detection results.
 
@@ -295,7 +296,7 @@ def nms(
         use_iou (bool, optional): If ``True`` use IoU, otherwise IoS.
         box_select (NmsBoxSelectionPolicy, optional): Box selection strategy.
         max_wh (int, optional): Maximum image dimension for class separation.
-        agnostic (bool, optional): If ``True`` perform class-agnostic NMS.
+        class_agnostic (bool, optional): If ``True`` perform class-agnostic NMS.
 
     Returns:
         (None): ``detections`` is modified in place with the filtered results.
@@ -328,7 +329,7 @@ def nms(
 
         # use fast OpenCV implementation when possible
         bboxes[:, 2:4] = bboxes[:, 2:4] - bboxes[:, 0:2]  # TLBR to TLWH
-        if not agnostic:
+        if not class_agnostic:
             keep = cv2.dnn.NMSBoxesBatched(bboxes, scores, classes, 0, iou_threshold)  # type: ignore[arg-type]
         else:
             keep = cv2.dnn.NMSBoxes(bboxes, scores, 0, iou_threshold)  # type: ignore[arg-type]
@@ -341,7 +342,7 @@ def nms(
             use_iou,
             box_select,
             max_wh,
-            agnostic,
+            class_agnostic,
         )
 
         if box_select != NmsBoxSelectionPolicy.MOST_PROBABLE:

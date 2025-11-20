@@ -707,11 +707,14 @@ class NmsOptions:
             If True, use IoU for box clustering, otherwise IoS.
         box_select (NmsBoxSelectionPolicy):
             Box selection policy (e.g., keep the box with the highest probability).
+        class_agnostic (bool):
+            If True, perform class-agnostic NMS.
     """
 
     threshold: float
     use_iou: bool = True
     box_select: NmsBoxSelectionPolicy = NmsBoxSelectionPolicy.MOST_PROBABLE
+    class_agnostic: bool = False
 
 
 class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
@@ -792,6 +795,7 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
                     iou_threshold=self._nms_options.threshold,
                     use_iou=self._nms_options.use_iou,
                     box_select=self._nms_options.box_select,
+                    class_agnostic=self._nms_options.class_agnostic,
                 )
 
             if self._add_model1_results:
