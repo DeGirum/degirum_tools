@@ -707,6 +707,8 @@ class NmsOptions:
             If True, use IoU for box clustering, otherwise IoS.
         box_select (NmsBoxSelectionPolicy):
             Box selection policy (e.g., keep the box with the highest probability).
+        agnostic (bool):
+            If True, perform class-agnostic NMS.
     """
 
     threshold: float
