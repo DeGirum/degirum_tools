@@ -813,7 +813,7 @@ class BoxFusionTileModel(_EdgeMixin, TileModel):
                     iou_threshold=self._nms_options.threshold,
                     use_iou=self._nms_options.use_iou,
                     box_select=self._nms_options.box_select,
-                    agnostic=self._nms_options.agnostic,
+                    class_agnostic=self._nms_options.class_agnostic,
                 )
 
             return ret
