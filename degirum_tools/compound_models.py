@@ -712,6 +712,7 @@ class NmsOptions:
     threshold: float
     use_iou: bool = True
     box_select: NmsBoxSelectionPolicy = NmsBoxSelectionPolicy.MOST_PROBABLE
+    agnostic: bool = False
 
 
 class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
@@ -792,6 +793,7 @@ class CroppingAndDetectingCompoundModel(CroppingCompoundModel):
                     iou_threshold=self._nms_options.threshold,
                     use_iou=self._nms_options.use_iou,
                     box_select=self._nms_options.box_select,
+                    agnostic=self._nms_options.agnostic,
                 )
 
             if self._add_model1_results:
