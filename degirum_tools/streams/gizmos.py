@@ -65,6 +65,7 @@ class VideoSourceGizmo(Gizmo):
         *,
         stop_composition_on_end: bool = False,
         retry_on_error: bool = False,
+        fps_override: Optional[float] = None,
     ):
         """Constructor.
 
@@ -73,11 +74,13 @@ class VideoSourceGizmo(Gizmo):
                 (device index as int, or file path/URL as str). Defaults to None.
             stop_composition_on_end (bool): If True, stop the [Composition](streams_base.md#composition) when the video source is over. Defaults to False.
             retry_on_error (bool): If True, retry opening the video source on error after some time. Defaults to False.
+            fps_override (float, optional): If provided, overrides the FPS value reported by source (some IP cameras report 100FPS). Defaults to None.
         """
         super().__init__()
         self._video_source = video_source
         self._stop_composition_on_end = stop_composition_on_end and not get_test_mode()
         self._retry_on_error = retry_on_error
+        self._fps_override = fps_override
         self._stream: Optional[cv2.VideoCapture] = None
 
     def get_video_properties(self) -> tuple:
@@ -88,6 +91,9 @@ class VideoSourceGizmo(Gizmo):
         """Open the video source if it is not opened."""
         if self._stream is None:
             self._stream = create_video_stream(self._video_source)
+            if self._fps_override is not None:
+                # set FPS if override is provided
+                self._stream.set(cv2.CAP_PROP_FPS, self._fps_override)
 
     def _close_video_source(self):
         """Open the video source if it is not opened."""
@@ -123,7 +129,11 @@ class VideoSourceGizmo(Gizmo):
                     meta = {
                         self.key_frame_width: int(src.get(cv2.CAP_PROP_FRAME_WIDTH)),
                         self.key_frame_height: int(src.get(cv2.CAP_PROP_FRAME_HEIGHT)),
-                        self.key_fps: src.get(cv2.CAP_PROP_FPS),
+                        self.key_fps: (
+                            src.get(cv2.CAP_PROP_FPS)
+                            if self._fps_override is None
+                            else self._fps_override
+                        ),
                         self.key_frame_count: int(src.get(cv2.CAP_PROP_FRAME_COUNT)),
                     }
                     while not self._abort:
