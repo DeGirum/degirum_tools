@@ -190,6 +190,7 @@ class NotificationServer:
                 storage_cfg,
                 pending_timeout_s,
             ),
+            daemon=True,
         )
         self._process.start()
 
@@ -207,7 +208,7 @@ class NotificationServer:
                 exc = self._response_queue.get_nowait()
                 if isinstance(exc, Exception):
                     logger.error(f"Notification error: {exc}")
-            except queue.Empty:
+            except Exception:
                 break
 
     def send_job(self, job_type, payload: str, dependent: Optional[int] = None):
@@ -455,8 +456,16 @@ class NotificationServer:
             Exception: Any exception that occurs during response queue processing.
         """
         if self._process is not None:
-            self._job_queue.put(None)
-            self._process.join()
+            try:
+                self._job_queue.put_nowait(None)
+            except Exception:
+                pass
+
+            try:
+                self._process.join(3.0)
+            except Exception:
+                pass
+
             self._process = None
             self._process_response_queue()
 
