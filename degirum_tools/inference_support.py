@@ -43,14 +43,14 @@ Key Concepts
 Basic Usage Example
 -------------------
 ```python
-from degirum_tools import ModelSpec, remote_assets
-from degirum_tools.inference_support import (
+from degirum_tools import (
+    ModelSpec,
+    remote_assets,
     attach_analyzers,
     annotate_video,
     model_time_profile,
+    ResultAnalyzerBase,
 )
-from degirum_tools.result_analyzer_base import ResultAnalyzerBase
-
 
 # Define a simple analyzer that draws text on each frame
 class MyDummyAnalyzer(ResultAnalyzerBase):
@@ -113,16 +113,17 @@ from pathlib import Path
 from typing import Union, List, Optional, Iterator, Final
 from dataclasses import dataclass
 from .compound_models import CompoundModelBase
-from .video_support import (
+from .analyzers import ResultAnalyzerBase, subclass_result_with_analyzers
+from .tools import (
     open_video_stream,
     get_video_stream_properties,
     video_source,
     open_video_writer,
+    Progress,
+    Display,
+    Timer,
+    environment as env,
 )
-from .ui_support import Progress, Display, Timer
-from .result_analyzer_base import ResultAnalyzerBase, subclass_result_with_analyzers
-from . import environment as env
-
 
 # Inference options: parameters for connect_model_zoo
 CloudInference = 1  # use DeGirum cloud server for inference

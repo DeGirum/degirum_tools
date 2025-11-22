@@ -79,8 +79,15 @@ from copy import deepcopy
 from scipy.optimize import linear_sum_assignment
 from dataclasses import dataclass
 from typing import List, Tuple, Optional, Dict
-from .math_support import box_iou_batch, AnchorPoint, get_anchor_coordinates
-from .ui_support import put_text, deduce_text_color, color_complement, rgb_to_bgr
+from ..tools import (
+    box_iou_batch,
+    AnchorPoint,
+    get_anchor_coordinates,
+    put_text,
+    deduce_text_color,
+    color_complement,
+    rgb_to_bgr,
+)
 from .result_analyzer_base import ResultAnalyzerBase
 
 
@@ -1069,7 +1076,9 @@ class ObjectTracker(ResultAnalyzerBase):
             # if tracing is enabled, show trails
             if result.overlay_line_width > 0:
                 all_trails = [
-                    get_anchor_coordinates(np.array(trail), self._anchor_point).astype(int)
+                    get_anchor_coordinates(np.array(trail), self._anchor_point).astype(
+                        int
+                    )
                     for _, trail in result.trails.items()
                     if len(trail) > 1
                 ]

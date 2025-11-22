@@ -13,7 +13,7 @@ import requests
 import shutil
 from pathlib import Path
 from unittest.mock import patch, mock_open
-from degirum_tools.model_registry import ModelSpec, ModelRegistry
+from degirum_tools import ModelSpec, ModelRegistry
 import degirum as dg
 
 
@@ -241,7 +241,9 @@ def test_model_registry_creation(sample_models_dict, sample_config_dict):
     with patch("builtins.open", mock_open(read_data=config_yaml)) as mocked_open:
         registry = ModelRegistry()
         assert registry.config["models"] == sample_config_dict["models"]
-        expected_path = Path(__file__).parent.parent / "degirum_tools" / "models.yaml"
+        expected_path = (
+            Path(__file__).parent.parent / "degirum_tools/tools" / "models.yaml"
+        )
         mocked_open.assert_called_once_with(expected_path, "r")
 
     # Test creation with invalid config

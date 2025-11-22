@@ -78,21 +78,19 @@ Configuration Options:
 import numpy as np, cv2, time
 from typing import Tuple, Optional, Dict, List, Union, Any
 from dataclasses import dataclass
-from .ui_support import (
+from ..tools import (
     put_text,
     color_complement,
     deduce_text_color,
     rgb_to_bgr,
     CornerPosition,
-)
-from .result_analyzer_base import ResultAnalyzerBase
-from .math_support import (
     AnchorPoint,
     get_anchor_coordinates,
     xyxy2xywh,
     xywh2xyxy,
     tlbr2allcorners,
 )
+from .result_analyzer_base import ResultAnalyzerBase
 
 
 @dataclass

@@ -7,7 +7,7 @@
 
 import numpy as np
 import PIL.Image
-from degirum_tools.image_tools import crop_image
+from degirum_tools import crop_image
 
 
 def test_crop_image():

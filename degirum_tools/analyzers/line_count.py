@@ -58,15 +58,17 @@ Configuration Options:
 import numpy as np, cv2
 from typing import List, Dict, Optional, Union, Any, Type
 from copy import deepcopy
-from .ui_support import (
+from ..tools import (
     put_text,
     color_complement,
     deduce_text_color,
     rgb_to_bgr,
     CornerPosition,
+    intersect,
+    get_anchor_coordinates,
+    AnchorPoint,
 )
 from .result_analyzer_base import ResultAnalyzerBase
-from .math_support import intersect, get_anchor_coordinates, AnchorPoint
 
 
 class SingleLineCounts:
