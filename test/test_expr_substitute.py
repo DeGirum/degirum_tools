@@ -9,6 +9,7 @@ from degirum_tools.tools.expr_substitute import expression_substitute
 
 
 def test_expression_substitute_all():
+
     ctx: dict
 
     # Basic
@@ -52,3 +53,10 @@ def test_expression_substitute_all():
     assert result2 == "A: 1, B: 2, C: {c}"
     result3 = expression_substitute(result2, ctx3)
     assert result3 == "A: 1, B: 2, C: 3"
+
+    # Nested braces: only innermost expressions should be substituted
+    ctx = {"x": 10, "y": 20}
+    template = "Outer: {{x + y}}, Inner: {x + y}, Mixed: {{x}} and {y}"
+    result = expression_substitute(template, ctx)
+    # Only {x + y} and {y} are substituted, double braces are left as-is
+    assert result == "Outer: {30}, Inner: 30, Mixed: {10} and 20"
