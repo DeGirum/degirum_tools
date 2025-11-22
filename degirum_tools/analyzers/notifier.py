@@ -83,6 +83,7 @@ from ..tools import (
     ClipSaver,
     ObjectStorageConfig,
     ObjectStorage,
+    expression_substitute,
 )
 
 
@@ -109,10 +110,6 @@ class NotificationServer:
     Usage:
         Instantiate with the desired configuration, then send jobs using `send_job()`.
     """
-
-    class DefaultDict(dict):
-        def __missing__(self, key):
-            return f"{{{key}}}"  # Return the literal placeholder if key is missing
 
     class Job:
         """Encapsulates a notification job for the NotificationServer.
@@ -367,7 +364,7 @@ class NotificationServer:
 
                 # replace placeholders in the message
                 if need_params:
-                    message = message.format_map(NotificationServer.DefaultDict(params))
+                    message = expression_substitute(message, params)
 
                 if notification_config_console in notification_cfg:
                     print(
@@ -670,8 +667,8 @@ class EventNotifier(ResultAnalyzerBase):
         # send notification if event is fired
         notification_job_id: Optional[int] = None
         if fired:
-            message = self._message.format_map(
-                NotificationServer.DefaultDict(result=result, time=time.asctime())
+            message = expression_substitute(
+                self._message, {"result": result, "time": time.asctime()}
             )
             result.notifications[self._name] = message
 
