@@ -55,7 +55,7 @@ import cv2, numpy as np, degirum as dg
 
 from .math_support import nms, edge_box_fusion
 from .image_tools import image_size
-from .result_analyzer_base import clone_result
+from .analyzers import clone_result
 from .compound_models import (
     CropExtentOptions,
     ModelLike,

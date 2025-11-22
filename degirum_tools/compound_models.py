@@ -135,7 +135,7 @@ from dataclasses import dataclass
 from typing import Union, Optional, List
 from .image_tools import detect_motion
 from .math_support import nms, NmsBoxSelectionPolicy
-from .result_analyzer_base import (
+from .analyzers import (
     ResultAnalyzerBase,
     image_overlay_substitute,
     clone_result,

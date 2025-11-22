@@ -53,8 +53,8 @@ from enum import Enum
 from typing import List, Optional, Callable, Dict, Any, Tuple
 from dataclasses import dataclass
 from .result_analyzer_base import ResultAnalyzerBase
-from .math_support import area
-from .ui_support import color_complement, rgb_to_bgr
+from ..math_support import area
+from ..ui_support import color_complement, rgb_to_bgr
 
 
 class ObjectSelectionStrategies(Enum):
@@ -95,7 +95,7 @@ class ObjectSelector(ResultAnalyzerBase):
             counter (int): Frames since last seen before removal.
         """
 
-        detection: Tuple[Dict[str, Any], float]   # detection result
+        detection: Tuple[Dict[str, Any], float]  # detection result
         counter: int = (
             0  # counter to keep track of how long the object has not been found in new results
         )

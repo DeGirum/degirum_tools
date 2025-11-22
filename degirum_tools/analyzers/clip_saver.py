@@ -55,7 +55,7 @@ from typing import Set
 from .result_analyzer_base import ResultAnalyzerBase
 from .notifier import EventNotifier
 from .event_detector import EventDetector
-from .video_support import ClipSaver
+from ..video_support import ClipSaver
 
 
 class ClipSavingAnalyzer(ResultAnalyzerBase):

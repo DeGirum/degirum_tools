@@ -54,26 +54,18 @@ import argparse
 
 from ._version import __version__, __version_info__
 from .audio_support import *
-from .classification_eval import *
-from .clip_saver import *
+from .analyzers import *
 from .compound_models import *
 from .crop_extent import *
-from .detection_eval import *
 from .environment import *
-from .event_detector import *
+from .evaluators import *
 from .figure_annotator import *
 from .inference_support import *
-from .line_count import *
 from .math_support import *
 from .model_registry import *
-from .notifier import *
-from .object_selector import *
 from .object_storage_support import *
-from .object_tracker import *
-from .regression_eval import *
 from .ui_support import *
 from .video_support import *
-from .zone_count import *
 
 
 # aliases for backward compatibility

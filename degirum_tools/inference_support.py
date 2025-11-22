@@ -120,7 +120,10 @@ from .video_support import (
     open_video_writer,
 )
 from .ui_support import Progress, Display, Timer
-from .result_analyzer_base import ResultAnalyzerBase, subclass_result_with_analyzers
+from .analyzers import (
+    ResultAnalyzerBase,
+    subclass_result_with_analyzers,
+)
 from . import environment as env
 
 

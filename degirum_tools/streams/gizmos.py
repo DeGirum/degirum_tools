@@ -24,10 +24,10 @@ from .base import Stream, StreamData, StreamMeta, Gizmo
 
 from ..crop_extent import CropExtentOptions, extend_bbox
 from ..environment import get_test_mode, get_token
-from ..event_detector import EventDetector
+from ..analyzers.event_detector import EventDetector
 from ..image_tools import crop_image, resize_image, image_size, ImageType
-from ..notifier import EventNotifier
-from ..result_analyzer_base import image_overlay_substitute, clone_result
+from ..analyzers.notifier import EventNotifier
+from ..analyzers.result_analyzer_base import image_overlay_substitute, clone_result
 from ..ui_support import Display
 from ..video_support import (
     create_video_stream,
