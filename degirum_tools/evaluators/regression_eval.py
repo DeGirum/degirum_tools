@@ -7,7 +7,7 @@
 
 import json, os, numpy as np, degirum as dg
 from .eval_support import ModelEvaluatorBase
-from ..ui_support import Progress
+from ..tools import Progress
 
 
 class ImageRegressionModelEvaluator(ModelEvaluatorBase):

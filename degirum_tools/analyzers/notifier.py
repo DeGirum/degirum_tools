@@ -71,12 +71,19 @@ from typing import Tuple, List, Union, Optional, Dict
 from contextvars import ContextVar
 from .. import logger_get
 from .result_analyzer_base import ResultAnalyzerBase
-from ..ui_support import put_text, color_complement, deduce_text_color, CornerPosition
-from ..math_support import AnchorPoint, get_image_anchor_point
 from .event_detector import EventDetector
-from ..environment import import_optional_package
-from ..video_support import ClipSaver
-from ..object_storage_support import ObjectStorageConfig, ObjectStorage
+from ..tools import (
+    put_text,
+    color_complement,
+    deduce_text_color,
+    CornerPosition,
+    AnchorPoint,
+    get_image_anchor_point,
+    import_optional_package,
+    ClipSaver,
+    ObjectStorageConfig,
+    ObjectStorage,
+)
 
 
 # special notification configuration for console output

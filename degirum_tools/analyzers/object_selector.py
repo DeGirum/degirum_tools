@@ -53,8 +53,7 @@ from enum import Enum
 from typing import List, Optional, Callable, Dict, Any, Tuple
 from dataclasses import dataclass
 from .result_analyzer_base import ResultAnalyzerBase
-from ..math_support import area
-from ..ui_support import color_complement, rgb_to_bgr
+from ..tools import area, color_complement, rgb_to_bgr
 
 
 class ObjectSelectionStrategies(Enum):

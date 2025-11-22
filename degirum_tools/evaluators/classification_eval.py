@@ -10,7 +10,7 @@ import degirum as dg
 from pathlib import Path
 from typing import Dict, List, Optional
 from .eval_support import ModelEvaluatorBase
-from ..ui_support import Progress
+from ..tools import Progress
 
 
 class ImageClassificationModelEvaluator(ModelEvaluatorBase):

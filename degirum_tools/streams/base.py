@@ -15,7 +15,7 @@
 import threading, queue, copy, time
 from abc import ABC, abstractmethod
 from typing import Optional, Any, List, Dict, Union, Iterator, Tuple
-from ..environment import get_test_mode
+from ..tools import get_test_mode
 from degirum.exceptions import DegirumException
 
 

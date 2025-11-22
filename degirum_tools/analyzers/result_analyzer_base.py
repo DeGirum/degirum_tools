@@ -31,7 +31,7 @@ Typical Usage Example
 
 1. Create a custom analyzer subclass:
    ```python
-   from degirum_tools.result_analyzer_base import ResultAnalyzerBase
+   from degirum_tools import ResultAnalyzerBase
 
    class MyCustomAnalyzer(ResultAnalyzerBase):
        def analyze(self, result):

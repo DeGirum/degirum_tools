@@ -10,9 +10,8 @@ from typing import List, Optional
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 from pycocotools.mask import encode
-from ..math_support import xyxy2xywh
+from ..tools import xyxy2xywh, Progress, stdoutRedirector
 from .eval_support import ModelEvaluatorBase
-from ..ui_support import Progress, stdoutRedirector
 
 
 class ObjectDetectionModelEvaluator(ModelEvaluatorBase):

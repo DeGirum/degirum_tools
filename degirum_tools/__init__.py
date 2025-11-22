@@ -53,23 +53,14 @@ def logger_add_handler(
 import argparse
 
 from ._version import __version__, __version_info__
-from .audio_support import *
 from .analyzers import *
 from .compound_models import *
-from .crop_extent import *
-from .environment import *
 from .evaluators import *
-from .figure_annotator import *
 from .inference_support import *
-from .math_support import *
-from .model_registry import *
-from .object_storage_support import *
-from .ui_support import *
-from .video_support import *
-
+from .tools import *
 
 # aliases for backward compatibility
-from .environment import (
+from .tools import (
     in_colab as _in_colab,
     reload_env as _reload_env,
     get_test_mode as _get_test_mode,
