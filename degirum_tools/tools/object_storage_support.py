@@ -237,7 +237,7 @@ class ObjectStorage:
             )
 
             self._client = minio.Minio(
-                self._config.endpoint,
+                endpoint=self._config.endpoint,
                 access_key=self._config.access_key,
                 secret_key=self._config.secret_key,
                 secure=True,  # Set to False if not using HTTPS
@@ -256,7 +256,7 @@ class ObjectStorage:
         try:
             ret = False
             for _ in range(retries):
-                ret = self._client.bucket_exists(self._config.bucket)
+                ret = self._client.bucket_exists(bucket_name=self._config.bucket)
                 if ret:
                     return True
                 time.sleep(0.1)
@@ -275,8 +275,8 @@ class ObjectStorage:
         """
 
         try:
-            if not self._client.bucket_exists(self._config.bucket):
-                self._client.make_bucket(self._config.bucket)
+            if not self._client.bucket_exists(bucket_name=self._config.bucket):
+                self._client.make_bucket(bucket_name=self._config.bucket)
         except Exception as e:
             raise RuntimeError(
                 f"Error occurred when ensuring bucket '{self._config.bucket}' exists: {e}"
@@ -293,8 +293,10 @@ class ObjectStorage:
         """
 
         try:
-            if self._client.bucket_exists(self._config.bucket):
-                return self._client.list_objects(self._config.bucket, recursive=True)
+            if self._client.bucket_exists(bucket_name=self._config.bucket):
+                return self._client.list_objects(
+                    bucket_name=self._config.bucket, recursive=True
+                )
         except Exception as e:
             raise RuntimeError(
                 f"Error occurred when listing bucket '{self._config.bucket}': {e}"
@@ -305,10 +307,14 @@ class ObjectStorage:
         """Remove all objects from the bucket."""
 
         try:
-            if self._client.bucket_exists(self._config.bucket):
-                objects = self._client.list_objects(self._config.bucket, recursive=True)
+            if self._client.bucket_exists(bucket_name=self._config.bucket):
+                objects = self._client.list_objects(
+                    bucket_name=self._config.bucket, recursive=True
+                )
                 for obj in objects:
-                    self._client.remove_object(self._config.bucket, obj.object_name)
+                    self._client.remove_object(
+                        bucket_name=self._config.bucket, object_name=obj.object_name
+                    )
                 return True
         except Exception as e:
             raise RuntimeError(
@@ -325,7 +331,7 @@ class ObjectStorage:
 
         try:
             if self.delete_bucket_contents():
-                self._client.remove_bucket(self._config.bucket)
+                self._client.remove_bucket(bucket_name=self._config.bucket)
         except Exception as e:
             raise RuntimeError(
                 f"Error occurred when deleting bucket '{self._config.bucket}': {e}"
@@ -343,8 +349,8 @@ class ObjectStorage:
 
         try:
             return self._client.presigned_get_object(
-                self._config.bucket,
-                object_name,
+                bucket_name=self._config.bucket,
+                object_name=object_name,
                 expires=datetime.timedelta(seconds=self._config.url_expiration_s),
             )
         except Exception as e:
@@ -365,7 +371,11 @@ class ObjectStorage:
 
         try:
             # Upload the file
-            self._client.fput_object(self._config.bucket, object_name, file_path)
+            self._client.fput_object(
+                bucket_name=self._config.bucket,
+                object_name=object_name,
+                file_path=file_path,
+            )
 
         except Exception as e:
             raise RuntimeError(
@@ -388,7 +398,11 @@ class ObjectStorage:
         """
 
         try:
-            self._client.fget_object(self._config.bucket, object_name, file_path)
+            self._client.fget_object(
+                bucket_name=self._config.bucket,
+                object_name=object_name,
+                file_path=file_path,
+            )
         except Exception as e:
             raise RuntimeError(
                 f"Error occurred when downloading file '{self._config.bucket}/{object_name} to '{file_path}': {e}"
@@ -408,7 +422,9 @@ class ObjectStorage:
         """
 
         try:
-            self._client.remove_object(self._config.bucket, object_name)
+            self._client.remove_object(
+                bucket_name=self._config.bucket, object_name=object_name
+            )
         except Exception as e:
             raise RuntimeError(
                 f"Error occurred when deleting file '{self._config.bucket}/{object_name}': {e}"
@@ -425,6 +441,8 @@ class ObjectStorage:
         """
 
         try:
-            return self._client.stat_object(self._config.bucket, object_name)
+            return self._client.stat_object(
+                bucket_name=self._config.bucket, object_name=object_name
+            )
         except Exception:
             return None
