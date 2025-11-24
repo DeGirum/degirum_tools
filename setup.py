@@ -59,7 +59,7 @@ setup(
         # building for CI/CD
         "build": ["build"],
         # external notifications
-        "notifications": ["apprise", "minio"],
+        "notifications": ["apprise", "minio==7.2.18"],
         # annotation tool
         "annotator": ["tk"],
     },
