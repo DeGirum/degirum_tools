@@ -16,7 +16,7 @@ It implements the `EventNotifier` analyzer for triggering notifications and opti
 
 Key Features:
     - Event-Based Triggers: Generates notifications when user-defined event conditions are met
-    - Message Formatting: Supports Python format strings for dynamic notification content
+    - Message Formatting: Supports `${expression}` fields for dynamic notification content
     - Holdoff Control: Configurable time/frame windows to suppress repeat notifications
     - Video Clip Saving: Optional video clip saving with local or cloud storage
     - Visual Overlay: Annotates active notification status on images
@@ -47,13 +47,13 @@ Configuration Options:
     - `show_overlay`: Enable/disable visual annotations
 
 Message Formatting:
-    - Use Python format strings in the `message` parameter to include dynamic content (e.g., `{time}` for the time the notification was sent)
+    - Use `${expression}` fields in the `message` parameter to include dynamic content (e.g., `${time}` for the time the notification was sent)
     - Use markdown formatting for rich text notifications (e.g. `**bold**`, `*italic*`, `[link](url)`)
-    - Supported placeholders include:
-        - `{result}`: The inference result
-        - `{time}`: The time the notification was sent
-        - `{url}`: The URL of the uploaded file
-        - `{filename}`: The name of the uploaded file
+    - Supported variables to use in `${expression}` fields include:
+        - `${result}`: The inference result
+        - `${time}`: The time the notification was sent
+        - `${url}`: The URL of the uploaded file
+        - `${filename}`: The name of the uploaded file
 
 Example:
     For local storage configuration:
@@ -69,14 +69,22 @@ Example:
 import numpy as np, sys, multiprocessing, threading, time, os, queue, tempfile, shutil, datetime
 from typing import Tuple, List, Union, Optional, Dict
 from contextvars import ContextVar
-from . import logger_get
+from .. import logger_get
 from .result_analyzer_base import ResultAnalyzerBase
-from .ui_support import put_text, color_complement, deduce_text_color, CornerPosition
-from .math_support import AnchorPoint, get_image_anchor_point
 from .event_detector import EventDetector
-from .environment import import_optional_package
-from .video_support import ClipSaver
-from .object_storage_support import ObjectStorageConfig, ObjectStorage
+from ..tools import (
+    put_text,
+    color_complement,
+    deduce_text_color,
+    CornerPosition,
+    AnchorPoint,
+    get_image_anchor_point,
+    import_optional_package,
+    ClipSaver,
+    ObjectStorageConfig,
+    ObjectStorage,
+    expression_substitute,
+)
 
 
 # special notification configuration for console output
@@ -102,10 +110,6 @@ class NotificationServer:
     Usage:
         Instantiate with the desired configuration, then send jobs using `send_job()`.
     """
-
-    class DefaultDict(dict):
-        def __missing__(self, key):
-            return f"{{{key}}}"  # Return the literal placeholder if key is missing
 
     class Job:
         """Encapsulates a notification job for the NotificationServer.
@@ -190,6 +194,7 @@ class NotificationServer:
                 storage_cfg,
                 pending_timeout_s,
             ),
+            daemon=True,
         )
         self._process.start()
 
@@ -207,7 +212,7 @@ class NotificationServer:
                 exc = self._response_queue.get_nowait()
                 if isinstance(exc, Exception):
                     logger.error(f"Notification error: {exc}")
-            except queue.Empty:
+            except Exception:
                 break
 
     def send_job(self, job_type, payload: str, dependent: Optional[int] = None):
@@ -341,7 +346,7 @@ class NotificationServer:
         def run_notification_job(job, params):
 
             message = job.payload
-            need_params = "{" in message and "}" in message
+            need_params = "${" in message
 
             if need_params and not params:
                 job.is_done = False  # no params available yet: job is not done
@@ -359,7 +364,7 @@ class NotificationServer:
 
                 # replace placeholders in the message
                 if need_params:
-                    message = message.format_map(NotificationServer.DefaultDict(params))
+                    message = expression_substitute(message, params)
 
                 if notification_config_console in notification_cfg:
                     print(
@@ -455,8 +460,16 @@ class NotificationServer:
             Exception: Any exception that occurs during response queue processing.
         """
         if self._process is not None:
-            self._job_queue.put(None)
-            self._process.join()
+            try:
+                self._job_queue.put_nowait(None)
+            except Exception:
+                pass
+
+            try:
+                self._process.join(3.0)
+            except Exception:
+                pass
+
             self._process = None
             self._process_response_queue()
 
@@ -472,7 +485,7 @@ class EventNotifier(ResultAnalyzerBase):
     Generates notifications when user-defined event conditions are met.
 
     Features:
-        * Message formatting using Python format strings (e.g., `{result}` for inference results)
+        * Message Formatting: supports `${expression}` fields for dynamic notification content.
         * Holdoff to suppress repeat notifications within a specified time/frame window
         * Optional video clip saving upon notification trigger with local or cloud storage
         * Records triggered notifications in the result object's `notifications` dictionary
@@ -531,6 +544,16 @@ class EventNotifier(ResultAnalyzerBase):
         Raises:
             ValueError: If holdoff unit is not "seconds" or "frames".
             ImportError: If required optional packages are not installed.
+
+        Message Formatting:
+            - Use `${expression}` fields in the `message` parameter to include dynamic content (e.g., `${time}` for the time the notification was sent)
+            - Use markdown formatting for rich text notifications (e.g. `**bold**`, `*italic*`, `[link](url)`)
+            - Supported variables to use in `${expression}` fields include:
+                - `${result}`: The inference result
+                - `${time}`: The time the notification was sent
+                - `${url}`: The URL of the uploaded file
+                - `${filename}`: The name of the uploaded file
+            - `re` and `json` modules are also available for advanced formatting
         """
 
         self._frame = 0
@@ -654,8 +677,8 @@ class EventNotifier(ResultAnalyzerBase):
         # send notification if event is fired
         notification_job_id: Optional[int] = None
         if fired:
-            message = self._message.format_map(
-                NotificationServer.DefaultDict(result=result, time=time.asctime())
+            message = expression_substitute(
+                self._message, {"result": result, "time": time.asctime()}
             )
             result.notifications[self._name] = message
 

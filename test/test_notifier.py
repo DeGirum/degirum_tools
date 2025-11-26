@@ -65,7 +65,7 @@ def test_notifier(s3_credentials, msteams_test_workflow_url):
             "params": {
                 "name": "test",
                 "condition": "myevent",
-                "message": "{result.events_detected}",
+                "message": "${result.events_detected}",
             },
             "inp": [{"events_detected": {"myevent"}}],
             "res": [{"test": "{'myevent'}"}],
@@ -171,7 +171,7 @@ def test_notifier(s3_credentials, msteams_test_workflow_url):
             "params": {
                 "name": "test",
                 "condition": "a",
-                "message": "{result.msg}",
+                "message": "${result.msg}",
                 "notification_tags": "Test, Tg",
                 "notification_config": "json://unittest",
             },
@@ -189,7 +189,7 @@ def test_notifier(s3_credentials, msteams_test_workflow_url):
             "params": {
                 "name": "test",
                 "condition": "a",
-                "message": "Unit test: [Uploaded file]({url})",
+                "message": "Unit test: [Uploaded file](${url})",
                 "notification_tags": "all",
                 "notification_config": msteams_test_workflow_url,
                 "clip_save": True,
@@ -206,7 +206,7 @@ def test_notifier(s3_credentials, msteams_test_workflow_url):
                 {"events_detected": {""}},
                 {"events_detected": {""}},
             ],
-            "res": [{}, {}, {"test": "Unit test: [Uploaded file]({url})"}, {}, {}],
+            "res": [{}, {}, {"test": "Unit test: [Uploaded file](${url})"}, {}, {}],
         },
     ]
 
