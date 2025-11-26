@@ -16,7 +16,7 @@ It implements the `EventNotifier` analyzer for triggering notifications and opti
 
 Key Features:
     - Event-Based Triggers: Generates notifications when user-defined event conditions are met
-    - Message Formatting: Supports Python format strings for dynamic notification content
+    - Message Formatting: Supports `${expression}` fields for dynamic notification content
     - Holdoff Control: Configurable time/frame windows to suppress repeat notifications
     - Video Clip Saving: Optional video clip saving with local or cloud storage
     - Visual Overlay: Annotates active notification status on images
@@ -47,13 +47,13 @@ Configuration Options:
     - `show_overlay`: Enable/disable visual annotations
 
 Message Formatting:
-    - Use Python format strings in the `message` parameter to include dynamic content (e.g., `{time}` for the time the notification was sent)
+    - Use `${expression}` fields in the `message` parameter to include dynamic content (e.g., `${time}` for the time the notification was sent)
     - Use markdown formatting for rich text notifications (e.g. `**bold**`, `*italic*`, `[link](url)`)
-    - Supported placeholders include:
-        - `{result}`: The inference result
-        - `{time}`: The time the notification was sent
-        - `{url}`: The URL of the uploaded file
-        - `{filename}`: The name of the uploaded file
+    - Supported variables to use in `${expression}` fields include:
+        - `${result}`: The inference result
+        - `${time}`: The time the notification was sent
+        - `${url}`: The URL of the uploaded file
+        - `${filename}`: The name of the uploaded file
 
 Example:
     For local storage configuration:
@@ -346,7 +346,7 @@ class NotificationServer:
         def run_notification_job(job, params):
 
             message = job.payload
-            need_params = "{" in message and "}" in message
+            need_params = "${" in message
 
             if need_params and not params:
                 job.is_done = False  # no params available yet: job is not done
@@ -485,7 +485,7 @@ class EventNotifier(ResultAnalyzerBase):
     Generates notifications when user-defined event conditions are met.
 
     Features:
-        * Message formatting using Python format strings (e.g., `{result}` for inference results)
+        * Message Formatting: supports `${expression}` fields for dynamic notification content.
         * Holdoff to suppress repeat notifications within a specified time/frame window
         * Optional video clip saving upon notification trigger with local or cloud storage
         * Records triggered notifications in the result object's `notifications` dictionary
@@ -544,6 +544,16 @@ class EventNotifier(ResultAnalyzerBase):
         Raises:
             ValueError: If holdoff unit is not "seconds" or "frames".
             ImportError: If required optional packages are not installed.
+
+        Message Formatting:
+            - Use `${expression}` fields in the `message` parameter to include dynamic content (e.g., `${time}` for the time the notification was sent)
+            - Use markdown formatting for rich text notifications (e.g. `**bold**`, `*italic*`, `[link](url)`)
+            - Supported variables to use in `${expression}` fields include:
+                - `${result}`: The inference result
+                - `${time}`: The time the notification was sent
+                - `${url}`: The URL of the uploaded file
+                - `${filename}`: The name of the uploaded file
+            - `re` and `json` modules are also available for advanced formatting
         """
 
         self._frame = 0
