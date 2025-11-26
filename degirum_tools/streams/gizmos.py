@@ -709,7 +709,9 @@ class AiGizmoBase(Gizmo):
 
             meta = result.info
             # If input was preprocessed bytes, attempt to attach original image for better visualization
-            if isinstance(result._input_image, bytes):
+            if isinstance(result._input_image, bytes) or isinstance(
+                result._input_image, memoryview
+            ):
                 preprocess_meta = meta.find_last(tag_preprocess)
                 if preprocess_meta:
                     # Restore original input image for result visualization
@@ -726,6 +728,10 @@ class AiGizmoBase(Gizmo):
                                     *converter(*box[:2]),
                                     *converter(*box[2:]),
                                 ]
+                            if "landmarks" in res:
+                                for m in res["landmarks"]:
+                                    m["landmark"][:2] = converter(*m["landmark"][:2])
+
             self.on_result(result)
             if self._abort:
                 break
