@@ -68,7 +68,7 @@ from .tools import (
 
 
 def _command_entrypoint(arg_str=None):
-    from .figure_annotator import (
+    from .tools.figure_annotator import (
         _figure_annotator_args,
         _zone_annotator_args,
         _line_annotator_args,

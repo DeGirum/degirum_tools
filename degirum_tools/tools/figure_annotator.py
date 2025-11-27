@@ -1,7 +1,7 @@
 #
 # figure_annotator.py: geometric figure annotation command-line utility
 #
-# Copyright DeGirum Corporation 2024
+# Copyright DeGirum Corporation 2025
 # All rights reserved
 #
 # Implements classes for the geometric figure annotation command-line utility
@@ -548,7 +548,7 @@ class FigureAnnotator:
 
             # Set window icon
             self.icon_image = self.imageTk.PhotoImage(
-                file=str(Path(__file__).parent) + "/logo.ico"
+                file=str(Path(__file__).parent.parent) + "/logo.ico"
             )
             self.root.iconphoto(True, self.icon_image)  # type: ignore
 
