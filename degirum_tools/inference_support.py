@@ -520,8 +520,12 @@ def model_time_profile(
     return ModelTimeProfile(
         elapsed=elapsed,
         iterations=iterations,
-        observed_fps=iterations / elapsed,
-        max_possible_fps=1e3 / stats["CoreInferenceDuration_ms"].avg,
+        observed_fps=iterations / elapsed if elapsed > 0 else 0.0,
+        max_possible_fps=(
+            1e3 / stats["CoreInferenceDuration_ms"].avg
+            if stats["CoreInferenceDuration_ms"].avg > 0
+            else 0.0
+        ),
         parameters=model.model_info,
         time_stats=stats,
     )
