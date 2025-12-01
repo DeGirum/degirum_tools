@@ -912,7 +912,7 @@ class VideoStreamer:
         fps: float = 30.0,
         pix_fmt="bgr24",
         gop_size: int = 50,
-        verbose: bool = True,
+        verbose: bool = False,
     ):
         """Initializes the video streamer.
 

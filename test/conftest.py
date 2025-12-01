@@ -121,18 +121,16 @@ def regression_model(zoo_dir, regression_model_name):
 
 @pytest.fixture(scope="session")
 def s3_credentials():
-    degirum_tools.environment.reload_env()
+    degirum_tools.reload_env()
     return dict(
         endpoint="s3.us-west-1.amazonaws.com",
-        access_key=os.getenv(degirum_tools.environment.var_S3AccessKey),
-        secret_key=os.getenv(degirum_tools.environment.var_S3SecretKey),
+        access_key=os.getenv(degirum_tools.var_S3AccessKey),
+        secret_key=os.getenv(degirum_tools.var_S3SecretKey),
         bucket="dg-degirum-tools-test-s3",
     )
 
 
 @pytest.fixture(scope="session")
 def msteams_test_workflow_url():
-    degirum_tools.environment.reload_env()
-    return os.getenv(
-        degirum_tools.environment.var_MSTeamsTestWorkflowURL, "json://unittest"
-    )
+    degirum_tools.reload_env()
+    return os.getenv(degirum_tools.var_MSTeamsTestWorkflowURL, "json://unittest")
