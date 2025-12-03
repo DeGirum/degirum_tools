@@ -1,7 +1,7 @@
 #
 # figure_annotator.py: geometric figure annotation command-line utility
 #
-# Copyright DeGirum Corporation 2024
+# Copyright DeGirum Corporation 2025
 # All rights reserved
 #
 # Implements classes for the geometric figure annotation command-line utility
@@ -511,6 +511,10 @@ class FigureAnnotator:
         self.line_width = 1
         self.darker_theme_color = "#89CFF0"
         self.lighter_theme_color = "lightblue"
+        self.icon_image_path = str(Path(__file__).parent.parent) + "/logo.ico"
+
+        if not Path(self.icon_image_path).exists():
+            raise FileNotFoundError(f"Icon file not found at {self.icon_image_path}")
 
         if not test_mode:
             self.tk = env.import_optional_package(
@@ -547,9 +551,7 @@ class FigureAnnotator:
             self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
             # Set window icon
-            self.icon_image = self.imageTk.PhotoImage(
-                file=str(Path(__file__).parent) + "/logo.ico"
-            )
+            self.icon_image = self.imageTk.PhotoImage(file=self.icon_image_path)
             self.root.iconphoto(True, self.icon_image)  # type: ignore
 
             # Set font
