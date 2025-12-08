@@ -66,8 +66,9 @@ Example:
     )
     ```
 """
-import numpy as np, sys, multiprocessing, threading, time, os, queue, tempfile, shutil, datetime
-from typing import Tuple, List, Union, Optional, Dict
+
+import numpy as np, sys, multiprocessing, threading, time, os, queue, tempfile, shutil, datetime, requests, re
+from typing import Any, Tuple, List, Union, Optional, Dict
 from contextvars import ContextVar
 from .. import logger_get
 from .result_analyzer_base import ResultAnalyzerBase
@@ -271,7 +272,24 @@ class NotificationServer:
             return None
 
         def configure_notifications():
+
+            class WebhookNotifier:
+                def __init__(self, url: str) -> None:
+                    self.url = url
+
+                def notify(self, body: str, title: str, tag: Any) -> bool:
+                    try:
+                        requests.post(self.url, data=body)
+                    except Exception:
+                        return False
+                    return True
+
             if notification_cfg:
+
+                if re.match(r"https?://", notification_cfg):
+                    # configure general webhook notifier (instead of Apprise)
+                    return WebhookNotifier(notification_cfg)
+
                 try:
                     apprise = import_optional_package(
                         "apprise",
