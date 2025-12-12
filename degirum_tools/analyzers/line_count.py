@@ -364,7 +364,12 @@ class LineCounter(ResultAnalyzerBase):
                 # new trails not previously counted
                 new_trails_list[i] = new_trails_list[i] - self._counted_trails_list[i]
 
-        def count_increment(trail_vector, line_vector):
+        def count_increment(
+            trail_vector: np.ndarray, line_vector: np.ndarray
+        ) -> Tuple[
+            Union[SingleLineCounts, SingleVectorCounts],
+            Union[Dict[str, str], str],
+        ]:
             """
             Compute increment counts and direction info for a single crossing.
 
@@ -373,7 +378,8 @@ class LineCounter(ResultAnalyzerBase):
                 direction_info: dict or str describing direction, per mode
             """
             if self._absolute_directions:
-                increment_counts: Optional[SingleLineCounts] = SingleLineCounts()
+                # absolute directions: left/right + top/bottom
+                increment_counts = SingleLineCounts()
 
                 # horizontal component
                 if trail_vector[0] < 0:
@@ -391,18 +397,17 @@ class LineCounter(ResultAnalyzerBase):
                     increment_counts.bottom += 1
                     vert = "bottom"
 
-                direction_info = {
+                direction_info: Dict[str, str] = {
                     "horizontal": horiz,
                     "vertical": vert,
                 }
-
             else:
-                increment_counts: Optional[SingleVectorCounts] = SingleVectorCounts()
+                # relative to line orientation: left/right
+                increment_counts = SingleVectorCounts()
                 cross_product = (
                     trail_vector[0] * line_vector[1] - trail_vector[1] * line_vector[0]
                 )
 
-                # sign of cross product tells which side
                 if cross_product > 0:
                     increment_counts.left += 1
                     direction_info = "left"
@@ -472,14 +477,11 @@ class LineCounter(ResultAnalyzerBase):
                         total_count += increment
 
                         if self._per_class_display:
-                            class_count: Optional[
-                                Union[SingleLineCounts, SingleVectorCounts]
-                            ] = None
                             if isinstance(total_count, LineCounts):
                                 class_count = total_count.for_class.setdefault(
                                     result.trail_classes[tid], SingleLineCounts()
                                 )
-                            elif isinstance(total_count, VectorCounts):
+                            else:  # VectorCounts
                                 class_count = total_count.for_class.setdefault(
                                     result.trail_classes[tid], SingleVectorCounts()
                                 )
