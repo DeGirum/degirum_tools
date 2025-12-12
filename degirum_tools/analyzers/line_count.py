@@ -377,6 +377,10 @@ class LineCounter(ResultAnalyzerBase):
                 increment_counts: SingleLineCounts or SingleVectorCounts
                 direction_info: dict or str describing direction, per mode
             """
+            # Declare as unions so both branches are valid for mypy
+            increment_counts: Union[SingleLineCounts, SingleVectorCounts]
+            direction_info: Union[Dict[str, str], str]
+
             if self._absolute_directions:
                 # absolute directions: left/right + top/bottom
                 increment_counts = SingleLineCounts()
@@ -397,7 +401,7 @@ class LineCounter(ResultAnalyzerBase):
                     increment_counts.bottom += 1
                     vert = "bottom"
 
-                direction_info: Dict[str, str] = {
+                direction_info = {
                     "horizontal": horiz,
                     "vertical": vert,
                 }
