@@ -8,7 +8,7 @@
 import re
 
 # packages to support expression evaluation
-import json  # noqa
+import json, dataclasses  # noqa
 
 
 def expression_substitute(template: str, context: dict) -> str:
@@ -26,10 +26,11 @@ def expression_substitute(template: str, context: dict) -> str:
         str: The template string with all expressions substituted by their evaluated values.
     """
 
-    pattern = re.compile(r"\$\{([^{}]+)\}")
+    pattern = re.compile(r"\$\{\{(.+?)\}\}|\$\{([^{}]+)\}")
 
     def repl(match):
-        expr = match.group(1).strip()
+        # group 1 is for ${{...}}, group 2 is for ${...}
+        expr = (match.group(1) or match.group(2)).strip()
         try:
             value = eval(expr, globals(), context)
         except Exception:
