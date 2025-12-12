@@ -319,7 +319,7 @@ class LineCounter(ResultAnalyzerBase):
         self._line_counts: List[Union[LineCounts, VectorCounts]] = [
             self._count_type() for _ in self._lines
         ]
-    
+
     def analyze(self, result):
         """
         Analyzes object trails for line crossings and updates crossing counts.
