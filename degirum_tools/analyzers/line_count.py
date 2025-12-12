@@ -56,7 +56,7 @@ Configuration Options:
     - `window_name`: Enable interactive line adjustment
 """
 import numpy as np, cv2
-from typing import List, Dict, Optional, Union, Any, Type
+from typing import List, Dict, Optional, Union, Any, Type, Tuple
 from copy import deepcopy
 from ..tools import (
     put_text,
