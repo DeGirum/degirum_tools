@@ -307,6 +307,7 @@ class LineCounter(ResultAnalyzerBase):
         self._annotation_color = annotation_color
         self._annotation_line_width = annotation_line_width
         self._win_name = window_name
+        self._return_direction_in_results = return_direction_in_results
         self.reset()
 
     def reset(self):
