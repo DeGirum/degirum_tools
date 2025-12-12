@@ -56,7 +56,7 @@ Configuration Options:
     - `window_name`: Enable interactive line adjustment
 """
 import numpy as np, cv2
-from typing import List, Dict, Optional, Union, Any, Type
+from typing import List, Dict, Optional, Union, Any, Type, Tuple
 from copy import deepcopy
 from ..tools import (
     put_text,
@@ -266,6 +266,7 @@ class LineCounter(ResultAnalyzerBase):
         annotation_color: Optional[tuple] = None,
         annotation_line_width: Optional[int] = None,
         window_name: Optional[str] = None,
+        return_direction_in_results: bool = False,
     ):
         """
         Initialize a LineCounter with specified lines and counting options.
@@ -286,6 +287,9 @@ class LineCounter(ResultAnalyzerBase):
             annotation_color (tuple, optional): RGB color for annotations. Default is complement of overlay color.
             annotation_line_width (int, optional): Thickness of annotation lines.
             window_name (str, optional): OpenCV window name to attach for interactive adjustment.
+            return_direction_in_results (bool, optional): If True, add a
+                `cross_line_direction` list to each detection, describing the
+                direction of crossing for each line. Default False
         """
         self._lines = [np.array(line).astype(int) for line in lines]
         self._line_vectors = [self._line_to_vector(line) for line in lines]
@@ -303,6 +307,7 @@ class LineCounter(ResultAnalyzerBase):
         self._annotation_color = annotation_color
         self._annotation_line_width = annotation_line_width
         self._win_name = window_name
+        self._return_direction_in_results = return_direction_in_results
         self.reset()
 
     def reset(self):
@@ -326,23 +331,30 @@ class LineCounter(ResultAnalyzerBase):
         Adds a `cross_line` boolean list to each detected object's dictionary indicating
         which lines they crossed on this frame.
 
-        Args:
-            result (InferenceResults): Model result object containing trails and detection info.
+        If `self._return_direction_in_results` is True, also adds a
+        `cross_line_direction` list, aligned with `cross_line`:
 
-        Returns:
-            (None): This method modifies the input result object in-place.
+            - In absolute mode (absolute_directions=True):
+                cross_line_direction[i] is a dict:
+                    {
+                        "horizontal": "left" or "right",
+                        "vertical": "top" or "bottom",
+                    }
 
-        Raises:
-            AttributeError: If result object is missing required attributes.
-            TypeError: If result object is not of the expected type.
+            - In relative mode (absolute_directions=False):
+                cross_line_direction[i] is "left" or "right"
         """
         self._lazy_init()
+
+        # No trails: propagate current line_counts, no cross_line on results
         if not hasattr(result, "trails") or len(result.trails) == 0:
             result.line_counts = deepcopy(self._line_counts)
             return
+
         lines_cnt = len(self._lines)
         new_trails = set(result.trails.keys())
         new_trails_list = [new_trails for _ in self._counted_trails_list]
+
         if self._count_first_crossing:
             for i in range(len(self._counted_trails_list)):
                 # remove trails that are no longer active
@@ -352,42 +364,84 @@ class LineCounter(ResultAnalyzerBase):
                 # new trails not previously counted
                 new_trails_list[i] = new_trails_list[i] - self._counted_trails_list[i]
 
-        def count_increment(trail_vector, line_vector):
-            increment_counts: Optional[Union[SingleLineCounts, SingleVectorCounts]] = (
-                None
-            )
+        def count_increment(
+            trail_vector: np.ndarray, line_vector: np.ndarray
+        ) -> Tuple[
+            Union[SingleLineCounts, SingleVectorCounts],
+            Union[Dict[str, str], str],
+        ]:
+            """
+            Compute increment counts and direction info for a single crossing.
+
+            Returns:
+                increment_counts: SingleLineCounts or SingleVectorCounts
+                direction_info: dict or str describing direction, per mode
+            """
+            # Declare as unions so both branches are valid for mypy
+            increment_counts: Union[SingleLineCounts, SingleVectorCounts]
+            direction_info: Union[Dict[str, str], str]
+
             if self._absolute_directions:
+                # absolute directions: left/right + top/bottom
                 increment_counts = SingleLineCounts()
+
+                # horizontal component
                 if trail_vector[0] < 0:
                     increment_counts.left += 1
+                    horiz = "left"
                 else:
                     increment_counts.right += 1
+                    horiz = "right"
+
+                # vertical component
                 if trail_vector[1] < 0:
                     increment_counts.top += 1
+                    vert = "top"
                 else:
                     increment_counts.bottom += 1
+                    vert = "bottom"
+
+                direction_info = {
+                    "horizontal": horiz,
+                    "vertical": vert,
+                }
             else:
+                # relative to line orientation: left/right
                 increment_counts = SingleVectorCounts()
                 cross_product = (
                     trail_vector[0] * line_vector[1] - trail_vector[1] * line_vector[0]
                 )
+
                 if cross_product > 0:
                     increment_counts.left += 1
+                    direction_info = "left"
                 elif cross_product < 0:
                     increment_counts.right += 1
+                    direction_info = "right"
                 else:
-                    if np.sign(trail_vector) == np.sign(line_vector):
+                    # Collinear case: fall back to direction of motion vs line
+                    sign_trail = np.sign(trail_vector)
+                    sign_line = np.sign(line_vector)
+                    if (sign_trail == sign_line).all():
                         increment_counts.left += 1
+                        direction_info = "left"
                     else:
                         increment_counts.right += 1
-            return increment_counts
+                        direction_info = "right"
+
+            return increment_counts, direction_info
 
         if not self._accumulate:
             self._line_counts = [self._count_type() for _ in self._lines]
-        crossed_tids: Dict[int, list] = (
-            {}
-        )  # map of track IDs to crossed line boolean flags
-        for li, new_trails, counted_trails, total_count, line, line_vector in zip(
+
+        # track_id -> [bool, ...] per line
+        crossed_tids: Dict[int, list] = {}
+
+        # track_id -> [direction_info or None, ...] per line
+        # Only used if self._return_direction_in_results is True
+        cross_directions: Dict[int, list] = {}
+
+        for li, new_trails_for_line, counted_trails, total_count, line, line_vector in zip(
             range(lines_cnt),
             new_trails_list,
             self._counted_trails_list,
@@ -395,7 +449,7 @@ class LineCounter(ResultAnalyzerBase):
             self._lines,
             self._line_vectors,
         ):
-            for tid in new_trails:
+            for tid in new_trails_for_line:
                 trail = get_anchor_coordinates(
                     np.array(result.trails[tid]), self._anchor_point
                 )
@@ -405,34 +459,61 @@ class LineCounter(ResultAnalyzerBase):
                     trail_vector = self._line_to_vector(
                         trail_start.tolist() + trail_end.tolist()
                     )
+
                     if intersect(line[:2], line[2:], trail_start, trail_end):
+                        # mark that this track crossed this line
                         crossed_tids.setdefault(tid, [False] * lines_cnt)[li] = True
+
+                        # compute increment & direction once
+                        increment, direction_info = count_increment(
+                            trail_vector, line_vector
+                        )
+
+                        if self._return_direction_in_results:
+                            cross_directions.setdefault(
+                                tid, [None] * lines_cnt
+                            )[li] = direction_info
+
                         if self._count_first_crossing:
                             counted_trails.add(tid)
-                        increment = count_increment(trail_vector, line_vector)
+
+                        # update total counts
                         total_count += increment
+
                         if self._per_class_display:
-                            class_count: Optional[
-                                Union[SingleLineCounts, SingleVectorCounts]
-                            ] = None
                             if isinstance(total_count, LineCounts):
                                 class_count = total_count.for_class.setdefault(
                                     result.trail_classes[tid], SingleLineCounts()
                                 )
-                            elif isinstance(total_count, VectorCounts):
+                            else:  # VectorCounts
                                 class_count = total_count.for_class.setdefault(
                                     result.trail_classes[tid], SingleVectorCounts()
                                 )
                             class_count += increment
+
+        # expose total line counts on result
         result.line_counts = deepcopy(self._line_counts)
+
+        # attach per-object crossing flags (and, optionally, directions)
         for obj in result.results:
             tid = obj.get("track_id")
             if tid is not None:
                 flags = crossed_tids.get(tid)
+
                 if flags is not None:
                     obj["cross_line"] = flags
+
+                    # Only add new key when user opted in
+                    if self._return_direction_in_results:
+                        dirs = cross_directions.get(tid, [None] * lines_cnt)
+                        obj["cross_line_direction"] = dirs
+
                     continue
+
+            # default: no crossings for this object
             obj["cross_line"] = [False] * lines_cnt
+            if self._return_direction_in_results:
+                obj["cross_line_direction"] = [None] * lines_cnt
 
     def annotate(self, result, image: np.ndarray) -> np.ndarray:
         """
