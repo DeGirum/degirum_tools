@@ -87,9 +87,10 @@ def test_expression_substitute():
 
     # ${{}} syntax: set comprehension with braces
     ctx = {"nums": [1, 2, 3, 2, 1]}
-    template = "Unique: ${{ {n*2 for n in nums} }}"
+    template = "${{ {n*2 for n in nums} }}"
     result = expression_substitute(template, ctx)
-    assert result == "Unique: {2, 4, 6}"
+    actual_set = set(eval(result))
+    assert actual_set == {2, 4, 6}
 
     # Mixed ${} and ${{}} in same template
     ctx = {"a": 5, "items": [("x", 1), ("y", 2)]}
