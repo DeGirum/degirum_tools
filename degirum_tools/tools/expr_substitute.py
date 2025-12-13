@@ -32,7 +32,11 @@ def expression_substitute(template: str, context: dict) -> str:
         # group 1 is for ${{...}}, group 2 is for ${...}
         expr = (match.group(1) or match.group(2)).strip()
         try:
-            value = eval(expr, globals(), context)
+            # Pass context as both globals and locals to support comprehensions in Python 3.9+
+            # In Python 3.9, comprehensions create their own scope and need variables in locals()
+            eval_globals = dict(globals())
+            eval_globals.update(context)
+            value = eval(expr, eval_globals, context)
         except Exception:
             # can't resolve expression – return original text including braces
             return match.group(0)
