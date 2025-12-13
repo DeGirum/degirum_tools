@@ -7,12 +7,15 @@
 # Implements various gizmos for streaming pipelines
 #
 
-import queue, copy, time, cv2, numpy as np
+import io, queue, copy, time, cv2, numpy as np
+from urllib.parse import urlparse
 from types import ModuleType
 import degirum as dg
 from abc import abstractmethod
 from typing import Iterator, Optional, List, Union
 from contextlib import ExitStack
+
+import requests
 
 try:
     Image: Optional[ModuleType] = None
@@ -220,13 +223,37 @@ class IteratorSourceGizmo(Gizmo):
             FileNotFoundError: If image file path doesn't exist
         """
         if isinstance(image_input, str):
-            # Load image from file path
-            img = cv2.imread(image_input)
-            if img is None:
-                raise FileNotFoundError(
-                    f"Could not load image from path: {image_input}"
+
+            if "http:" == image_input[:5] or "https:" == image_input[:6]:
+                # load image from URL
+                headers = {
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9",
+                    "Accept-Encoding": "gzip, deflate",
+                    "Accept-Language": "en-GB,en-US;q=0.9,en;q=0.8",
+                    "Dnt": "1",
+                    "Host": urlparse(image_input).netloc,
+                    "Upgrade-Insecure-Requests": "1",
+                    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.0.0 Safari/537.36",
+                }
+                buf = io.BytesIO(
+                    requests.get(image_input, headers=headers, timeout=5).content
                 )
-            return img
+                img = cv2.imdecode(
+                    np.frombuffer(buf.read(), np.uint8), cv2.IMREAD_COLOR
+                )
+                if img is None:
+                    raise dg.exceptions.DegirumException(
+                        f"Failed to decode image from '{image_input}'"
+                    )
+                return img
+            else:
+                # Load image from file path
+                img = cv2.imread(image_input)
+                if img is None:
+                    raise dg.exceptions.DegirumException(
+                        f"Could not load image from path: {image_input}"
+                    )
+                return img
 
         elif isinstance(image_input, np.ndarray):
             # Already a numpy array, just ensure it's in the right format

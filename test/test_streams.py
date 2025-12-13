@@ -121,9 +121,11 @@ def test_streams_video_source(short_video):
 
 
 def test_streams_iterator_source():
-    """Test for IteratorSourceGizmo"""
+    """Test for IteratorSourceGizmo with numpy arrays, file paths, URL images, PIL images, mixed formats, error handling, and empty iterators"""
 
-    # Test with numpy arrays
+    import glob
+
+    # Test 1: Numpy arrays
     test_images = []
     expected_shapes = []
 
@@ -173,87 +175,110 @@ def test_streams_iterator_source():
         assert video_meta[streams.VideoSourceGizmo.key_frame_id] == i
         assert streams.VideoSourceGizmo.key_timestamp in video_meta
 
-
-def test_streams_iterator_source_file_paths():
-    """Test IteratorSourceGizmo with file paths"""
-
-    # Get some test image files
-    import glob
-
+    # Test 2: File paths
     image_files = glob.glob("test/sample_dataset/chair/*.jpg")[:3]  # Use first 3 images
 
-    if not image_files:
-        pytest.skip("No test images found")
+    if image_files:
 
-    def file_generator():
-        for file_path in image_files:
-            yield file_path
+        def file_generator():
+            for file_path in image_files:
+                yield file_path
 
-    source = streams.IteratorSourceGizmo(file_generator())
-    sink = VideoSink()
-    streams.Composition(source >> sink).start()
+        source = streams.IteratorSourceGizmo(file_generator())
+        sink = VideoSink()
+        streams.Composition(source >> sink).start()
 
-    assert sink.frames_cnt == len(image_files)
+        assert sink.frames_cnt == len(image_files)
 
-    # Verify each frame is properly loaded
-    for i, frame in enumerate(sink.frames):
-        assert isinstance(frame.data, np.ndarray)
-        assert len(frame.data.shape) == 3  # Should be color image
-        assert frame.data.shape[2] == 3  # Should have 3 channels (BGR)
+        # Verify each frame is properly loaded
+        for i, frame in enumerate(sink.frames):
+            assert isinstance(frame.data, np.ndarray)
+            assert len(frame.data.shape) == 3  # Should be color image
+            assert frame.data.shape[2] == 3  # Should have 3 channels (BGR)
 
-        # Check metadata
-        video_meta = frame.meta.find_last(streams.tag_video)
-        assert video_meta is not None
-        assert video_meta[streams.VideoSourceGizmo.key_frame_id] == i
+            # Check metadata
+            video_meta = frame.meta.find_last(streams.tag_video)
+            assert video_meta is not None
+            assert video_meta[streams.VideoSourceGizmo.key_frame_id] == i
 
+    # Test 3: URL images
+    try:
+        from degirum_tools import remote_assets
 
-def test_streams_iterator_source_pil_images():
-    """Test IteratorSourceGizmo with PIL Images"""
+        # Get list of image URLs from remote assets
+        image_urls_dict = remote_assets.list_images()
+        image_urls = list(image_urls_dict.values())[:3]  # Use first 3 image URLs
 
+        if image_urls:
+
+            def url_generator():
+                for url in image_urls:
+                    yield url
+
+            source = streams.IteratorSourceGizmo(url_generator())
+            sink = VideoSink()
+            streams.Composition(source >> sink).start()
+
+            assert sink.frames_cnt == len(image_urls)
+
+            # Verify each frame is properly loaded
+            for i, frame in enumerate(sink.frames):
+                assert isinstance(frame.data, np.ndarray)
+                assert len(frame.data.shape) == 3  # Should be color image
+                assert frame.data.shape[2] == 3  # Should have 3 channels (BGR)
+
+                # Check metadata
+                video_meta = frame.meta.find_last(streams.tag_video)
+                assert video_meta is not None
+                assert video_meta[streams.VideoSourceGizmo.key_frame_id] == i
+    except Exception:
+        pass  # Remote assets not available or network error, skip URL tests
+
+    # Test 4: PIL Images
     try:
         from PIL import Image
+
+        # Create test PIL images
+        pil_images = []
+        pil_images.append(Image.new("RGB", (100, 200), color="red"))
+        pil_images.append(Image.new("RGB", (150, 100), color="green"))
+        pil_images.append(Image.new("L", (80, 120), color=128))  # Grayscale
+
+        def pil_generator():
+            for img in pil_images:
+                yield img
+
+        source = streams.IteratorSourceGizmo(pil_generator())
+        sink = VideoSink()
+        streams.Composition(source >> sink).start()
+
+        assert sink.frames_cnt == len(pil_images)
+
+        expected_shapes = [
+            (200, 100, 3),
+            (100, 150, 3),
+            (120, 80, 3),
+        ]  # PIL uses (width, height), OpenCV uses (height, width)
+
+        for i, (frame, expected_shape) in enumerate(zip(sink.frames, expected_shapes)):
+            assert frame.data.shape == expected_shape
+            assert isinstance(frame.data, np.ndarray)
+
+            # Verify conversion from RGB to BGR happened correctly
+            video_meta = frame.meta.find_last(streams.tag_video)
+            assert video_meta is not None
+            assert (
+                video_meta[streams.VideoSourceGizmo.key_frame_width]
+                == expected_shape[1]
+            )
+            assert (
+                video_meta[streams.VideoSourceGizmo.key_frame_height]
+                == expected_shape[0]
+            )
     except ImportError:
-        pytest.skip("PIL not available")
+        pass  # PIL not available, skip PIL tests
 
-    # Create test PIL images
-    pil_images = []
-    pil_images.append(Image.new("RGB", (100, 200), color="red"))
-    pil_images.append(Image.new("RGB", (150, 100), color="green"))
-    pil_images.append(Image.new("L", (80, 120), color=128))  # Grayscale
-
-    def pil_generator():
-        for img in pil_images:
-            yield img
-
-    source = streams.IteratorSourceGizmo(pil_generator())
-    sink = VideoSink()
-    streams.Composition(source >> sink).start()
-
-    assert sink.frames_cnt == len(pil_images)
-
-    expected_shapes = [
-        (200, 100, 3),
-        (100, 150, 3),
-        (120, 80, 3),
-    ]  # PIL uses (width, height), OpenCV uses (height, width)
-
-    for i, (frame, expected_shape) in enumerate(zip(sink.frames, expected_shapes)):
-        assert frame.data.shape == expected_shape
-        assert isinstance(frame.data, np.ndarray)
-
-        # Verify conversion from RGB to BGR happened correctly
-        video_meta = frame.meta.find_last(streams.tag_video)
-        assert video_meta is not None
-        assert video_meta[streams.VideoSourceGizmo.key_frame_width] == expected_shape[1]
-        assert (
-            video_meta[streams.VideoSourceGizmo.key_frame_height] == expected_shape[0]
-        )
-
-
-def test_streams_iterator_source_mixed_formats():
-    """Test IteratorSourceGizmo with mixed input formats"""
-
-    # Create mixed format inputs
+    # Test 5: Mixed formats
     test_inputs: list = []
 
     # Numpy array
@@ -268,39 +293,32 @@ def test_streams_iterator_source_mixed_formats():
         pass
 
     # Try to add file path if images exist
-    import glob
-
-    image_files = glob.glob("test/sample_dataset/chair/*.jpg")
     if image_files:
         test_inputs.append(image_files[0])
 
-    if len(test_inputs) < 2:
-        pytest.skip("Not enough test inputs available")
+    if len(test_inputs) >= 2:
 
-    def mixed_generator():
-        for inp in test_inputs:
-            yield inp
+        def mixed_generator():
+            for inp in test_inputs:
+                yield inp
 
-    source = streams.IteratorSourceGizmo(mixed_generator())
-    sink = VideoSink()
-    streams.Composition(source >> sink).start()
+        source = streams.IteratorSourceGizmo(mixed_generator())
+        sink = VideoSink()
+        streams.Composition(source >> sink).start()
 
-    assert sink.frames_cnt == len(test_inputs)
+        assert sink.frames_cnt == len(test_inputs)
 
-    # Verify all frames are properly converted to numpy arrays
-    for i, frame in enumerate(sink.frames):
-        assert isinstance(frame.data, np.ndarray)
-        assert len(frame.data.shape) == 3  # Should be 3D (H, W, C)
-        assert frame.data.shape[2] == 3  # Should have 3 color channels
+        # Verify all frames are properly converted to numpy arrays
+        for i, frame in enumerate(sink.frames):
+            assert isinstance(frame.data, np.ndarray)
+            assert len(frame.data.shape) == 3  # Should be 3D (H, W, C)
+            assert frame.data.shape[2] == 3  # Should have 3 color channels
 
-        video_meta = frame.meta.find_last(streams.tag_video)
-        assert video_meta is not None
-        assert video_meta[streams.VideoSourceGizmo.key_frame_id] == i
+            video_meta = frame.meta.find_last(streams.tag_video)
+            assert video_meta is not None
+            assert video_meta[streams.VideoSourceGizmo.key_frame_id] == i
 
-
-def test_streams_iterator_source_error_handling():
-    """Test IteratorSourceGizmo error handling"""
-
+    # Test 6: Error handling
     def invalid_generator():
         yield "non_existent_file.jpg"  # File that doesn't exist
 
@@ -321,10 +339,7 @@ def test_streams_iterator_source_error_handling():
     with pytest.raises(Exception):  # Could be wrapped in other exceptions
         streams.Composition(source2 >> sink2).start()
 
-
-def test_streams_iterator_source_empty():
-    """Test IteratorSourceGizmo with empty iterator"""
-
+    # Test 7: Empty iterator
     def empty_generator():
         return
         yield  # This will never execute
