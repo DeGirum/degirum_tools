@@ -518,6 +518,7 @@ class EventNotifier(ResultAnalyzerBase):
         condition: str,
         *,
         message: str = "",
+        notify_while_true: bool = False,
         holdoff: Union[Tuple[float, str], int, float] = 0,
         notification_config: Optional[str] = None,
         notification_tags: Optional[str] = None,
@@ -543,6 +544,7 @@ class EventNotifier(ResultAnalyzerBase):
             name (str): Name of the notification.
             condition (str): Python expression defining the condition to trigger the notification (references event names from `EventDetector`).
             message (str, optional): Notification message format string. If empty, uses "Notification triggered: {name}". Default is "".
+            notify_while_true (bool, optional): Whether to notify continuously while the condition is true. Default is False: notify only when condition changes from False to True.
             holdoff (int | float | Tuple[float, str], optional): Holdoff duration to suppress repeated notifications. If int, interpreted as frames; if float, as seconds; if tuple (value, "seconds"/"frames"), uses the specified unit. Default is 0 (no holdoff).
             notification_config (str, optional): Notification service config file path, Apprise URL, or "json://console" for stdout output. If None, notifications are not sent to any external service.
             notification_tags (str, optional): Tags to attach to notifications for filtering. Multiple tags can be separated by commas (for logical AND) or spaces (for logical OR).
@@ -587,6 +589,7 @@ class EventNotifier(ResultAnalyzerBase):
 
         self._name = name
         self._message = message if message else f"Notification triggered: {name}"
+        self._notify_while_true = notify_while_true
         self._show_overlay = show_overlay
         self._annotation_color = annotation_color
         self._annotation_font_scale = annotation_font_scale
@@ -676,8 +679,10 @@ class EventNotifier(ResultAnalyzerBase):
         if not hasattr(result, self.key_notifications):
             result.notifications = {}
 
+        # fire when edge trigger is selected and condition is met for the first time
+        # OR level trigger is selected and condition is true
         fired = False
-        if cond and not self._prev_cond:  # condition is met for the first time
+        if cond and (self._notify_while_true or not self._prev_cond):
             # check for holdoff time
             if (
                 (self._holdoff_frames == 0 and self._holdoff_sec == 0)  # no holdoff

@@ -108,6 +108,89 @@ def _run_notifier_tests(s3_credentials, webhook_url):
             "res": [{"test": "Notification triggered: test"}],
         },
         # ----------------------------------------------------------------
+        # notify_while_true tests
+        # ----------------------------------------------------------------
+        # edge trigger (default): notify only on first True
+        {
+            "params": {
+                "name": "test",
+                "condition": "a",
+                "message": "OK",
+                "notify_while_true": False,
+            },
+            "inp": [
+                {"events_detected": {}},
+                {"events_detected": {"a"}},
+                {"events_detected": {"a"}},
+                {"events_detected": {"a"}},
+                {"events_detected": {}},
+                {"events_detected": {"a"}},
+                {"events_detected": {"a"}},
+            ],
+            "res": [{}, {"test": "OK"}, {}, {}, {}, {"test": "OK"}, {}],
+        },
+        # level trigger: notify on every True
+        {
+            "params": {
+                "name": "test",
+                "condition": "a",
+                "message": "OK",
+                "notify_while_true": True,
+            },
+            "inp": [
+                {"events_detected": {}},
+                {"events_detected": {"a"}},
+                {"events_detected": {"a"}},
+                {"events_detected": {"a"}},
+                {"events_detected": {}},
+                {"events_detected": {"a"}},
+                {"events_detected": {"a"}},
+            ],
+            "res": [
+                {},
+                {"test": "OK"},
+                {"test": "OK"},
+                {"test": "OK"},
+                {},
+                {"test": "OK"},
+                {"test": "OK"},
+            ],
+        },
+        # edge trigger with complex condition
+        {
+            "params": {
+                "name": "test",
+                "condition": "a and b",
+                "message": "OK",
+                "notify_while_true": False,
+            },
+            "inp": [
+                {"events_detected": {"a"}},
+                {"events_detected": {"a", "b"}},
+                {"events_detected": {"a", "b"}},
+                {"events_detected": {"a"}},
+                {"events_detected": {"a", "b"}},
+            ],
+            "res": [{}, {"test": "OK"}, {}, {}, {"test": "OK"}],
+        },
+        # level trigger with complex condition
+        {
+            "params": {
+                "name": "test",
+                "condition": "a and b",
+                "message": "OK",
+                "notify_while_true": True,
+            },
+            "inp": [
+                {"events_detected": {"a"}},
+                {"events_detected": {"a", "b"}},
+                {"events_detected": {"a", "b"}},
+                {"events_detected": {"a"}},
+                {"events_detected": {"a", "b"}},
+            ],
+            "res": [{}, {"test": "OK"}, {"test": "OK"}, {}, {"test": "OK"}],
+        },
+        # ----------------------------------------------------------------
         # Holdoff tests
         # ----------------------------------------------------------------
         # holdoff in frames (implicitly specified)
@@ -193,6 +276,40 @@ def _run_notifier_tests(s3_credentials, webhook_url):
                 {"events_detected": {"a"}},
             ],
             "res": [{}, {"test": "OK"}, {}, {}, {}, {}, {}, {}, {}],
+        },
+        # level trigger with holdoff in frames
+        {
+            "params": {
+                "name": "test",
+                "condition": "a",
+                "message": "OK",
+                "notify_while_true": True,
+                "holdoff": 2,
+            },
+            "inp": [
+                {"events_detected": {}},
+                {"events_detected": {"a"}},
+                {"events_detected": {"a"}},
+                {"events_detected": {"a"}},
+                {"events_detected": {}},
+                {"events_detected": {}},
+                {"events_detected": {}},
+                {"events_detected": {"a"}},
+                {"events_detected": {"a"}},
+                {"events_detected": {"a"}},
+            ],
+            "res": [
+                {},
+                {"test": "OK"},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {"test": "OK"},
+                {},
+                {},
+            ],
         },
         # -------------------------------------------------------
         # Notification Tests
