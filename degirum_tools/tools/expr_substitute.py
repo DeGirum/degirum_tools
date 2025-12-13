@@ -26,7 +26,7 @@ def expression_substitute(template: str, context: dict) -> str:
         str: The template string with all expressions substituted by their evaluated values.
     """
 
-    pattern = re.compile(r"\$\{\{(.+?)\}\}|\$\{([^{}]+)\}")
+    pattern = re.compile(r"\$\{\{((?:[^}]|\}(?!\}))+)\}\}|\$\{([^{}]+)\}")
 
     def repl(match):
         # group 1 is for ${{...}}, group 2 is for ${...}
