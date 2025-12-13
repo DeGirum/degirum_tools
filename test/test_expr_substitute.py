@@ -8,7 +8,7 @@
 from degirum_tools.tools.expr_substitute import expression_substitute
 
 
-def test_expression_substitute_all():
+def test_expression_substitute():
 
     ctx: dict
 
@@ -66,3 +66,46 @@ def test_expression_substitute_all():
     template = "${json.dumps(payload)}"
     result = expression_substitute(template, ctx)
     assert result == '{"key": "value", "num": 42}'
+
+    # ${{}} syntax: dict comprehension
+    ctx = {"items": [("a", 1), ("b", 2), ("c", 3)]}
+    template = "${{ {k: v for k, v in items} }}"
+    result = expression_substitute(template, ctx)
+    assert result == "{'a': 1, 'b': 2, 'c': 3}"
+
+    # ${{}} syntax: dict literal
+    ctx = {"x": 10, "y": 20}
+    template = "Dict: ${{ {'x': x, 'y': y} }}"
+    result = expression_substitute(template, ctx)
+    assert result == "Dict: {'x': 10, 'y': 20}"
+
+    # ${{}} syntax: nested dict access
+    ctx = {"data": {"foo": {"bar": 123}}}
+    template = "Access: ${{data['foo']['bar']}}"
+    result = expression_substitute(template, ctx)
+    assert result == "Access: 123"
+
+    # ${{}} syntax: set comprehension with braces
+    ctx = {"nums": [1, 2, 3, 2, 1]}
+    template = "${{ {n*2 for n in nums} }}"
+    result = expression_substitute(template, ctx)
+    actual_set = set(eval(result))
+    assert actual_set == {2, 4, 6}
+
+    # Mixed ${} and ${{}} in same template
+    ctx = {"a": 5, "items": [("x", 1), ("y", 2)]}
+    template = "Value: ${a}, Dict: ${{ {k: v*a for k, v in items} }}"
+    result = expression_substitute(template, ctx)
+    assert result == "Value: 5, Dict: {'x': 5, 'y': 10}"
+
+    # ${{}} with failed evaluation
+    ctx = {"a": 1}
+    template = "Failed: ${{undefined_var}}, Success: ${a}"
+    result = expression_substitute(template, ctx)
+    assert result == "Failed: ${{undefined_var}}, Success: 1"
+
+    # ${{}} with json.dumps inside
+    ctx = {"data": {"key": "value"}}
+    template = "${{json.dumps(data)}}"
+    result = expression_substitute(template, ctx)
+    assert result == '{"key": "value"}'
