@@ -21,8 +21,8 @@ def _discover_media_files():
         # add more repos here...
     ]
 
-    IMAGE_EXTS = {".jpg"}
-    VIDEO_EXTS = {".mp4"}
+    IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".gif"}
+    VIDEO_EXTS = {".mp4", ".avi", ".mov"}
 
     # Precompiled regex patterns (shared)
     _CAMEL_RE1 = re.compile(r"(.)([A-Z][a-z]+)")
