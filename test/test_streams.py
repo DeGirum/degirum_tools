@@ -204,7 +204,9 @@ def test_streams_iterator_source():
     # Test 3: URL images
     try:
         # Get list of image URLs from remote assets
-        image_urls_dict = degirum_tools.remote_assets.list_images()
+        from degirum_tools import remote_assets
+
+        image_urls_dict = remote_assets.list_images()
         image_urls = list(image_urls_dict.values())[:3]  # Use first 3 image URLs
 
         if image_urls:
