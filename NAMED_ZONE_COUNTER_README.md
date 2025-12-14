@@ -8,25 +8,6 @@
 - **Clean architecture** - Separation of spatial geometry and temporal state logic
 - **Production-ready smoothing** - Timeout mechanism to filter noisy real-world data
 
-## Core Problem: Real-World Noise
-
-Video analytics in production environments faces inherent challenges:
-- **Detector failures**: Objects missed due to occlusion, lighting, pose changes
-- **Tracker instability**: Temporary ID loss, brief tracking gaps
-- **Physical uncertainty**: Objects hovering at zone boundaries
-
-**Without smoothing**, a single person walking through a doorway could generate:
-- 50+ entry events
-- 48+ exit events
-- Dozens of occupied/empty transitions
-
-**With smoothing**, the same scenario generates:
-- 1 clean entry event
-- 1 clean exit event
-- 2 occupancy state transitions
-
-This makes the difference between an **unusable prototype** and a **production-ready system**.
-
 ## Architecture: Separation of Concerns
 
 The implementation is structured around three focused components:
@@ -352,30 +333,6 @@ Each detection object gets additional attributes:
 obj["in_zone"]           # List[bool]: In each zone?
 obj["frames_in_zone"]    # List[int]: Frame counts (if tracking)
 obj["time_in_zone"]      # List[float]: Time in seconds (if tracking)
-```
-
-## Dependencies and Integration
-
-### Required Upstream
-
-**For basic counting**: Detection model with bounding boxes
-```python
-model = zoo.load_model("yolo_model")
-counter = NamedZoneCounter(zones=zones)
-model.attach_analyzers(counter)
-```
-
-**For events and tracking**: ObjectTracker must be attached first
-```python
-from degirum_tools.analyzers import ObjectTracker
-
-tracker = ObjectTracker()
-counter = NamedZoneCounter(
-    zones=zones,
-    use_tracking=True,
-    enable_zone_events=True,
-)
-model.attach_analyzers([tracker, counter])  # Order matters!
 ```
 
 ## Design Decisions and Rationale
