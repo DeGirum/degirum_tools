@@ -40,7 +40,8 @@ Typical Usage:
             "exit_area": exit_polygon,
         },
         use_tracking=True,
-        timeout_frames=5,
+        exit_delay_frames=5,
+        entry_delay_frames=3,
         enable_zone_events=True,
     )
 
@@ -66,13 +67,14 @@ Zone Events:
     Event structure:
     ```python
     {
-        "event_type": str,         # Event type
-        "zone_index": int,         # Numeric zone index (0-based)
-        "zone_id": str,            # Zone name/ID
-        "timestamp": float,        # Unix timestamp
-        "track_id": int | None,    # Track ID (entry/exit) or None (occupied/empty)
-        "object_label": str | None,# Object class (entry/exit) or None (occupied/empty)
-        "frame_number": int,       # Frame index (if available)
+        "event_type": str,              # Event type
+        "zone_index": int,              # Numeric zone index (0-based)
+        "zone_id": str,                 # Zone name/ID
+        "timestamp": float,             # Unix timestamp
+        "track_id": int | None,         # Track ID (entry/exit) or None (occupied/empty)
+        "object_label": str | None,     # Object class (entry/exit) or None (occupied/empty)
+        "dwell_time": float | None,     # Duration: in zone (exit), empty/occupied (transitions), None (entry)
+        "frame_number": int | None,     # Frame index (if available)
     }
     ```
 
@@ -86,10 +88,24 @@ Configuration Options:
     - `zones`: Dictionary mapping zone names to polygons
     - `class_list`: Optional list of class labels to count
     - `triggering_position`: Anchor point or IoPA-based triggering
-    - `timeout_frames`: Grace period for flickering/occlusion
+    - `timeout_frames`: Grace period for flickering/occlusion (exit smoothing)
+    - `credence_frames`: Consecutive frames required to establish presence (entry smoothing)
     - `enable_zone_events`: Generate zone-level events
     - `show_overlay`: Visual annotations
     - `per_class_display`: Show per-class counts
+
+Smoothing Parameters:
+    The analyzer provides symmetric smoothing for both entries and exits:
+
+    - **timeout_frames** (exit smoothing): Objects must be absent for N consecutive frames
+      before triggering exit events. Prevents false exits from brief occlusions or
+      flickering detections. Default: 0 (immediate exit).
+
+    - **credence_frames** (entry smoothing): Objects must be detected for N consecutive
+      frames before triggering entry events. Prevents false entries from spurious or
+      transient detections. Default: 1 (immediate entry).
+
+    Both parameters require `use_tracking=True` when set > 0/1 respectively.
 """
 
 import numpy as np
@@ -117,16 +133,20 @@ class _ObjectState:
     """Tracks the state of an object within a zone.
 
     Attributes:
-        timeout_count: Frames remaining before object is considered exited
+        exit_delay_count: Frames remaining before object is considered exited
+        entry_delay_count: Frames accumulated to establish presence (for entry smoothing)
         object_label: Class label of the tracked object
         presence_count: Number of frames object has been in the zone
         entering_time: Timestamp when object first entered the zone
+        is_established: Whether object presence is confirmed (entry delay threshold met)
     """
 
-    timeout_count: int
+    exit_delay_count: int
+    entry_delay_count: int
     object_label: str
     presence_count: int
     entering_time: float
+    is_established: bool = False
 
 
 class _ZoneGeometry:
@@ -250,60 +270,80 @@ class _ZoneState:
         was_occupied: Previous frame's occupancy state
     """
 
-    def __init__(self, timeout_frames: int):
+    def __init__(self, exit_delay_frames: int, entry_delay_frames: int):
         """Initialize zone state.
 
         Args:
-            timeout_frames: Number of frames to tolerate absence before exit
+            exit_delay_frames: Number of frames to tolerate absence before exit
+            entry_delay_frames: Number of frames required to establish presence
         """
-        self._timeout_frames = timeout_frames
+        self._exit_delay_frames = exit_delay_frames
+        self._entry_delay_frames = entry_delay_frames
         self._object_states: Dict[int, _ObjectState] = {}
         self._was_occupied: bool = False
         self._state_change_time: Optional[float] = None  # Track last transition time
 
-    def add_track(self, track_id: int, label: str, timestamp: float) -> bool:
-        """Add or update a track in the zone.
+    def add_track(
+        self, track_id: int, label: str, timestamp: float
+    ) -> Tuple[bool, bool]:
+        """Add or update a tracked object in the zone.
 
         Args:
-            track_id: Track ID to add
-            label: Object class label
-            timestamp: Current timestamp
+            track_id: Unique object identifier
+            label: Class label of the object
+            timestamp: Current frame timestamp
 
         Returns:
-            True if this is a new entry (first time seeing this track)
+            Tuple of (entry_event, is_fresh_entry):
+                - entry_event: True if object just became established (credence threshold met)
+                - is_fresh_entry: True if this is a brand new track (not a re-entry)
         """
         if track_id in self._object_states:
-            # Track already exists - update timeout and presence
-            self._object_states[track_id].timeout_count = self._timeout_frames
-            self._object_states[track_id].presence_count += 1
-            return False
+            # Object already tracked - reset exit delay and increment entry delay
+            obj_state = self._object_states[track_id]
+            obj_state.exit_delay_count = self._exit_delay_frames
+            obj_state.presence_count += 1
+
+            # Check if object just became established
+            if not obj_state.is_established:
+                obj_state.entry_delay_count += 1
+                if obj_state.entry_delay_count >= self._entry_delay_frames:
+                    obj_state.is_established = True
+                    return True, False  # Entry event when entry delay threshold met
+
+            return False, False  # No entry event for already-established tracks
         else:
-            # New track - create state
+            # New object entering zone for the first time
             self._object_states[track_id] = _ObjectState(
-                timeout_count=self._timeout_frames,
+                exit_delay_count=self._exit_delay_frames,
+                entry_delay_count=1,  # Start counting entry delay
                 object_label=label,
                 presence_count=1,
                 entering_time=timestamp,
+                is_established=(
+                    self._entry_delay_frames <= 1
+                ),  # Immediately established if threshold is 0 or 1
             )
-            return True
+            # Generate entry event only if immediately established
+            return (self._entry_delay_frames <= 1), True
 
-    def update_timeout(self, track_id: int) -> bool:
-        """Decrement timeout for a track not currently detected.
+    def update_exit_delay(self, track_id: int) -> bool:
+        """Decrement exit delay for a track not currently detected.
 
         Args:
             track_id: Track ID to update
 
         Returns:
-            True if track is still valid, False if timeout expired
+            True if track is still valid, False if exit delay expired
         """
         if track_id not in self._object_states:
             return False
 
         obj_state = self._object_states[track_id]
         obj_state.presence_count += 1
-        obj_state.timeout_count -= 1
+        obj_state.exit_delay_count -= 1
 
-        return obj_state.timeout_count > 0
+        return obj_state.exit_delay_count >= 0
 
     def remove_track(self, track_id: int) -> Optional[_ObjectState]:
         """Remove a track from the zone.
@@ -338,10 +378,10 @@ class _ZoneState:
             track_id: Track ID to check
 
         Returns:
-            True if timeout has expired (ready for exit)
+            True if exit delay has expired (ready for exit)
         """
         obj_state = self._object_states.get(track_id)
-        return obj_state is not None and obj_state.timeout_count == 0
+        return obj_state is not None and obj_state.exit_delay_count == 0
 
     def update_occupancy(
         self, current_count: int, timestamp: float
@@ -409,7 +449,8 @@ class NamedZoneCounter(ResultAnalyzerBase):
         bounding_box_scale: float = 1.0,
         iopa_threshold: Union[float, List[float]] = 0.0,
         use_tracking: bool = False,
-        timeout_frames: int = 0,
+        exit_delay_frames: int = 0,
+        entry_delay_frames: int = 1,
         enable_zone_events: bool = False,
         show_overlay: bool = True,
         show_inzone_counters: Optional[str] = None,
@@ -426,7 +467,8 @@ class NamedZoneCounter(ResultAnalyzerBase):
             bounding_box_scale: Scale factor for bboxes (0 to 1)
             iopa_threshold: IoPA threshold (single value or list per zone)
             use_tracking: Enable object tracking
-            timeout_frames: Frames to tolerate absence (requires tracking)
+            exit_delay_frames: Frames to tolerate absence before exit (requires tracking)
+            entry_delay_frames: Frames required to establish presence before entry (requires tracking)
             enable_zone_events: Generate zone-level events (requires tracking)
             show_overlay: Draw zone overlays
             show_inzone_counters: Show presence counters ('time', 'frames', 'all', None)
@@ -472,9 +514,12 @@ class NamedZoneCounter(ResultAnalyzerBase):
 
         # Tracking and events
         self._use_tracking = use_tracking
-        self._timeout_frames = timeout_frames
-        if self._timeout_frames > 0 and not self._use_tracking:
-            raise ValueError("timeout_frames requires use_tracking=True")
+        self._exit_delay_frames = exit_delay_frames
+        self._entry_delay_frames = entry_delay_frames
+        if self._exit_delay_frames > 0 and not self._use_tracking:
+            raise ValueError("exit_delay_frames requires use_tracking=True")
+        if self._entry_delay_frames > 1 and not self._use_tracking:
+            raise ValueError("entry_delay_frames > 1 requires use_tracking=True")
 
         self._enable_zone_events = enable_zone_events
         if self._enable_zone_events and not self._use_tracking:
@@ -525,19 +570,13 @@ class NamedZoneCounter(ResultAnalyzerBase):
 
         # Filter objects
         filtered_objects = self._filter_objects(result)
-        if not filtered_objects:
-            # Handle empty detections but still update occupancy
-            if self._enable_zone_events:
-                for zi, (zone_name, state) in enumerate(
-                    zip(self._zone_names, self._states)
-                ):
-                    self._generate_occupancy_events(
-                        result, zi, zone_name, state, 0, time.time()
-                    )
-            return
 
-        # Process each zone
-        bboxes = np.array([obj["bbox"] for obj in filtered_objects])
+        # Process each zone (even if no detections - need to handle missing tracks)
+        bboxes = (
+            np.array([obj["bbox"] for obj in filtered_objects])
+            if filtered_objects
+            else np.array([])
+        )
         time_now = time.time()
 
         for zi, (zone_name, geom, state) in enumerate(
@@ -569,10 +608,17 @@ class NamedZoneCounter(ResultAnalyzerBase):
             ]
 
             # Create state components
-            self._states = [_ZoneState(self._timeout_frames) for _ in self._zone_names]
+            self._states = [
+                _ZoneState(self._exit_delay_frames, self._entry_delay_frames)
+                for _ in self._zone_names
+            ]
 
     def _filter_objects(self, result) -> List[dict]:
-        """Filter objects based on class list and tracking requirements."""
+        """Filter objects based on class list and tracking requirements.
+
+        Returns only fresh detections - no ghost detections from stale trails.
+        Missing tracked objects will be handled via zone._object_states.
+        """
 
         def in_class_list(label):
             return (
@@ -581,7 +627,7 @@ class NamedZoneCounter(ResultAnalyzerBase):
                 else False if label is None else label in self._class_list
             )
 
-        # Filter detected objects
+        # Filter detected objects (fresh detections only)
         filtered = [
             obj
             for obj in result.results
@@ -589,20 +635,6 @@ class NamedZoneCounter(ResultAnalyzerBase):
             and in_class_list(obj.get("label"))
             and (not self._use_tracking or "track_id" in obj)
         ]
-
-        # Add lost but still tracked objects
-        if self._use_tracking and hasattr(result, "trails"):
-            active_tids = [obj["track_id"] for obj in filtered]
-            lost_objects = [
-                {
-                    "bbox": result.trails[tid][-1],
-                    "label": label,
-                    "track_id": tid,
-                }
-                for tid, label in result.trail_classes.items()
-                if tid not in active_tids and in_class_list(label)
-            ]
-            filtered.extend(lost_objects)
 
         # Initialize per-object zone fields
         nzones = len(self._zone_names)
@@ -624,38 +656,44 @@ class NamedZoneCounter(ResultAnalyzerBase):
         state: _ZoneState,
         timestamp: float,
     ):
-        """Process a single zone - update counts, states, and generate events."""
+        """Process a single zone - update counts, states, and generate events.
+
+        Implements clean 3-case logic:
+        1. Detected in zone (fresh bbox triggers)
+        2. Detected outside zone (fresh bbox doesn't trigger, but has state)
+        3. Missing detection (in state but not detected this frame)
+        """
         zone_counts = result.zone_counts[zone_name]
 
-        # Collect active and inactive track IDs upfront for clarity
+        # Collect track IDs
         detected_tids = (
             {obj["track_id"] for obj in objects} if self._use_tracking else set()
         )
         all_tracked_tids = state.get_tracked_ids() if self._use_tracking else set()
-        inactive_tids = all_tracked_tids - detected_tids
+        missing_tids = all_tracked_tids - detected_tids
 
-        # Process each detected object
+        # Case 1 & 2: Process fresh detections
         for obj, is_triggered in zip(objects, triggers):
             if is_triggered:
-                # Object is in zone
+                # Case 1: Fresh detection IN zone
                 self._handle_object_in_zone(
                     result, zone_index, zone_name, obj, state, zone_counts, timestamp
                 )
-            elif self._use_tracking and self._timeout_frames > 0:
-                # Object not in zone but may still be tracked (timeout grace period)
-                self._handle_object_missing(
+            elif self._use_tracking:
+                # Case 2: Fresh detection OUTSIDE zone (check if has state)
+                self._handle_detected_outside_zone(
                     result, zone_index, zone_name, obj, state, zone_counts, timestamp
                 )
 
-        # Process inactive tracks (not detected at all this frame)
-        if self._use_tracking:
-            self._process_inactive_tracks(
+        # Case 3: Process missing detections (tracked but not detected this frame)
+        if self._use_tracking and missing_tids:
+            self._handle_missing_detections(
                 result,
                 zone_index,
                 zone_name,
                 state,
                 zone_counts,
-                inactive_tids,
+                missing_tids,
                 timestamp,
             )
 
@@ -677,18 +715,24 @@ class NamedZoneCounter(ResultAnalyzerBase):
         timestamp: float,
     ):
         """Handle an object that is currently in the zone."""
-        # Mark object as in zone and increment counts
+        # Mark object as in zone
         obj[self.key_in_zone][zone_index] = True
-        zone_counts["total"] += 1
-        if self._per_class_display and obj.get("label"):
-            zone_counts[obj["label"]] += 1
 
         if self._use_tracking:
             tid = obj["track_id"]
-            is_new_entry = state.add_track(tid, obj.get("label"), timestamp)
+            entry_event, is_fresh = state.add_track(tid, obj.get("label"), timestamp)
 
-            # Generate entry event for new tracks
-            if is_new_entry and self._enable_zone_events:
+            # Get object state to check if established
+            obj_state = state.get_state(tid)
+
+            # Only count established objects
+            if obj_state.is_established:
+                zone_counts["total"] += 1
+                if self._per_class_display and obj.get("label"):
+                    zone_counts[obj["label"]] += 1
+
+            # Generate entry event when object becomes established
+            if entry_event and self._enable_zone_events:
                 self._generate_event(
                     result,
                     "zone_entry",
@@ -701,11 +745,15 @@ class NamedZoneCounter(ResultAnalyzerBase):
                 )
 
             # Update time-in-zone metrics
-            obj_state = state.get_state(tid)
             obj[self.key_frames_in_zone][zone_index] = obj_state.presence_count
             obj[self.key_time_in_zone][zone_index] = timestamp - obj_state.entering_time
+        else:
+            # Non-tracking mode: count all objects immediately
+            zone_counts["total"] += 1
+            if self._per_class_display and obj.get("label"):
+                zone_counts[obj["label"]] += 1
 
-    def _handle_object_missing(
+    def _handle_detected_outside_zone(
         self,
         result,
         zone_index: int,
@@ -715,20 +763,27 @@ class NamedZoneCounter(ResultAnalyzerBase):
         zone_counts: dict,
         timestamp: float,
     ):
-        """Handle an object not in zone but within timeout period."""
+        """Handle fresh detection outside zone (Case 2: grace period).
+
+        Object detected this frame but bbox doesn't trigger zone geometry.
+        If it was previously in zone, apply grace period (timeout).
+        """
         tid = obj["track_id"]
         obj_state = state.get_state(tid)
 
         if obj_state is not None:
-            # Still within timeout - keep counting
-            still_valid = state.update_timeout(tid)
+            # Object was previously in zone - apply grace period
+            still_valid = state.update_exit_delay(tid)
 
             if still_valid:
-                # Count as in-zone during grace period
+                # Still within timeout - mark as in-zone
                 obj[self.key_in_zone][zone_index] = True
-                zone_counts["total"] += 1
-                if self._per_class_display and obj_state.object_label:
-                    zone_counts[obj_state.object_label] += 1
+
+                # Only count if established
+                if obj_state.is_established:
+                    zone_counts["total"] += 1
+                    if self._per_class_display and obj_state.object_label:
+                        zone_counts[obj_state.object_label] += 1
 
                 obj[self.key_frames_in_zone][zone_index] = obj_state.presence_count
                 obj[self.key_time_in_zone][zone_index] = (
@@ -750,32 +805,38 @@ class NamedZoneCounter(ResultAnalyzerBase):
                     )
                 state.remove_track(tid)
 
-    def _process_inactive_tracks(
+    def _handle_missing_detections(
         self,
         result,
         zone_index: int,
         zone_name: str,
         state: _ZoneState,
         zone_counts: dict,
-        inactive_tids: set,
+        missing_tids: set,
         timestamp: float,
     ):
-        """Process tracks that are inactive (not detected this frame)."""
-        for tid in inactive_tids:
+        """Handle missing detections (Case 3: tracked but not detected).
+
+        These tracks are in zone state but have no detection this frame.
+        They could be temporarily occluded or truly exited.
+        """
+        for tid in missing_tids:
             obj_state = state.get_state(tid)
             if obj_state is None:
+                # Defensive check - should never happen since tid came from state.get_tracked_ids()
                 continue
 
-            if self._timeout_frames > 0:
-                # Update timeout
-                still_valid = state.update_timeout(tid)
+            if self._exit_delay_frames > 0:
+                # Apply grace period
+                still_valid = state.update_exit_delay(tid)
 
-                # Count inactive objects during grace period
-                zone_counts["total"] += 1
-                if self._per_class_display and obj_state.object_label:
-                    zone_counts[obj_state.object_label] += 1
-
-                if not still_valid:
+                if still_valid:
+                    # Count only if still in grace period AND established
+                    if obj_state.is_established:
+                        zone_counts["total"] += 1
+                        if self._per_class_display and obj_state.object_label:
+                            zone_counts[obj_state.object_label] += 1
+                else:
                     # Timeout expired - exit event
                     if self._enable_zone_events:
                         dwell_time = timestamp - obj_state.entering_time
@@ -791,21 +852,20 @@ class NamedZoneCounter(ResultAnalyzerBase):
                         )
                     state.remove_track(tid)
             else:
-                # No timeout - immediate exit
-                if state.should_exit(tid):
-                    if self._enable_zone_events:
-                        dwell_time = timestamp - obj_state.entering_time
-                        self._generate_event(
-                            result,
-                            "zone_exit",
-                            zone_index,
-                            zone_name,
-                            tid,
-                            obj_state.object_label,
-                            timestamp,
-                            dwell_time,
-                        )
-                    state.remove_track(tid)
+                # No timeout configured - immediate exit
+                if self._enable_zone_events:
+                    dwell_time = timestamp - obj_state.entering_time
+                    self._generate_event(
+                        result,
+                        "zone_exit",
+                        zone_index,
+                        zone_name,
+                        tid,
+                        obj_state.object_label,
+                        timestamp,
+                        dwell_time,
+                    )
+                state.remove_track(tid)
 
     def _generate_occupancy_events(
         self,
