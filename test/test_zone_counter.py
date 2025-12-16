@@ -498,7 +498,7 @@ def test_zone_counter():
                     [
                         {"total": 0},
                         {"total": 0},
-                    ],  # Object 0 missing, immediately deleted (exit_delay=0)
+                    ],  # Object 0 missing, immediately deleted (timeout_frames=0)
                 ],
                 [
                     [
@@ -1221,6 +1221,10 @@ class MockResult:
         self.inference_results = {"frame_number": frame_number}
         self.zone_counts = {}  # Will be replaced by ZoneCounter with list or dict
         self.zone_events = []
+        # Attributes for annotate() method
+        self.overlay_color = (255, 0, 0)  # Red
+        self.overlay_line_width = 2
+        self.overlay_font_scale = 0.5
 
 
 def test_entry_delay_frames():
@@ -1359,3 +1363,78 @@ def test_zone_events():
     empty_events = [e for e in result3.zone_events if e["event_type"] == "zone_empty"]
     assert len(exit_events) == 1
     assert len(empty_events) == 1
+
+
+def test_parameter_validation():
+    """
+    Test parameter validation for ZoneCounter
+    """
+    import degirum_tools
+    import pytest
+
+    zone = [[10, 10], [90, 10], [90, 90], [10, 90]]
+
+    # Test valid parameters (should not raise)
+    degirum_tools.ZoneCounter(
+        count_polygons=[zone],
+        timeout_frames=0,
+        entry_delay_frames=1,
+        use_tracking=True,
+    )
+
+    degirum_tools.ZoneCounter(
+        count_polygons=[zone],
+        timeout_frames=10,
+        entry_delay_frames=5,
+        use_tracking=True,
+    )
+
+    # Test invalid timeout_frames (negative)
+    with pytest.raises(
+        ValueError, match="timeout_frames must be a non-negative integer"
+    ):
+        degirum_tools.ZoneCounter(
+            count_polygons=[zone],
+            timeout_frames=-1,
+            use_tracking=True,
+        )
+
+    # Test invalid timeout_frames (float)
+    with pytest.raises(
+        ValueError, match="timeout_frames must be a non-negative integer"
+    ):
+        degirum_tools.ZoneCounter(
+            count_polygons=[zone],
+            timeout_frames=1.5,
+            use_tracking=True,
+        )
+
+    # Test invalid entry_delay_frames (zero)
+    with pytest.raises(
+        ValueError, match="entry_delay_frames must be a positive integer"
+    ):
+        degirum_tools.ZoneCounter(
+            count_polygons=[zone],
+            entry_delay_frames=0,
+            use_tracking=True,
+        )
+
+    # Test invalid entry_delay_frames (negative)
+    with pytest.raises(
+        ValueError, match="entry_delay_frames must be a positive integer"
+    ):
+        degirum_tools.ZoneCounter(
+            count_polygons=[zone],
+            entry_delay_frames=-1,
+            use_tracking=True,
+        )
+
+    # Test invalid entry_delay_frames (float)
+    with pytest.raises(
+        ValueError, match="entry_delay_frames must be a positive integer"
+    ):
+        degirum_tools.ZoneCounter(
+            count_polygons=[zone],
+            entry_delay_frames=2.5,
+            use_tracking=True,
+        )

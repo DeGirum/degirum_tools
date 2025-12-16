@@ -557,7 +557,15 @@ class ZoneCounter(ResultAnalyzerBase):
 
         # Tracking and delay parameters
         self._use_tracking = use_tracking
+
+        # Validate timeout_frames
+        if not isinstance(timeout_frames, int) or timeout_frames < 0:
+            raise ValueError("timeout_frames must be a non-negative integer (>= 0)")
         self._timeout_frames = timeout_frames
+
+        # Validate entry_delay_frames
+        if not isinstance(entry_delay_frames, int) or entry_delay_frames < 1:
+            raise ValueError("entry_delay_frames must be a positive integer (>= 1)")
         self._entry_delay_frames = entry_delay_frames
 
         if self._timeout_frames > 0 and not self._use_tracking:
