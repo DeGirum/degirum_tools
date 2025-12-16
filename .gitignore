@@ -3,3 +3,4 @@
 build/*
 dist/*
 degirum_tools.egg-info/*
+temp/*
