@@ -1219,8 +1219,8 @@ class MockResult:
         self.image = np.zeros((480, 640, 3), dtype=np.uint8)
         self.image_overlay = self.image.copy()
         self.inference_results = {"frame_number": frame_number}
-        self.zone_counts: dict = {}
-        self.zone_events: list = []
+        self.zone_counts = {}  # Will be replaced by ZoneCounter with list or dict
+        self.zone_events = []
 
 
 def test_entry_delay_frames():

@@ -1,5 +1,5 @@
 #
-# named_zone_count.py: named zone object counting with clean architecture
+# zone_count.py: zone object counting with named zone support and clean architecture
 #
 # Copyright DeGirum Corporation 2025
 # All rights reserved
@@ -124,6 +124,8 @@ from ..tools import (
     tlbr2allcorners,
 )
 from .result_analyzer_base import ResultAnalyzerBase
+
+__all__ = ["ZoneCounter", "NamedZoneCounter"]
 
 
 @dataclass
@@ -294,7 +296,7 @@ class _ZoneState:
 
         Returns:
             Tuple of (entry_event, is_fresh_entry):
-                - entry_event: True if object just became established (credence threshold met)
+                - entry_event: True if object just became established (entry delay threshold met)
                 - is_fresh_entry: True if this is a brand new track (not a re-entry)
         """
         if track_id in self._object_states:
@@ -488,11 +490,11 @@ class ZoneCounter(ResultAnalyzerBase):
             class_list: List of class labels to count (None = all classes)
             per_class_display: Show per-class counts separately
             triggering_position: Anchor point(s) or None for IoPA
-            bounding_box_scale: Scale factor for bboxes (0 to 1)
+            bounding_box_scale: Scale factor for bboxes (greater than 0, up to 1)
             iopa_threshold: IoPA threshold (single value or list per zone)
             use_tracking: Enable object tracking
-            timeout_frames: Grace period (frames to tolerate absence before exit, requires tracking if > 0)
-            entry_delay_frames: Credence period (frames required to establish presence before entry, requires tracking if > 1)
+            timeout_frames: Number of consecutive missing frames tolerated before object exits zone (requires tracking if > 0)
+            entry_delay_frames: Number of consecutive frames required to establish object presence before entry (requires tracking if > 1)
             enable_zone_events: Generate zone-level events (requires tracking)
             window_name: OpenCV window name for interactive polygon editing (None = disabled)
             show_overlay: Draw zone overlays
@@ -804,9 +806,8 @@ class ZoneCounter(ResultAnalyzerBase):
             obj_state = state.get_state(tid)
             assert obj_state is not None  # Type guard for mypy
 
-            # Count only on entry event (when object first enters or re-enters)
-            # This matches old ZoneCounter behavior: count once per entry, not every frame
-            if entry_event:
+            # Count all established objects (zone_counts resets each frame)
+            if obj_state.is_established:
                 zone_counts["total"] += 1
                 if self._per_class_display and obj.get("label"):
                     zone_counts[obj["label"]] += 1
@@ -874,7 +875,7 @@ class ZoneCounter(ResultAnalyzerBase):
                     )
                 else:
                     # Timeout expired - generate exit event
-                    if self._enable_zone_events:
+                    if self._enable_zone_events and obj_state.is_established:
                         dwell_time = timestamp - obj_state.entering_time
                         self._generate_event(
                             result,
@@ -889,7 +890,7 @@ class ZoneCounter(ResultAnalyzerBase):
                     state.remove_track(tid)
             else:
                 # No timeout configured - immediate exit
-                if self._enable_zone_events:
+                if self._enable_zone_events and obj_state.is_established:
                     dwell_time = timestamp - obj_state.entering_time
                     self._generate_event(
                         result,
@@ -936,7 +937,7 @@ class ZoneCounter(ResultAnalyzerBase):
                             zone_counts[obj_state.object_label] += 1
                 else:
                     # Timeout expired - exit event
-                    if self._enable_zone_events:
+                    if self._enable_zone_events and obj_state.is_established:
                         dwell_time = timestamp - obj_state.entering_time
                         self._generate_event(
                             result,
@@ -951,7 +952,7 @@ class ZoneCounter(ResultAnalyzerBase):
                     state.remove_track(tid)
             else:
                 # No timeout configured - immediate exit
-                if self._enable_zone_events:
+                if self._enable_zone_events and obj_state.is_established:
                     dwell_time = timestamp - obj_state.entering_time
                     self._generate_event(
                         result,

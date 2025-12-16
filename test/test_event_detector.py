@@ -1021,15 +1021,12 @@ def test_event_detector():
     ]
 
     for ci, case in enumerate(test_cases):
-        print(f"\n[{ci + 1}/{len(test_cases)}] Testing: {case['case']}")
-
         if "res" not in case:
             # expected to fail
             with pytest.raises(Exception):
                 event_detector = degirum_tools.EventDetector(
                     case["params"], custom_metric=case.get("custom_metric")
                 )
-            print("  ✓ Expected failure caught")
             continue
 
         try:
@@ -1057,4 +1054,3 @@ def test_event_detector():
                     + f"do not match expected `{case['res'][i]}`."
                     + f"\nConfig: {case['params']}"
                 )
-        print("  ✓ Passed")
