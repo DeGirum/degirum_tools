@@ -59,10 +59,10 @@ Typical Usage:
 Zone Events:
     When `enable_zone_events=True`, the analyzer generates four types of events:
 
-    - **zone_entry**: Track first enters a zone
-    - **zone_exit**: Track exits a zone (after timeout)
-    - **zone_occupied**: Zone transitions from empty to occupied
-    - **zone_empty**: Zone transitions from occupied to empty
+    - **zone_entry**: Track becomes established in zone (after entry_delay_frames consecutive detections)
+    - **zone_exit**: Track exits zone (after timeout_frames consecutive missing detections)
+    - **zone_occupied**: Zone transitions from empty to occupied (when first track becomes established)
+    - **zone_empty**: Zone transitions from occupied to empty (after all tracks exit)
 
     Event structure:
     ```python
@@ -99,11 +99,11 @@ Smoothing Parameters:
 
     - **timeout_frames** (exit smoothing): Objects must be absent for N consecutive frames
       before triggering exit events. Prevents false exits from brief occlusions or
-      flickering detections. Default: 0 (immediate exit). Requires `use_tracking=True` if > 0.
+      flickering detections. Default: 0 (exit on first missing frame). Requires `use_tracking=True` if > 0.
 
     - **entry_delay_frames** (entry smoothing): Objects must be detected for N consecutive
       frames before triggering entry events. Prevents false entries from spurious or
-      transient detections. Default: 1 (immediate entry). Requires `use_tracking=True` if > 1.
+      transient detections. Default: 1 (count on first detection). Requires `use_tracking=True` if > 1.
 """
 
 import numpy as np
@@ -1167,14 +1167,17 @@ class ZoneCounter(ResultAnalyzerBase):
                 else result.zone_counts[zone_name]
             )
 
+            # Format zone name (add "Zone" prefix for list-based zones for backward compatibility)
+            display_name = f"Zone {zone_name}" if self._zones_as_list else zone_name
+
             if self._per_class_display:
-                text = f"{zone_name}:"
+                text = f"{display_name}:"
                 for class_name in self._class_list:
                     count = zone_counts_dict.get(class_name, 0)
                     text += f"\n {class_name}: {count}"
             else:
                 count = zone_counts_dict.get("total", 0)
-                text = f"{zone_name}: {count}"
+                text = f"{display_name}: {count}"
 
             put_text(
                 image,
