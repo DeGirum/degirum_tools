@@ -772,25 +772,42 @@ class NamedZoneCounter(ResultAnalyzerBase):
         obj_state = state.get_state(tid)
 
         if obj_state is not None:
-            # Object was previously in zone - apply grace period
-            still_valid = state.update_exit_delay(tid)
+            # Object was previously in zone - check if grace period configured
+            if self._exit_delay_frames > 0:
+                # Apply grace period
+                still_valid = state.update_exit_delay(tid)
 
-            if still_valid:
-                # Still within timeout - mark as in-zone
-                obj[self.key_in_zone][zone_index] = True
+                if still_valid:
+                    # Still within timeout - mark as in-zone
+                    obj[self.key_in_zone][zone_index] = True
 
-                # Only count if established
-                if obj_state.is_established:
-                    zone_counts["total"] += 1
-                    if self._per_class_display and obj_state.object_label:
-                        zone_counts[obj_state.object_label] += 1
+                    # Only count if established
+                    if obj_state.is_established:
+                        zone_counts["total"] += 1
+                        if self._per_class_display and obj_state.object_label:
+                            zone_counts[obj_state.object_label] += 1
 
-                obj[self.key_frames_in_zone][zone_index] = obj_state.presence_count
-                obj[self.key_time_in_zone][zone_index] = (
-                    timestamp - obj_state.entering_time
-                )
+                    obj[self.key_frames_in_zone][zone_index] = obj_state.presence_count
+                    obj[self.key_time_in_zone][zone_index] = (
+                        timestamp - obj_state.entering_time
+                    )
+                else:
+                    # Timeout expired - generate exit event
+                    if self._enable_zone_events:
+                        dwell_time = timestamp - obj_state.entering_time
+                        self._generate_event(
+                            result,
+                            "zone_exit",
+                            zone_index,
+                            zone_name,
+                            tid,
+                            obj_state.object_label,
+                            timestamp,
+                            dwell_time,
+                        )
+                    state.remove_track(tid)
             else:
-                # Timeout expired - generate exit event
+                # No timeout configured - immediate exit
                 if self._enable_zone_events:
                     dwell_time = timestamp - obj_state.entering_time
                     self._generate_event(
