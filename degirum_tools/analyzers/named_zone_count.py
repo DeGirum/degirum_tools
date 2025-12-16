@@ -74,7 +74,7 @@ Zone Events:
         "track_id": int | None,         # Track ID (entry/exit) or None (occupied/empty)
         "object_label": str | None,     # Object class (entry/exit) or None (occupied/empty)
         "dwell_time": float | None,     # Duration: in zone (exit), empty/occupied (transitions), None (entry)
-        "frame_number": int | None,     # Frame index (if available)
+        "frame_index": int | None,      # Frame index (if available)
     }
     ```
 
@@ -959,7 +959,7 @@ class NamedZoneCounter(ResultAnalyzerBase):
             "track_id": track_id,
             "object_label": object_label,
             "dwell_time": dwell_time,
-            "frame_number": (
+            "frame_index": (
                 result.frame_index if hasattr(result, "frame_index") else None
             ),
         }

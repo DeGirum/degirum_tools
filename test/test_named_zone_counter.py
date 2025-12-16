@@ -13,8 +13,6 @@ Tests cover:
 import numpy as np
 import sys
 
-sys.path.insert(0, "c:\\Users\\ShashiChilappagari\\Documents\\wa\\degirum_tools")
-
 from degirum_tools.analyzers.named_zone_count import NamedZoneCounter
 
 
