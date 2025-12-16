@@ -12,7 +12,6 @@ Tests cover:
 
 import numpy as np
 import sys
-import time as time_module
 
 sys.path.insert(0, "c:\\Users\\ShashiChilappagari\\Documents\\wa\\degirum_tools")
 
@@ -27,6 +26,8 @@ class MockResult:
         self.image = np.zeros((480, 640, 3), dtype=np.uint8)
         self.image_overlay = self.image.copy()
         self.inference_results = {"frame_number": frame_number}
+        self.zone_counts: dict = {}  # Added for mypy
+        self.zone_events: list = []  # Added for mypy
 
 
 def test_entry_delay_frames():
@@ -861,7 +862,7 @@ def test_bbox_annotation_fields():
 
     obj = result.results[0]
     assert counter.key_in_zone in obj, "Should have in_zone field"
-    assert obj[counter.key_in_zone][0] == True, "Should be marked as in zone"
+    assert obj[counter.key_in_zone][0] is True, "Should be marked as in zone"
     assert counter.key_frames_in_zone in obj, "Should have frames_in_zone field"
     assert obj[counter.key_frames_in_zone][0] == 1, "Should have 1 frame"
     assert counter.key_time_in_zone in obj, "Should have time_in_zone field"

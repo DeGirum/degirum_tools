@@ -111,7 +111,7 @@ Smoothing Parameters:
 import numpy as np
 import cv2
 import time
-from typing import Tuple, Optional, Dict, List, Union, Any
+from typing import Tuple, Optional, Dict, List, Union
 from dataclasses import dataclass
 from ..tools import (
     put_text,
@@ -246,6 +246,7 @@ class _ZoneGeometry:
 
     def _trigger_anchor(self, bboxes: np.ndarray) -> np.ndarray:
         """Trigger using anchor points."""
+        assert self.triggering_position is not None  # Type guard for mypy
         clipped_anchors = np.array(
             [
                 np.ceil(get_anchor_coordinates(xyxy=bboxes, anchor=anchor)).astype(int)
@@ -579,6 +580,8 @@ class NamedZoneCounter(ResultAnalyzerBase):
         )
         time_now = time.time()
 
+        assert self._geometries is not None  # Type guard for mypy
+        assert self._states is not None  # Type guard for mypy
         for zi, (zone_name, geom, state) in enumerate(
             zip(self._zone_names, self._geometries, self._states)
         ):
@@ -720,10 +723,13 @@ class NamedZoneCounter(ResultAnalyzerBase):
 
         if self._use_tracking:
             tid = obj["track_id"]
-            entry_event, is_fresh = state.add_track(tid, obj.get("label"), timestamp)
+            entry_event, is_fresh = state.add_track(
+                tid, obj.get("label", "unknown"), timestamp
+            )
 
             # Get object state to check if established
             obj_state = state.get_state(tid)
+            assert obj_state is not None  # Type guard for mypy
 
             # Only count established objects
             if obj_state.is_established:
@@ -745,6 +751,7 @@ class NamedZoneCounter(ResultAnalyzerBase):
                 )
 
             # Update time-in-zone metrics
+            assert obj_state is not None  # Type guard for mypy
             obj[self.key_frames_in_zone][zone_index] = obj_state.presence_count
             obj[self.key_time_in_zone][zone_index] = timestamp - obj_state.entering_time
         else:
