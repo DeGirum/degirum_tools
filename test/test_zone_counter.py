@@ -1372,7 +1372,7 @@ def test_parameter_validation():
     import degirum_tools
     import pytest
 
-    zone = [[10, 10], [90, 10], [90, 90], [10, 90]]
+    zone = np.array([[10, 10], [90, 10], [90, 90], [10, 90]])
 
     # Test valid parameters (should not raise)
     degirum_tools.ZoneCounter(
@@ -1405,7 +1405,7 @@ def test_parameter_validation():
     ):
         degirum_tools.ZoneCounter(
             count_polygons=[zone],
-            timeout_frames=1.5,
+            timeout_frames=1.5,  # type: ignore[arg-type]
             use_tracking=True,
         )
 
@@ -1435,6 +1435,6 @@ def test_parameter_validation():
     ):
         degirum_tools.ZoneCounter(
             count_polygons=[zone],
-            entry_delay_frames=2.5,
+            entry_delay_frames=2.5,  # type: ignore[arg-type]
             use_tracking=True,
         )
