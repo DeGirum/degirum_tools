@@ -1,82 +1,115 @@
 #
-# zone_count.py: polygon zone object counting support
+# named_zone_count.py: named zone object counting with clean architecture
 #
 # Copyright DeGirum Corporation 2025
 # All rights reserved
 #
-# Implements classes for polygon zone object counting
+# Implements ZoneCounter with separation of geometry and state concerns
 #
-# MIT License
-#
-# Copyright (c) 2022 Roboflow
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
 
 """
-Zone Count Analyzer Module Overview
-====================================
+Named Zone Counter Analyzer Module Overview
+============================================
 
-This module provides an analyzer (`ZoneCounter`) for counting objects within polygonal zones in video frames
-or images. It integrates with AI inference results to determine whether detected or tracked objects lie
-within user-defined polygon zones.
+This module provides an enhanced zone counting analyzer (`ZoneCounter`) with named zones
+and clean separation of concerns. It builds upon the concepts from `ZoneCounter` but with
+improved architecture and a more user-friendly API.
 
 Key Features:
-    - **Polygonal Zone Definition**: Support for arbitrary polygon shapes as counting zones
-    - **Multiple Trigger Methods**: Choose between anchor-point or IoPA-based zone entry detection
-    - **Per-Class Counting**: Track object counts separately by class labels
-    - **Tracking Integration**: Smooth counts over time using frame and time-based track presence
-    - **Timeout Control**: Configurable grace period for objects temporarily missing from zones
-    - **Visual Overlay**: Draw zones and per-zone object counts on images
-    - **Interactive Editing**: Optional OpenCV mouse callback support for zone adjustment
-    - **Zone Presence Tracking**: Monitor how long objects remain within zones
+    - **Named Zones**: Use descriptive names instead of numeric indices
+    - **Clean Architecture**: Separation of geometry (spatial) and state (temporal) logic
+    - **Zone Events**: Track entry, exit, occupied, and empty events per zone
+    - **All ZoneCounter Features**: Supports all triggering methods, tracking, timeouts, etc.
+    - **Better Maintainability**: Smaller, focused components that are easier to test and extend
+
+Architecture:
+    The implementation separates concerns into focused components:
+
+    - **_ZoneGeometry**: Handles spatial logic - polygon shapes, masks, and triggering
+    - **_ZoneState**: Handles temporal logic - object tracking, timeouts, occupancy state
+    - **ZoneCounter**: Orchestrates the components and generates events
 
 Typical Usage:
-    1. Define polygon zones over the target video/image frame
-    2. Create a ZoneCounter instance with desired zones and settings
-    3. Process inference results through the analyzer chain
-    4. Access per-zone counts and object presence data
-    5. Optionally visualize zones and counts using annotate method
+    ```python
+    from degirum_tools.analyzers import ZoneCounter
+
+    counter = ZoneCounter(
+        zones={
+            "entrance": entrance_polygon,
+            "parking_spot_1": spot1_polygon,
+            "exit_area": exit_polygon,
+        },
+        use_tracking=True,
+        timeout_frames=5,
+        entry_delay_frames=3,
+        enable_zone_events=True,
+    )
+
+    model.attach_analyzers(counter)
+    result = model(frame)
+
+    # Access named zone counts
+    print(result.zone_counts)  # {"entrance": {...}, "parking_spot_1": {...}, ...}
+
+    # Access zone events
+    for event in result.zone_events:
+        print(f"{event['event_type']} in {event['zone_id']} at {event['timestamp']}")
+    ```
+
+Zone Events:
+    When `enable_zone_events=True`, the analyzer generates four types of events:
+
+    - **zone_entry**: Track first enters a zone
+    - **zone_exit**: Track exits a zone (after timeout)
+    - **zone_occupied**: Zone transitions from empty to occupied
+    - **zone_empty**: Zone transitions from occupied to empty
+
+    Event structure:
+    ```python
+    {
+        "event_type": str,              # Event type
+        "zone_index": int,              # Numeric zone index (0-based)
+        "zone_id": str,                 # Zone name/ID
+        "timestamp": float,             # Unix timestamp
+        "track_id": int | None,         # Track ID (entry/exit) or None (occupied/empty)
+        "object_label": str | None,     # Object class (entry/exit) or None (occupied/empty)
+        "dwell_time": float | None,     # Duration: in zone (exit), empty/occupied (transitions), None (entry)
+        "frame_index": int | None,      # Frame index (if available)
+    }
+    ```
 
 Integration Notes:
     - Requires detection results with bounding boxes
-    - Optional track IDs for tracking-related functionality
-    - Works best with ObjectTracker analyzer upstream
-    - Supports standard DeGirum PySDK result formats
-    - Handles partial/missing detections gracefully
-
-Key Classes:
-    - `ZoneCounter`: Main analyzer class for counting objects in zones
-    - `ZonePresence`: Internal class for tracking object presence in zones
+    - Zone events require `use_tracking=True`
+    - Compatible with ObjectTracker analyzer upstream
+    - Results structure matches ZoneCounter for easy migration
 
 Configuration Options:
-    - `zones`: List of polygon definitions for counting areas
-    - `classes`: Optional list of class labels to count
-    - `trigger_method`: Zone entry detection method (anchor or iopa)
-    - `tracking_timeout`: Frames to wait before removing lost objects
-    - `show_overlay`: Enable/disable visual annotations
-    - `show_counts`: Display count numbers on zone overlays
-    - `show_presence`: Show object presence duration in zones
+    - `zones`: Dictionary mapping zone names to polygons
+    - `class_list`: Optional list of class labels to count
+    - `triggering_position`: Anchor point or IoPA-based triggering
+    - `timeout_frames`: Grace period for flickering/occlusion (exit smoothing)
+    - `entry_delay_frames`: Consecutive frames required to establish presence (entry smoothing)
+    - `enable_zone_events`: Generate zone-level events
+    - `show_overlay`: Visual annotations
+    - `per_class_display`: Show per-class counts
 
+Smoothing Parameters:
+    The analyzer provides symmetric smoothing for both entries and exits:
+
+    - **timeout_frames** (exit smoothing): Objects must be absent for N consecutive frames
+      before triggering exit events. Prevents false exits from brief occlusions or
+      flickering detections. Default: 0 (immediate exit). Requires `use_tracking=True` if > 0.
+
+    - **entry_delay_frames** (entry smoothing): Objects must be detected for N consecutive
+      frames before triggering entry events. Prevents false entries from spurious or
+      transient detections. Default: 1 (immediate entry). Requires `use_tracking=True` if > 1.
 """
 
-import numpy as np, cv2, time
-from typing import Tuple, Optional, Dict, List, Union, Any
+import numpy as np
+import cv2
+import time
+from typing import Tuple, Optional, Dict, List, Union
 from dataclasses import dataclass
 from ..tools import (
     put_text,
@@ -95,40 +128,39 @@ from .result_analyzer_base import ResultAnalyzerBase
 
 @dataclass
 class _ObjectState:
-    """Internal class to track the state of an object within a zone.
-
-    This class maintains state information for objects being tracked within a zone,
-    including timeout counters, presence duration, and entry timestamps.
+    """Tracks the state of an object within a zone.
 
     Attributes:
-        timeout_count (int): Number of frames the object is allowed to be missing before it is considered exited.
-        object_label (str): The class label of the object being tracked.
-        presence_count (int): Number of consecutive frames the object has been present in the zone.
-        entering_time (float): Timestamp when the object was first detected in the zone.
+        exit_delay_count: Frames remaining before object is considered exited
+        entry_delay_count: Frames accumulated to establish presence (for entry smoothing)
+        object_label: Class label of the tracked object
+        presence_count: Number of frames object has been in the zone
+        entering_time: Timestamp when object first entered the zone
+        is_established: Whether object presence is confirmed (entry delay threshold met)
     """
 
-    timeout_count: int  # number of frames to buffer when an object disappears from zone
-    object_label: str  # label of the object
-    presence_count: int  # number of frames the object is present in the zone
-    entering_time: float  # timestamp when the object entered the zone
+    exit_delay_count: int
+    entry_delay_count: int
+    object_label: str
+    presence_count: int
+    entering_time: float
+    is_established: bool = False
 
 
-class _PolygonZone:
-    """Represents a polygonal zone within a video frame or image.
+class _ZoneGeometry:
+    """Handles spatial geometry and zone triggering logic.
 
-    This class encapsulates the logic for determining whether objects are inside a polygon zone,
-    using either anchor points or IoPA (Intersection over Polygon Area) thresholding.
-
-    The class maintains internal state for tracking objects within the zone and handles
-    timeout logic for objects that temporarily leave the zone.
+    This class is responsible for determining whether bounding boxes are inside
+    a polygon zone based on geometric criteria (anchor points or IoPA).
+    It is stateless and has no memory of previous frames.
 
     Attributes:
-        polygon (np.ndarray): Polygon vertices as (N,2) array.
-        frame_resolution_wh (Tuple[int, int]): Frame width and height.
-        triggering_position (list[AnchorPoint] or None): Anchor points to trigger inside zone.
-        bounding_box_scale (float): Scale to shrink bounding boxes before zone trigger.
-        iopa_threshold (float): IoPA threshold to trigger zone.
-        timeout_frames (int): Frames to tolerate temporary absence of object.
+        polygon: Polygon vertices as (N,2) array
+        mask: Binary mask for point-in-polygon tests
+        polygon_area: Area of the polygon
+        triggering_position: Anchor points for triggering (or None for IoPA)
+        bounding_box_scale: Scale factor for bounding boxes
+        iopa_threshold: IoPA threshold for zone membership
     """
 
     def __init__(
@@ -138,20 +170,17 @@ class _PolygonZone:
         triggering_position: Optional[Union[List[AnchorPoint], AnchorPoint]],
         bounding_box_scale: float = 1.0,
         iopa_threshold: float = 0.0,
-        timeout_frames: int = 0,
     ):
-        """
-        Constructor.
+        """Initialize zone geometry.
 
         Args:
-            polygon (np.ndarray): Polygon vertices.
-            frame_resolution_wh (Tuple[int, int]): Frame resolution (width, height).
-            triggering_position (list or AnchorPoint or None): Anchor positions to check.
-            bounding_box_scale (float, optional): Box scaling factor. Default 1.0.
-            iopa_threshold (float, optional): IoPA threshold. Default 0.0.
-            timeout_frames (int, optional): Timeout frames for tracking absence. Default 0.
+            polygon: Polygon vertices
+            frame_resolution_wh: Frame (width, height)
+            triggering_position: Anchor point(s) or None for IoPA
+            bounding_box_scale: Scale factor for bboxes (default 1.0)
+            iopa_threshold: IoPA threshold (default 0.0)
         """
-        self.frame_resolution_wh = frame_resolution_wh
+        self.width, self.height = frame_resolution_wh
         self.triggering_position = (
             triggering_position
             if triggering_position is None or isinstance(triggering_position, list)
@@ -159,219 +188,508 @@ class _PolygonZone:
         )
         self.bounding_box_scale = bounding_box_scale
         self.iopa_threshold = iopa_threshold
-        self._timeout_count_initial = timeout_frames
-        self._object_states: Dict[int, _ObjectState] = {}
-        self.width, self.height = frame_resolution_wh
+
+        # Create polygon mask and compute area
+        self.polygon = polygon.astype(np.float32)
         self.mask = np.zeros((self.height + 1, self.width + 1))
         cv2.fillPoly(self.mask, [cv2.Mat(polygon.astype(int))], color=[1])
-        self.polygon = polygon.astype(np.float32)
         self.polygon_area = cv2.contourArea(polygon.reshape(1, -1, 2))
 
     def trigger(self, bboxes: np.ndarray) -> np.ndarray:
-        """Determine which bounding boxes are considered inside the polygon zone.
+        """Determine which bounding boxes are inside the zone.
 
-        This method applies the configured triggering logic:
-        - If `triggering_position` is set, tests if any specified anchor point
-          of each bounding box lies inside the polygon.
-        - Otherwise, uses IoPA (Intersection over Polygon Area) with the polygon
-          and thresholds it against `iopa_threshold`.
+        Uses either anchor point testing or IoPA (Intersection over Polygon Area)
+        depending on configuration.
 
         Args:
-            bboxes (np.ndarray): Array of shape `(N, 4)` with bounding boxes in `(x0, y0, x1, y1)` format.
+            bboxes: Array of shape (N, 4) with boxes in (x0, y0, x1, y1) format
 
         Returns:
-            np.ndarray: Boolean array of length `N`, indicating if each bounding box is inside the zone.
+            Boolean array of length N indicating zone membership
         """
-        # clip to frame
+        if bboxes.size == 0:
+            return np.array([], dtype=bool)
+
+        # Clip bboxes to frame boundaries
+        bboxes = bboxes.copy()
         bboxes[:, [0, 2]] = bboxes[:, [0, 2]].clip(0, self.width)
         bboxes[:, [1, 3]] = bboxes[:, [1, 3]].clip(0, self.height)
-        # scale down bounding box by scale factor
+
+        # Scale down bounding boxes if needed
         if self.bounding_box_scale < 1.0:
             bboxes_xywh = xyxy2xywh(bboxes).astype(float)
             bboxes_xywh[:, [2, 3]] *= self.bounding_box_scale
             bboxes = xywh2xyxy(bboxes_xywh)
+
+        # Choose triggering method
         if self.triggering_position is None:
-            # trigger zones based on IoPA
-            iopa = np.zeros((bboxes.shape[0]), dtype=float)
-            bboxes_corners = tlbr2allcorners(bboxes).astype(np.float32)
-            for i in range(len(bboxes_corners)):
-                iopa[i] = cv2.intersectConvexConvex(
-                    bboxes_corners[i].reshape(-1, 2), self.polygon
-                )[0]
-            iopa /= self.polygon_area
-            is_in_zone = iopa > self.iopa_threshold
+            # IoPA-based triggering
+            return self._trigger_iopa(bboxes)
         else:
-            # trigger zones based on trigger points (anchor points)
-            clipped_anchors = np.array(
-                [
-                    np.ceil(get_anchor_coordinates(xyxy=bboxes, anchor=anchor)).astype(
-                        int
-                    )
-                    for anchor in self.triggering_position
-                ]
+            # Anchor point-based triggering
+            return self._trigger_anchor(bboxes)
+
+    def _trigger_iopa(self, bboxes: np.ndarray) -> np.ndarray:
+        """Trigger using Intersection over Polygon Area."""
+        iopa = np.zeros(len(bboxes), dtype=float)
+        bboxes_corners = tlbr2allcorners(bboxes).astype(np.float32)
+
+        for i in range(len(bboxes_corners)):
+            intersection_area = cv2.intersectConvexConvex(
+                bboxes_corners[i].reshape(-1, 2), self.polygon
+            )[0]
+            iopa[i] = intersection_area / self.polygon_area
+
+        return iopa > self.iopa_threshold
+
+    def _trigger_anchor(self, bboxes: np.ndarray) -> np.ndarray:
+        """Trigger using anchor points."""
+        assert self.triggering_position is not None  # Type guard for mypy
+        clipped_anchors = np.array(
+            [
+                np.ceil(get_anchor_coordinates(xyxy=bboxes, anchor=anchor)).astype(int)
+                for anchor in self.triggering_position
+            ]
+        )
+
+        # Check if any anchor point is inside the zone
+        return np.logical_or.reduce(
+            self.mask[clipped_anchors[:, :, 1], clipped_anchors[:, :, 0]]
+        )
+
+
+class _ZoneState:
+    """Manages temporal state for a single zone.
+
+    This class tracks object presence over time, handles timeouts for flickering,
+    and maintains zone-level occupancy state for event generation.
+
+    Attributes:
+        object_states: Dictionary mapping track_id to _ObjectState
+        was_occupied: Previous frame's occupancy state
+    """
+
+    def __init__(self, timeout_frames: int, entry_delay_frames: int):
+        """Initialize zone state.
+
+        Args:
+            timeout_frames: Number of frames to tolerate absence before exit
+            entry_delay_frames: Number of frames required to establish presence
+        """
+        self._timeout_frames = timeout_frames
+        self._entry_delay_frames = entry_delay_frames
+        self._object_states: Dict[int, _ObjectState] = {}
+        self._was_occupied: bool = False
+        self._state_change_time: Optional[float] = None  # Track last transition time
+
+    def add_track(
+        self, track_id: int, label: str, timestamp: float
+    ) -> Tuple[bool, bool]:
+        """Add or update a tracked object in the zone.
+
+        Args:
+            track_id: Unique object identifier
+            label: Class label of the object
+            timestamp: Current frame timestamp
+
+        Returns:
+            Tuple of (entry_event, is_fresh_entry):
+                - entry_event: True if object just became established (credence threshold met)
+                - is_fresh_entry: True if this is a brand new track (not a re-entry)
+        """
+        if track_id in self._object_states:
+            # Object already tracked
+            obj_state = self._object_states[track_id]
+
+            # Check if this is a re-entry (object was in timeout/exit period)
+            is_reentry = obj_state.exit_delay_count < self._timeout_frames
+
+            # Reset exit delay
+            obj_state.exit_delay_count = self._timeout_frames
+
+            if is_reentry:
+                # Object left and came back - reset presence tracking
+                obj_state.presence_count = 1
+                obj_state.entering_time = timestamp
+                obj_state.entry_delay_count = 1
+                obj_state.is_established = self._entry_delay_frames == 1
+                return (
+                    self._entry_delay_frames == 1
+                ), False  # Entry event if immediate
+            else:
+                # Continuous presence - increment counter
+                obj_state.presence_count += 1
+
+                # Check if object just became established
+                if not obj_state.is_established:
+                    obj_state.entry_delay_count += 1
+                    if obj_state.entry_delay_count >= self._entry_delay_frames:
+                        obj_state.is_established = True
+                        return True, False  # Entry event when entry delay threshold met
+
+                return False, False  # No entry event for already-established tracks
+        else:
+            # New object entering zone for the first time
+            self._object_states[track_id] = _ObjectState(
+                exit_delay_count=self._timeout_frames,
+                entry_delay_count=1,  # Start counting entry delay
+                object_label=label,
+                presence_count=1,
+                entering_time=timestamp,
+                is_established=(
+                    self._entry_delay_frames == 1
+                ),  # Immediately established if threshold is exactly 1 (immediate counting)
             )
-            is_in_zone = np.logical_or.reduce(
-                self.mask[clipped_anchors[:, :, 1], clipped_anchors[:, :, 0]]
-            )
-        return is_in_zone
+            # Generate entry event only if immediately established
+            return (self._entry_delay_frames == 1), True
+
+    def update_exit_delay(self, track_id: int) -> bool:
+        """Decrement exit delay for a track not currently detected.
+
+        Args:
+            track_id: Track ID to update
+
+        Returns:
+            True if track is still valid, False if exit delay expired
+        """
+        if track_id not in self._object_states:
+            return False
+
+        obj_state = self._object_states[track_id]
+        obj_state.presence_count += 1
+        obj_state.exit_delay_count -= 1
+
+        return obj_state.exit_delay_count >= 0
+
+    def remove_track(self, track_id: int) -> Optional[_ObjectState]:
+        """Remove a track from the zone.
+
+        Args:
+            track_id: Track ID to remove
+
+        Returns:
+            The object state if it existed, None otherwise
+        """
+        return self._object_states.pop(track_id, None)
+
+    def get_state(self, track_id: int) -> Optional[_ObjectState]:
+        """Get the state for a track.
+
+        Args:
+            track_id: Track ID to query
+
+        Returns:
+            Object state if exists, None otherwise
+        """
+        return self._object_states.get(track_id)
+
+    def get_tracked_ids(self) -> set:
+        """Get all currently tracked IDs in this zone."""
+        return set(self._object_states.keys())
+
+    def should_exit(self, track_id: int) -> bool:
+        """Check if a track should generate an exit event.
+
+        Args:
+            track_id: Track ID to check
+
+        Returns:
+            True if exit delay has expired (ready for exit)
+        """
+        obj_state = self._object_states.get(track_id)
+        return obj_state is not None and obj_state.exit_delay_count == 0
+
+    def update_occupancy(
+        self, current_count: int, timestamp: float
+    ) -> Tuple[bool, bool, Optional[float]]:
+        """Update occupancy state and detect transitions.
+
+        Args:
+            current_count: Current number of objects in zone
+            timestamp: Current timestamp
+
+        Returns:
+            Tuple of (occupied_event, empty_event, state_duration)
+            state_duration is the time spent in the previous state (if transition occurred)
+        """
+        is_occupied = current_count > 0
+
+        # Detect transitions
+        occupied_event = not self._was_occupied and is_occupied
+        empty_event = self._was_occupied and not is_occupied
+
+        # Calculate duration of previous state if transitioning
+        state_duration = None
+        if (occupied_event or empty_event) and self._state_change_time is not None:
+            state_duration = timestamp - self._state_change_time
+
+        # Update state for next frame
+        if occupied_event or empty_event:
+            self._state_change_time = timestamp
+        elif self._state_change_time is None:
+            # First frame - initialize timestamp
+            self._state_change_time = timestamp
+
+        self._was_occupied = is_occupied
+
+        return occupied_event, empty_event, state_duration
 
 
 class ZoneCounter(ResultAnalyzerBase):
     """Analyzer that counts objects inside user-defined polygonal zones.
 
     This analyzer integrates with PySDK inference results to determine whether detected or
-    tracked objects lie within user-defined polygon zones. It supports per-class counting
-    and object tracking with timeout periods.
+    tracked objects lie within user-defined polygon zones. It supports per-class counting,
+    object tracking with separate entry/exit delays, zone events, and interactive editing.
 
-    The analyzer adds per-zone presence flags and counts to detected objects, with optional
-    per-class breakdown and object tracking support. It can use object tracking to provide
-    frame-based and time-based presence metrics.
+    Backward compatible with old ZoneCounter API (list of zones) while supporting new
+    dict-based named zones interface.
 
     Attributes:
-        zone_counts (List[dict]): List of per-zone count dictionaries updated after each call to `analyze()`.
-        key_in_zone (str): Name of the key inserted into result objects that stores zone-presence flags.
-        key_frames_in_zone (str): Name of the key inserted into result objects that stores the number of frames spent in each zone.
-        key_time_in_zone (str): Name of the key inserted into result objects that stores the total time (in seconds) spent in each zone.
-
-    Methods:
-        analyze(result): Determine per-zone presence for *result* and update cumulative counts.
-        annotate(result, image): Draw zones and their counts on *image*.
-        window_attach(win_name): Attach an OpenCV window for interactive editing, if supported.
+        key_in_zone: Key for zone presence flags in result objects
+        key_frames_in_zone: Key for frame counts in result objects
+        key_time_in_zone: Key for time-in-zone in result objects
+        key_zone_events: Key for zone events list in result objects
     """
 
     key_in_zone = "in_zone"
     key_frames_in_zone = "frames_in_zone"
     key_time_in_zone = "time_in_zone"
+    key_zone_events = "zone_events"
 
     def __init__(
         self,
-        count_polygons: Union[np.ndarray, list],
+        zones: Union[Dict[str, np.ndarray], List[np.ndarray], np.ndarray, None] = None,
         *,
-        class_list: Optional[List] = None,
-        per_class_display: Optional[bool] = False,
+        count_polygons: Union[
+            List[np.ndarray], np.ndarray, None
+        ] = None,  # Old API alias
+        class_list: Optional[List[str]] = None,
+        per_class_display: bool = False,
         triggering_position: Optional[
             Union[List[AnchorPoint], AnchorPoint]
         ] = AnchorPoint.BOTTOM_CENTER,
         bounding_box_scale: float = 1.0,
         iopa_threshold: Union[float, List[float]] = 0.0,
-        use_tracking: Optional[bool] = False,
+        use_tracking: bool = False,
         timeout_frames: int = 0,
+        entry_delay_frames: int = 1,
+        enable_zone_events: bool = False,
         window_name: Optional[str] = None,
         show_overlay: bool = True,
         show_inzone_counters: Optional[str] = None,
         annotation_color: Optional[tuple] = None,
         annotation_line_width: Optional[int] = None,
     ):
-        """
-        Constructor.
+        """Initialize ZoneCounter.
 
         Args:
-            count_polygons (Union[np.ndarray, list]): Polygon or list of polygons to count objects in.
-            class_list (List[str], optional): List of class labels to count. If None, all detected classes are counted. Default None.
-            per_class_display (bool, optional): If True, maintain and display counts per class separately. Default False.
-            triggering_position (list or AnchorPoint or None, optional): Anchor point(s) on the bounding box to use for zone triggering. If None, uses IoPA threshold instead. Default `AnchorPoint.BOTTOM_CENTER`.
-            bounding_box_scale (float, optional): Scale factor applied to detection bounding boxes before checking zone membership. Default 1.0 (no scaling).
-            iopa_threshold (float or List[float], optional): Intersection over polygon area threshold(s) for considering an object inside a zone when using IoPA. Can be a single float applied to all zones or a list of floats (one per zone). Default 0.0 (any overlap is counted).
-            use_tracking (bool, optional): If True, use object tracking to maintain zone presence information over time. Default False.
-            timeout_frames (int, optional): Number of consecutive frames an object can be missing and still be considered in-zone (requires tracking). Default 0.
-            window_name (str, optional): Name of an OpenCV window for interactive polygon editing. If provided, enables interactive mode via `window_attach()`. Default None.
-            show_overlay (bool, optional): If True, enable drawing zone outlines and counts on images in `annotate()`. Default True.
-            show_inzone_counters (str or None, optional): Which per-object in-zone counters to display on annotations: 'time' for time-in-zone, 'frames' for frame count, 'all' for both, or None for none. Default None.
-            annotation_color (tuple, optional): RGB color for zone outlines and text. Default None (automatically chosen).
-            annotation_line_width (int, optional): Thickness of zone outline lines (in pixels). Default None (uses default overlay line width).
+            zones: Dict mapping zone names to polygons (new style) OR list of polygons (old style backward compat)
+            class_list: List of class labels to count (None = all classes)
+            per_class_display: Show per-class counts separately
+            triggering_position: Anchor point(s) or None for IoPA
+            bounding_box_scale: Scale factor for bboxes (0 to 1)
+            iopa_threshold: IoPA threshold (single value or list per zone)
+            use_tracking: Enable object tracking
+            timeout_frames: Grace period (frames to tolerate absence before exit, requires tracking if > 0)
+            entry_delay_frames: Credence period (frames required to establish presence before entry, requires tracking if > 1)
+            enable_zone_events: Generate zone-level events (requires tracking)
+            window_name: OpenCV window name for interactive polygon editing (None = disabled)
+            show_overlay: Draw zone overlays
+            show_inzone_counters: Show presence counters ('time', 'frames', 'all', None)
+            annotation_color: RGB color for overlays (None = auto)
+            annotation_line_width: Line width for overlays (None = auto)
         """
-        self._wh: Optional[Tuple] = None
-        self._zones: Optional[List] = None
-        self._win_name = window_name
-        self._mouse_callback_installed = False
+        # Handle backward compatibility: count_polygons (old) or zones (new)
+        if count_polygons is not None:
+            zones = count_polygons
+
+        if zones is None:
+            raise ValueError("Either 'zones' or 'count_polygons' must be specified")
+
+        # Handle backward compatibility: zones can be dict (new) or list (old)
+        if isinstance(zones, dict):
+            self._zones_as_list = False
+            self._zone_names = list(zones.keys())
+            self._zone_polygons = [
+                np.array(poly, dtype=np.int32) for poly in zones.values()
+            ]
+        else:
+            # Old style: list of polygons - convert to dict with string indices
+            self._zones_as_list = True
+            if isinstance(zones, np.ndarray):
+                zones = [zones]
+            self._zone_polygons = [np.array(poly, dtype=np.int32) for poly in zones]
+            self._zone_names = [str(i) for i in range(len(self._zone_polygons))]
+
+        # Validate and store parameters
         self._class_list = [] if class_list is None else class_list
         self._per_class_display = per_class_display
         if class_list is None and per_class_display:
             raise ValueError(
                 "class_list must be specified when per_class_display is True"
             )
+
         self._triggering_position = triggering_position
         self._bounding_box_scale = bounding_box_scale
-        if self._bounding_box_scale <= 0.0 or self._bounding_box_scale > 1.0:
-            raise ValueError("bounding_box_scale must be from 0 to 1")
+        if not 0 < self._bounding_box_scale <= 1.0:
+            raise ValueError("bounding_box_scale must be between 0 and 1")
 
-        # Process iopa_threshold - convert scalar to list if needed
-        self._polygons = [
-            np.array(polygon, dtype=np.int32) for polygon in count_polygons
-        ]
+        # Process iopa_threshold
         if isinstance(iopa_threshold, (int, float)):
-            self._iopa_threshold = [float(iopa_threshold)] * len(self._polygons)
+            self._iopa_thresholds = [float(iopa_threshold)] * len(self._zone_names)
         else:
-            if len(iopa_threshold) != len(self._polygons):
+            if len(iopa_threshold) != len(self._zone_names):
                 raise ValueError(
-                    f"iopa_threshold list length ({len(iopa_threshold)}) must match number of zones ({len(self._polygons)})"
+                    f"iopa_threshold list length must match number of zones ({len(self._zone_names)})"
                 )
-            self._iopa_threshold = [float(t) for t in iopa_threshold]
+            self._iopa_thresholds = [float(t) for t in iopa_threshold]
 
         # Validate iopa_threshold values
         if self._triggering_position is None:
-            for i, threshold in enumerate(self._iopa_threshold):
+            for i, threshold in enumerate(self._iopa_thresholds):
                 if threshold <= 0:
                     raise ValueError(
                         f"iopa_threshold[{i}] must be > 0 when triggering_position is None"
                     )
+
+        # Tracking and delay parameters
         self._use_tracking = use_tracking
         self._timeout_frames = timeout_frames
+        self._entry_delay_frames = entry_delay_frames
+
         if self._timeout_frames > 0 and not self._use_tracking:
-            raise ValueError(
-                "timeout_frames can be used only when use_tracking is True"
-            )
+            raise ValueError("timeout_frames > 0 requires use_tracking=True")
+        if self._entry_delay_frames > 1 and not self._use_tracking:
+            raise ValueError("entry_delay_frames > 1 requires use_tracking=True")
+
+        self._enable_zone_events = enable_zone_events
+        if self._enable_zone_events and not self._use_tracking:
+            raise ValueError("enable_zone_events requires use_tracking=True")
+
+        # Display options
         self._show_overlay = show_overlay
         self._show_inzone_counters = show_inzone_counters
         if self._show_inzone_counters not in [None, "time", "frames", "all"]:
             raise ValueError(
-                "show_inzone_counters must be one of 'time', 'frames', 'all', or None"
+                "show_inzone_counters must be 'time', 'frames', 'all', or None"
             )
         if self._show_inzone_counters is not None and not self._show_overlay:
-            raise ValueError(
-                "show_inzone_counters can be used only when show_overlay is True"
-            )
+            raise ValueError("show_inzone_counters requires show_overlay=True")
         if self._show_inzone_counters is not None and not self._use_tracking:
-            raise ValueError(
-                "show_inzone_counters can be used only when use_tracking is True"
-            )
+            raise ValueError("show_inzone_counters requires use_tracking=True")
+
         self._annotation_color = annotation_color
         self._annotation_line_width = annotation_line_width
 
+        # Interactive editing support
+        self._win_name = window_name
+        self._mouse_callback_installed = False
+        self._gui_state: Optional[Dict] = None
+
+        # Internal state (lazy initialized)
+        self._geometries: Optional[List[_ZoneGeometry]] = None
+        self._states: Optional[List[_ZoneState]] = None
+        self._frame_wh: Optional[Tuple[int, int]] = None
+
     def analyze(self, result):
-        """Analyzes the inference result to count objects inside each polygonal zone.
-
-        Updates the result in-place with zone analysis data. Specifically, it adds a `zone_counts`
-        attribute (a list of per-zone count dictionaries) to the result. Each detected object's
-        dictionary is augmented with an `in_zone` list of booleans indicating zone membership.
-        If tracking is enabled, each object also receives `frames_in_zone` and `time_in_zone`
-        lists for frame count and time-in-zone metrics.
-
-        This method filters detections based on the specified class list and, if tracking is
-        enabled, ignores detections without track IDs. It updates internal object state to
-        handle short absences (using `timeout_frames`) and computes the total and per-class
-        counts of objects in each zone.
+        """Analyze inference result and update zone counts and events.
 
         Args:
-            result (InferenceResults): Inference result to analyze and augment with zone information.
-
-        Returns:
-            (None): This method modifies the input result object in-place.
-
-        Raises:
-            AttributeError: If result object is missing required attributes.
-            TypeError: If result object is not of the expected type.
+            result: Inference result to analyze
         """
-        result.zone_counts = [
-            dict.fromkeys(
-                self._class_list + ["total"] if self._per_class_display else ["total"],
-                0,
-            )
-            for _ in self._polygons
-        ]
+        # Initialize result structures
+        # Use list format (old style) if zones were specified as list, otherwise dict (new style)
+        if self._zones_as_list:
+            result.zone_counts = [
+                dict.fromkeys(
+                    (
+                        self._class_list + ["total"]
+                        if self._per_class_display
+                        else ["total"]
+                    ),
+                    0,
+                )
+                for _ in self._zone_names
+            ]
+        else:
+            result.zone_counts = {
+                name: dict.fromkeys(
+                    (
+                        self._class_list + ["total"]
+                        if self._per_class_display
+                        else ["total"]
+                    ),
+                    0,
+                )
+                for name in self._zone_names
+            }
+
+        if self._enable_zone_events:
+            result.zone_events = []
+
+        # Lazy initialization
         self._lazy_init(result)
-        if self._zones is None:
+        if self._geometries is None:
             return
+
+        # Filter objects
+        filtered_objects = self._filter_objects(result)
+
+        # Process each zone (even if no detections - need to handle missing tracks)
+        bboxes = (
+            np.array([obj["bbox"] for obj in filtered_objects])
+            if filtered_objects
+            else np.array([])
+        )
+        time_now = time.time()
+
+        assert self._geometries is not None  # Type guard for mypy
+        assert self._states is not None  # Type guard for mypy
+        for zi, (zone_name, geom, state) in enumerate(
+            zip(self._zone_names, self._geometries, self._states)
+        ):
+            # Get zone triggers
+            triggers = geom.trigger(bboxes)
+
+            # Process objects in this zone
+            self._process_zone(
+                result, zi, zone_name, triggers, filtered_objects, state, time_now
+            )
+
+    def _lazy_init(self, result):
+        """Initialize geometry and state components on first call."""
+        if self._geometries is None:
+            self._frame_wh = (result.image.shape[1], result.image.shape[0])
+
+            # Create geometry components
+            self._geometries = [
+                _ZoneGeometry(
+                    polygon,
+                    self._frame_wh,
+                    self._triggering_position,
+                    self._bounding_box_scale,
+                    self._iopa_thresholds[i],
+                )
+                for i, polygon in enumerate(self._zone_polygons)
+            ]
+
+            # Create state components
+            self._states = [
+                _ZoneState(self._timeout_frames, self._entry_delay_frames)
+                for _ in self._zone_names
+            ]
+
+            # Install mouse callback for interactive editing if window_name specified
+            if not self._mouse_callback_installed and self._win_name is not None:
+                self._install_mouse_callback()
+
+    def _filter_objects(self, result) -> List[dict]:
+        """Filter objects based on class list and tracking requirements.
+
+        Returns only fresh detections - no synthetic objects from stale trails.
+        Missing tracked objects are handled via exit_delay_frames in zone state.
+        """
 
         def in_class_list(label):
             return (
@@ -380,125 +698,438 @@ class ZoneCounter(ResultAnalyzerBase):
                 else False if label is None else label in self._class_list
             )
 
-        filtered_results = [
+        # Filter detected objects (fresh detections only)
+        filtered = [
             obj
             for obj in result.results
             if "bbox" in obj
             and in_class_list(obj.get("label"))
             and (not self._use_tracking or "track_id" in obj)
         ]
-        # here `filtered_results` contains only objects with labels from the class list, having track IDs if tracking is used
-        if self._use_tracking and hasattr(result, "trails"):
-            active_tids = [obj["track_id"] for obj in filtered_results]
-            lost_results = [
-                {
-                    "bbox": result.trails[tid][-1],
-                    "label": label,
-                    "track_id": tid,
-                }
-                for tid, label in result.trail_classes.items()
-                if tid not in active_tids and in_class_list(label)
-            ]
-            filtered_results.extend(lost_results)
-            # here `filtered_results` is extended with "lost" objects: objects that were not detected but still tracked
-        # initialize per-object results
-        for obj in filtered_results:
-            nzones = len(self._zones)
+
+        # Initialize per-object zone fields
+        nzones = len(self._zone_names)
+        for obj in filtered:
             obj[self.key_in_zone] = [False] * nzones
             if self._use_tracking:
                 obj[self.key_frames_in_zone] = [0] * nzones
                 obj[self.key_time_in_zone] = [0.0] * nzones
-        bboxes = np.array([obj["bbox"] for obj in filtered_results])
-        time_now = time.time()
 
-        def set_in_zone_and_increment_counts(obj, zi, zone_counts):
-            obj[self.key_in_zone][zi] = True
+        return filtered
+
+    def _process_zone(
+        self,
+        result,
+        zone_index: int,
+        zone_name: str,
+        triggers: np.ndarray,
+        objects: List[dict],
+        state: _ZoneState,
+        timestamp: float,
+    ):
+        """Process a single zone - update counts, states, and generate events.
+
+        Implements clean 3-case logic:
+        1. Detected in zone (fresh bbox triggers)
+        2. Detected outside zone (fresh bbox doesn't trigger, but has state)
+        3. Missing detection (in state but not detected this frame)
+        """
+        # Access zone_counts with backward compatibility (list vs dict)
+        zone_counts = (
+            result.zone_counts[zone_index]
+            if self._zones_as_list
+            else result.zone_counts[zone_name]
+        )
+
+        # Collect track IDs
+        detected_tids = (
+            {obj["track_id"] for obj in objects} if self._use_tracking else set()
+        )
+        all_tracked_tids = state.get_tracked_ids() if self._use_tracking else set()
+        missing_tids = all_tracked_tids - detected_tids
+
+        # Case 1 & 2: Process fresh detections
+        for obj, is_triggered in zip(objects, triggers):
+            if is_triggered:
+                # Case 1: Fresh detection IN zone
+                self._handle_object_in_zone(
+                    result, zone_index, zone_name, obj, state, zone_counts, timestamp
+                )
+            elif self._use_tracking:
+                # Case 2: Fresh detection OUTSIDE zone (check if has state)
+                self._handle_detected_outside_zone(
+                    result, zone_index, zone_name, obj, state, zone_counts, timestamp
+                )
+
+        # Case 3: Process missing detections (tracked but not detected this frame)
+        if self._use_tracking and missing_tids:
+            self._handle_missing_detections(
+                result,
+                zone_index,
+                zone_name,
+                state,
+                zone_counts,
+                missing_tids,
+                timestamp,
+            )
+
+        # Generate zone-level occupancy events
+        if self._enable_zone_events:
+            current_count = zone_counts["total"]
+            self._generate_occupancy_events(
+                result, zone_index, zone_name, state, current_count, timestamp
+            )
+
+    def _handle_object_in_zone(
+        self,
+        result,
+        zone_index: int,
+        zone_name: str,
+        obj: dict,
+        state: _ZoneState,
+        zone_counts: dict,
+        timestamp: float,
+    ):
+        """Handle an object that is currently in the zone."""
+        # Mark object as in zone
+        obj[self.key_in_zone][zone_index] = True
+
+        if self._use_tracking:
+            tid = obj["track_id"]
+            entry_event, is_fresh = state.add_track(
+                tid, obj.get("label", "unknown"), timestamp
+            )
+
+            # Get object state to check if established
+            obj_state = state.get_state(tid)
+            assert obj_state is not None  # Type guard for mypy
+
+            # Count only on entry event (when object first enters or re-enters)
+            # This matches old ZoneCounter behavior: count once per entry, not every frame
+            if entry_event:
+                zone_counts["total"] += 1
+                if self._per_class_display and obj.get("label"):
+                    zone_counts[obj["label"]] += 1
+
+            # Generate entry event when object becomes established
+            if entry_event and self._enable_zone_events:
+                self._generate_event(
+                    result,
+                    "zone_entry",
+                    zone_index,
+                    zone_name,
+                    tid,
+                    obj.get("label"),
+                    timestamp,
+                    None,  # No dwell_time for entry
+                )
+
+            # Update time-in-zone metrics
+            assert obj_state is not None  # Type guard for mypy
+            obj[self.key_frames_in_zone][zone_index] = obj_state.presence_count
+            obj[self.key_time_in_zone][zone_index] = timestamp - obj_state.entering_time
+        else:
+            # Non-tracking mode: count all objects immediately
             zone_counts["total"] += 1
-            if self._per_class_display:
-                label = obj.get("label")
-                if label:
-                    zone_counts[label] += 1
+            if self._per_class_display and obj.get("label"):
+                zone_counts[obj["label"]] += 1
 
-        def set_time_in_zone(obj, zi, obj_state):
-            obj[self.key_frames_in_zone][zi] = obj_state.presence_count
-            obj[self.key_time_in_zone][zi] = time_now - obj_state.entering_time
+    def _handle_detected_outside_zone(
+        self,
+        result,
+        zone_index: int,
+        zone_name: str,
+        obj: dict,
+        state: _ZoneState,
+        zone_counts: dict,
+        timestamp: float,
+    ):
+        """Handle fresh detection outside zone (Case 2: grace period).
 
-        for zi, zone in enumerate(self._zones):
-            # compute object-in-zone flags
-            triggers = zone.trigger(bboxes) if bboxes.size > 0 else np.array([], bool)
-            zone_counts = result.zone_counts[zi]
-            all_tids_in_zone = []
-            # iterate over all filtered objects
-            for obj, flag in zip(filtered_results, triggers):
-                if flag:
-                    # object is in zone
-                    set_in_zone_and_increment_counts(obj, zi, zone_counts)
-                    if self._use_tracking:
-                        tid = obj["track_id"]
-                        obj_state = zone._object_states.get(tid)
-                        if obj_state:
-                            # object was already in zone before
-                            obj_state.timeout_count = zone._timeout_count_initial
-                            obj_state.presence_count += 1
-                        else:
-                            # fresh object, never seen in this zone
-                            zone._object_states[tid] = obj_state = _ObjectState(
-                                timeout_count=zone._timeout_count_initial,
-                                object_label=obj.get("label"),
-                                presence_count=1,
-                                entering_time=time_now,
-                            )
-                        set_time_in_zone(obj, zi, obj_state)
-                        all_tids_in_zone.append(tid)
-                else:
-                    # object is NOT in zone
-                    if self._use_tracking and self._timeout_frames > 0:
-                        tid = obj["track_id"]
-                        obj_state = zone._object_states.get(tid)
-                        if obj_state is not None:
-                            # object is not in zone, but still tracked
-                            obj_state.presence_count += 1
-                            set_in_zone_and_increment_counts(obj, zi, zone_counts)
-                            set_time_in_zone(obj, zi, obj_state)
-                            obj_state.timeout_count -= 1
-                            if obj_state.timeout_count > 0:
-                                all_tids_in_zone.append(tid)
-                            else:
-                                del zone._object_states[tid]
-            if self._use_tracking:
-                # process inactive objects: still tracked, but not detected on the current frame
-                inactive_set = set(zone._object_states.keys())
-                if len(all_tids_in_zone) > 0:
-                    inactive_set -= set(all_tids_in_zone)
-                for tid in inactive_set:
-                    obj_state = zone._object_states[tid]
-                    if self._timeout_frames > 0:
-                        obj_state.presence_count += 1
-                        obj_state.timeout_count -= 1
+        Object detected this frame but bbox doesn't trigger zone geometry.
+        If it was previously in zone, apply grace period (timeout).
+        """
+        tid = obj["track_id"]
+        obj_state = state.get_state(tid)
+
+        if obj_state is not None:
+            # Object was previously in zone - check if grace period configured
+            if self._timeout_frames > 0:
+                # Apply grace period
+                still_valid = state.update_exit_delay(tid)
+
+                if still_valid:
+                    # Still within timeout - mark as in-zone
+                    obj[self.key_in_zone][zone_index] = True
+
+                    # Only count if established
+                    if obj_state.is_established:
                         zone_counts["total"] += 1
                         if self._per_class_display and obj_state.object_label:
                             zone_counts[obj_state.object_label] += 1
-                    # here we delete both timed-out and lost objects (in case of zero timeout)
-                    if obj_state.timeout_count == 0:
-                        del zone._object_states[tid]
 
-    def annotate(self, result, image: np.ndarray) -> np.ndarray:
+                    obj[self.key_frames_in_zone][zone_index] = obj_state.presence_count
+                    obj[self.key_time_in_zone][zone_index] = (
+                        timestamp - obj_state.entering_time
+                    )
+                else:
+                    # Timeout expired - generate exit event
+                    if self._enable_zone_events:
+                        dwell_time = timestamp - obj_state.entering_time
+                        self._generate_event(
+                            result,
+                            "zone_exit",
+                            zone_index,
+                            zone_name,
+                            tid,
+                            obj_state.object_label,
+                            timestamp,
+                            dwell_time,
+                        )
+                    state.remove_track(tid)
+            else:
+                # No timeout configured - immediate exit
+                if self._enable_zone_events:
+                    dwell_time = timestamp - obj_state.entering_time
+                    self._generate_event(
+                        result,
+                        "zone_exit",
+                        zone_index,
+                        zone_name,
+                        tid,
+                        obj_state.object_label,
+                        timestamp,
+                        dwell_time,
+                    )
+                state.remove_track(tid)
+
+    def _handle_missing_detections(
+        self,
+        result,
+        zone_index: int,
+        zone_name: str,
+        state: _ZoneState,
+        zone_counts: dict,
+        missing_tids: set,
+        timestamp: float,
+    ):
+        """Handle missing detections (Case 3: tracked but not detected).
+
+        These tracks are in zone state but have no detection this frame.
+        They could be temporarily occluded or truly exited.
         """
-        Draws polygon zone boundaries and object counts on the image.
+        for tid in missing_tids:
+            obj_state = state.get_state(tid)
+            if obj_state is None:
+                # Defensive check - should never happen since tid came from state.get_tracked_ids()
+                continue
 
-        Draws the polygonal zones and their current object counts on the image. If `show_overlay`
-        is True, it also draws the zone boundaries and count information. If `show_inzone_counters`
-        is True, it adds text labels showing the count of objects inside each zone.
+            if self._timeout_frames > 0:
+                # Apply grace period - count missing objects during timeout
+                still_valid = state.update_exit_delay(tid)
+
+                if still_valid:
+                    # Still in grace period - count established objects
+                    if obj_state.is_established:
+                        zone_counts["total"] += 1
+                        if self._per_class_display and obj_state.object_label:
+                            zone_counts[obj_state.object_label] += 1
+                else:
+                    # Timeout expired - exit event
+                    if self._enable_zone_events:
+                        dwell_time = timestamp - obj_state.entering_time
+                        self._generate_event(
+                            result,
+                            "zone_exit",
+                            zone_index,
+                            zone_name,
+                            tid,
+                            obj_state.object_label,
+                            timestamp,
+                            dwell_time,
+                        )
+                    state.remove_track(tid)
+            else:
+                # No timeout configured - immediate exit
+                if self._enable_zone_events:
+                    dwell_time = timestamp - obj_state.entering_time
+                    self._generate_event(
+                        result,
+                        "zone_exit",
+                        zone_index,
+                        zone_name,
+                        tid,
+                        obj_state.object_label,
+                        timestamp,
+                        dwell_time,
+                    )
+                state.remove_track(tid)
+
+    def _generate_occupancy_events(
+        self,
+        result,
+        zone_index: int,
+        zone_name: str,
+        state: _ZoneState,
+        current_count: int,
+        timestamp: float,
+    ):
+        """Generate zone-level occupancy transition events."""
+        occupied_event, empty_event, state_duration = state.update_occupancy(
+            current_count, timestamp
+        )
+
+        if occupied_event:
+            # Zone became occupied - dwell_time is how long it was empty
+            self._generate_event(
+                result,
+                "zone_occupied",
+                zone_index,
+                zone_name,
+                None,
+                None,
+                timestamp,
+                state_duration,
+            )
+
+        if empty_event:
+            # Zone became empty - dwell_time is how long it was occupied
+            self._generate_event(
+                result,
+                "zone_empty",
+                zone_index,
+                zone_name,
+                None,
+                None,
+                timestamp,
+                state_duration,
+            )
+
+    def _generate_event(
+        self,
+        result,
+        event_type: str,
+        zone_index: int,
+        zone_id: str,
+        track_id: Optional[int],
+        object_label: Optional[str],
+        timestamp: float,
+        dwell_time: Optional[float] = None,
+    ):
+        """Generate and append an event to the result.
+
+        All events use a fixed schema with consistent fields.
+        dwell_time semantics:
+        - zone_entry: None (no prior state)
+        - zone_exit: Time track spent in zone
+        - zone_occupied: Time zone was empty before occupation
+        - zone_empty: Time zone was occupied before becoming empty
+        """
+        event = {
+            "event_type": event_type,
+            "zone_index": zone_index,
+            "zone_id": zone_id,
+            "timestamp": timestamp,
+            "track_id": track_id,
+            "object_label": object_label,
+            "dwell_time": dwell_time,
+            "frame_index": (
+                result.frame_index if hasattr(result, "frame_index") else None
+            ),
+        }
+
+        result.zone_events.append(event)
+
+    @staticmethod
+    def _mouse_callback(event: int, x: int, y: int, flags: int, self):
+        """Mouse event callback for interactive polygon zone editing.
+
+        Supports:
+        - Left-click and drag to move entire polygon
+        - Right-click and drag to move individual vertices
 
         Args:
-            result (InferenceResults): Inference result containing zone analysis data.
-            image (numpy.ndarray): Image to annotate.
+            event: OpenCV mouse event code
+            x: X coordinate of the mouse event
+            y: Y coordinate of the mouse event
+            flags: Additional event flags
+            self: Instance of ZoneCounter
+        """
+        click_point = np.array((x, y))
+
+        def zone_update():
+            idx = self._gui_state["update"]
+            if idx >= 0 and self._frame_wh is not None:
+                if not np.array_equal(
+                    self._geometries[idx].polygon, self._zone_polygons[idx]
+                ):
+                    self._geometries[idx] = _ZoneGeometry(
+                        self._zone_polygons[idx],
+                        self._frame_wh,
+                        self._triggering_position,
+                        self._bounding_box_scale,
+                        self._iopa_thresholds[idx],
+                    )
+
+        if event == cv2.EVENT_LBUTTONDOWN:
+            for idx, polygon in enumerate(self._zone_polygons):
+                if cv2.pointPolygonTest(polygon, (x, y), False) > 0:
+                    self._gui_state["dragging"] = polygon
+                    self._gui_state["offset"] = click_point
+                    self._gui_state["update"] = idx
+                    break
+        if event == cv2.EVENT_RBUTTONDOWN:
+            for idx, polygon in enumerate(self._zone_polygons):
+                for pt in polygon:
+                    if np.linalg.norm(pt - click_point) < 10:
+                        self._gui_state["dragging"] = pt
+                        self._gui_state["offset"] = click_point
+                        self._gui_state["update"] = idx
+                        break
+        elif event == cv2.EVENT_MOUSEMOVE:
+            if self._gui_state.get("dragging") is not None:
+                delta = click_point - self._gui_state["offset"]
+                self._gui_state["dragging"] += delta
+                self._gui_state["offset"] = click_point
+        elif event == cv2.EVENT_LBUTTONUP or event == cv2.EVENT_RBUTTONUP:
+            self._gui_state["dragging"] = None
+            zone_update()
+            self._gui_state["update"] = -1
+
+    def _install_mouse_callback(self):
+        """Install the OpenCV mouse callback on the attached window."""
+        if self._win_name is not None:
+            try:
+                cv2.setMouseCallback(self._win_name, ZoneCounter._mouse_callback, self)
+                self._gui_state = {"dragging": None, "update": -1}
+                self._mouse_callback_installed = True
+            except Exception:
+                pass  # ignore errors
+
+    def window_attach(self, win_name: str):
+        """Attach an OpenCV window for interactive polygon editing.
+
+        Args:
+            win_name: Name of the OpenCV window to attach to
+        """
+        self._win_name = win_name
+        if not self._mouse_callback_installed:
+            self._install_mouse_callback()
+
+    def annotate(self, result, image: np.ndarray) -> np.ndarray:
+        """Draw zone overlays and counts on the image.
+
+        Args:
+            result: Inference result with zone data
+            image: Image to annotate
 
         Returns:
-            numpy.ndarray: Annotated image.
+            Annotated image
         """
-        if not self._show_overlay:
+        if not self._show_overlay or self._geometries is None:
             return image
+
+        # Determine colors
         line_color = (
             color_complement(result.overlay_color)
             if self._annotation_color is None
@@ -510,170 +1141,88 @@ class ZoneCounter(ResultAnalyzerBase):
             if self._annotation_line_width is None
             else self._annotation_line_width
         )
-        # draw object annotations (presence counters)
+
+        # Draw per-object zone presence counters
         if self._show_inzone_counters:
-            for r in result.results:
-                if "in_zone" in r:
-                    text = ""
-                    for zi, in_zone in enumerate(r["in_zone"]):
-                        if in_zone:
-                            if text:
-                                text += "\n"
-                            if len(self._polygons) > 1:
-                                text += f"Z{zi}: "
-                            text += (
-                                f"{r['frames_in_zone'][zi]}#"
-                                if self._show_inzone_counters == "frames"
-                                else (
-                                    f"{r['time_in_zone'][zi]:.1f}s"
-                                    if self._show_inzone_counters == "time"
-                                    else f"{r['frames_in_zone'][zi]}#/{r['time_in_zone'][zi]:.1f}s"
-                                )
-                            )
-                    if text:
-                        xy = (
-                            np.array(r["bbox"][:2]).astype(int)
-                            + result.overlay_line_width
-                        )
-                        put_text(
-                            image,
-                            text,
-                            tuple(xy),
-                            corner_position=CornerPosition.TOP_LEFT,
-                            font_color=text_color,
-                            bg_color=line_color,
-                            font_scale=result.overlay_font_scale,
-                        )
-        # draw polygon zone outlines and display per-zone counts
-        for zi in range(len(self._polygons)):
+            self._annotate_objects(result, image, text_color, line_color)
+
+        # Draw zone polygons and counts
+        for zi, (zone_name, polygon) in enumerate(
+            zip(self._zone_names, self._zone_polygons)
+        ):
+            # Draw polygon outline
             cv2.polylines(
                 image,
-                [cv2.Mat(self._polygons[zi])],
+                [cv2.Mat(polygon)],
                 True,
                 rgb_to_bgr(line_color),
                 line_width,
             )
-            if self._per_class_display and self._class_list is not None:
-                text = f"Zone {zi}:"
+
+            # Draw zone label and counts (handle both list and dict formats)
+            zone_counts_dict = (
+                result.zone_counts[zi]
+                if self._zones_as_list
+                else result.zone_counts[zone_name]
+            )
+
+            if self._per_class_display:
+                text = f"{zone_name}:"
                 for class_name in self._class_list:
-                    text += (
-                        f"\n {class_name}: {result.zone_counts[zi].get(class_name, 0)}"
-                    )
+                    count = zone_counts_dict.get(class_name, 0)
+                    text += f"\n {class_name}: {count}"
             else:
-                text = f"Zone {zi}: {result.zone_counts[zi].get('total', 0)}"
+                count = zone_counts_dict.get("total", 0)
+                text = f"{zone_name}: {count}"
+
             put_text(
                 image,
                 text,
-                tuple(x + line_width for x in self._polygons[zi][0]),
+                tuple(x + line_width for x in polygon[0]),
                 font_color=text_color,
                 bg_color=line_color,
                 font_scale=result.overlay_font_scale,
             )
+
         return image
 
-    def window_attach(self, win_name: str):
-        """
-        Attach an OpenCV window for optional interactive zone adjustment.
+    def _annotate_objects(self, result, image: np.ndarray, text_color, bg_color):
+        """Annotate individual objects with zone presence info."""
+        for obj in result.results:
+            if self.key_in_zone not in obj:
+                continue
 
-        Installs a mouse callback on the given window that enables dragging polygon zones or their vertices for adjustment.
+            text_lines = []
+            for zi, in_zone in enumerate(obj[self.key_in_zone]):
+                if not in_zone:
+                    continue
 
-        Args:
-            win_name (str): Name of the OpenCV window.
-        """
-        self._win_name = win_name
-        self._mouse_callback_installed = False
+                zone_name = self._zone_names[zi]
+                frames = obj[self.key_frames_in_zone][zi]
+                time_val = obj[self.key_time_in_zone][zi]
 
-    def _lazy_init(self, result):
-        """
-        Performs deferred initialization tasks.
+                if self._show_inzone_counters == "frames":
+                    line = f"{zone_name}: {frames}#"
+                elif self._show_inzone_counters == "time":
+                    line = f"{zone_name}: {time_val:.1f}s"
+                else:  # "all"
+                    line = f"{zone_name}: {frames}#/{time_val:.1f}s"
 
-        - Initializes polygon zones from the model result, computing necessary masks and data.
-        - Installs mouse callback if interactive adjustment is enabled.
+                text_lines.append(line)
 
-        Args:
-            result: PySDK inference result object containing an image for dimension reference.
-        """
-        if self._zones is None:
-            self._wh = (result.image.shape[1], result.image.shape[0])
-            self._zones = [
-                _PolygonZone(
-                    polygon,
-                    self._wh,
-                    self._triggering_position,
-                    self._bounding_box_scale,
-                    self._iopa_threshold[i],
-                    self._timeout_frames,
+            if text_lines:
+                text = "\n".join(text_lines)
+                xy = np.array(obj["bbox"][:2]).astype(int) + result.overlay_line_width
+                put_text(
+                    image,
+                    text,
+                    tuple(xy),
+                    corner_position=CornerPosition.TOP_LEFT,
+                    font_color=text_color,
+                    bg_color=bg_color,
+                    font_scale=result.overlay_font_scale,
                 )
-                for i, polygon in enumerate(self._polygons)
-            ]
-        if not self._mouse_callback_installed and self._win_name is not None:
-            self._install_mouse_callback()
 
-    @staticmethod
-    def _mouse_callback(event: int, x: int, y: int, flags: int, self: Any):
-        """
-        Mouse event callback for interactive polygon zone editing.
 
-        Supports:
-        - Left-click and drag to move entire polygon.
-        - Right-click and drag to move individual vertices.
-        - Updates internal polygon state on changes.
-
-        Args:
-            event (int): OpenCV mouse event code.
-            x (int): X coordinate of the mouse event.
-            y (int): Y coordinate of the mouse event.
-            flags (int): Additional event flags.
-            self: Instance of ZoneCounter.
-        """
-        click_point = np.array((x, y))
-
-        def zone_update():
-            idx = self._gui_state["update"]
-            if idx >= 0 and self._wh is not None:
-                if not np.array_equal(self._zones[idx].polygon, self._polygons[idx]):
-                    self._zones[idx] = _PolygonZone(
-                        self._polygons[idx],
-                        self._wh,
-                        self._triggering_position,
-                        self._bounding_box_scale,
-                        self._iopa_threshold[idx],
-                        self._timeout_frames,
-                    )
-
-        if event == cv2.EVENT_LBUTTONDOWN:
-            for idx, polygon in enumerate(self._polygons):
-                if cv2.pointPolygonTest(polygon, (x, y), False) > 0:
-                    self._gui_state["dragging"] = polygon
-                    self._gui_state["offset"] = click_point
-                    self._gui_state["update"] = idx
-                    break
-        if event == cv2.EVENT_RBUTTONDOWN:
-            for idx, polygon in enumerate(self._polygons):
-                for pt in polygon:
-                    if np.linalg.norm(pt - click_point) < 10:
-                        self._gui_state["dragging"] = pt
-                        self._gui_state["offset"] = click_point
-                        self._gui_state["update"] = idx
-                        break
-        elif event == cv2.EVENT_MOUSEMOVE:
-            if self._gui_state["dragging"] is not None:
-                delta = click_point - self._gui_state["offset"]
-                self._gui_state["dragging"] += delta
-                self._gui_state["offset"] = click_point
-        elif event == cv2.EVENT_LBUTTONUP or event == cv2.EVENT_RBUTTONUP:
-            self._gui_state["dragging"] = None
-            zone_update()
-            self._gui_state["update"] = -1
-
-    def _install_mouse_callback(self):
-        """
-        Internal method to install the OpenCV mouse callback on the attached window.
-        """
-        if self._win_name is not None:
-            try:
-                cv2.setMouseCallback(self._win_name, ZoneCounter._mouse_callback, self)  # type: ignore[attr-defined]
-                self._gui_state = {"dragging": None, "update": -1}
-                self._mouse_callback_installed = True
-            except Exception:
-                pass  # ignore errors
+# Backward compatibility alias
+NamedZoneCounter = ZoneCounter

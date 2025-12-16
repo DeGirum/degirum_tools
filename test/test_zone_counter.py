@@ -495,7 +495,10 @@ def test_zone_counter():
                             "frames_in_zone": [0, 0],
                         },
                     ],
-                    [{"total": 1}, {"total": 0}],
+                    [
+                        {"total": 0},
+                        {"total": 0},
+                    ],  # Object 0 missing, immediately deleted (exit_delay=0)
                 ],
                 [
                     [
@@ -504,7 +507,10 @@ def test_zone_counter():
                             "label": "label1",
                             "track_id": 0,
                             "in_zone": [True, False],
-                            "frames_in_zone": [3, 0],
+                            "frames_in_zone": [
+                                1,
+                                0,
+                            ],  # Track re-created, starts fresh at 1
                         },
                         {
                             "bbox": box_2_zone_1,
@@ -1198,3 +1204,158 @@ def test_zone_counter():
                 + f"do not match expected `{case['res'][i][1]}`."
                 + f"\nConfig: {case['params']}"
             )
+
+
+# ============================================================================
+# Additional comprehensive tests for new ZoneCounter features
+# ============================================================================
+
+
+class MockResult:
+    """Mock inference result for testing."""
+
+    def __init__(self, detections, frame_number=0):
+        self.results = detections
+        self.image = np.zeros((480, 640, 3), dtype=np.uint8)
+        self.image_overlay = self.image.copy()
+        self.inference_results = {"frame_number": frame_number}
+        self.zone_counts: dict = {}
+        self.zone_events: list = []
+
+
+def test_entry_delay_frames():
+    """Test entry_delay_frames parameter for entry smoothing."""
+    from degirum_tools.analyzers.zone_count import ZoneCounter
+
+    zone_polygon = np.array([[100, 100], [300, 100], [300, 300], [100, 300]])
+    counter = ZoneCounter(
+        zones={"test_zone": zone_polygon},
+        use_tracking=True,
+        entry_delay_frames=3,
+        timeout_frames=2,
+        enable_zone_events=True,
+    )
+
+    # Frame 1: Object enters
+    result1 = MockResult(
+        [{"bbox": [150, 150, 200, 200], "track_id": 1, "label": "person"}], 1
+    )
+    counter.analyze(result1)
+    assert result1.zone_counts["test_zone"]["total"] == 0
+
+    # Frame 2: Still in zone
+    result2 = MockResult(
+        [{"bbox": [150, 150, 200, 200], "track_id": 1, "label": "person"}], 2
+    )
+    counter.analyze(result2)
+    assert result2.zone_counts["test_zone"]["total"] == 0
+
+    # Frame 3: Established
+    result3 = MockResult(
+        [{"bbox": [150, 150, 200, 200], "track_id": 1, "label": "person"}], 3
+    )
+    counter.analyze(result3)
+    assert result3.zone_counts["test_zone"]["total"] == 1
+    assert len(result3.zone_events) == 2  # entry + occupied
+
+
+def test_multi_zone_tracking():
+    """Test tracking across multiple zones."""
+    from degirum_tools.analyzers.zone_count import ZoneCounter
+
+    zones = {
+        "zone_A": np.array([[50, 50], [200, 50], [200, 200], [50, 200]]),
+        "zone_B": np.array([[250, 50], [400, 50], [400, 200], [250, 200]]),
+        "zone_C": np.array([[150, 250], [300, 250], [300, 400], [150, 400]]),
+    }
+
+    counter = ZoneCounter(
+        zones=zones,
+        use_tracking=True,
+        entry_delay_frames=1,
+        timeout_frames=1,
+        enable_zone_events=True,
+    )
+
+    # Frame 1: Object in zone_A, another in zone_B
+    result1 = MockResult(
+        [
+            {"bbox": [75, 75, 125, 125], "track_id": 1, "label": "person"},
+            {"bbox": [275, 75, 325, 125], "track_id": 2, "label": "car"},
+        ],
+        1,
+    )
+    counter.analyze(result1)
+    assert result1.zone_counts["zone_A"]["total"] == 1
+    assert result1.zone_counts["zone_B"]["total"] == 1
+    assert result1.zone_counts["zone_C"]["total"] == 0
+
+
+def test_per_class_counting():
+    """Test per-class display mode."""
+    from degirum_tools.analyzers.zone_count import ZoneCounter
+
+    zone_polygon = np.array([[100, 100], [300, 100], [300, 300], [100, 300]])
+    counter = ZoneCounter(
+        zones={"test_zone": zone_polygon},
+        class_list=["person", "car", "bicycle"],
+        per_class_display=True,
+        use_tracking=True,
+        entry_delay_frames=1,
+    )
+
+    # Frame 1: Mixed objects
+    result = MockResult(
+        [
+            {"bbox": [120, 120, 170, 170], "track_id": 1, "label": "person"},
+            {"bbox": [180, 180, 230, 230], "track_id": 2, "label": "person"},
+            {"bbox": [240, 240, 290, 290], "track_id": 3, "label": "car"},
+        ],
+        1,
+    )
+    counter.analyze(result)
+
+    counts = result.zone_counts["test_zone"]
+    assert counts["total"] == 3
+    assert counts["person"] == 2
+    assert counts["car"] == 1
+    assert counts["bicycle"] == 0
+
+
+def test_zone_events():
+    """Test zone event generation."""
+    from degirum_tools.analyzers.zone_count import ZoneCounter
+
+    zone_polygon = np.array([[100, 100], [300, 100], [300, 300], [100, 300]])
+    counter = ZoneCounter(
+        zones={"test_zone": zone_polygon},
+        use_tracking=True,
+        entry_delay_frames=1,
+        timeout_frames=1,
+        enable_zone_events=True,
+    )
+
+    # Frame 1: Object enters
+    result1 = MockResult(
+        [{"bbox": [150, 150, 200, 200], "track_id": 1, "label": "person"}], 1
+    )
+    counter.analyze(result1)
+    entry_events = [e for e in result1.zone_events if e["event_type"] == "zone_entry"]
+    occupied_events = [
+        e for e in result1.zone_events if e["event_type"] == "zone_occupied"
+    ]
+    assert len(entry_events) == 1
+    assert len(occupied_events) == 1
+
+    # Frame 2: Object exits (grace period)
+    result2 = MockResult([], 2)
+    counter.analyze(result2)
+    assert len(result2.zone_events) == 0
+
+    # Frame 3: Grace period expires
+    result3 = MockResult([], 3)
+    counter.analyze(result3)
+    exit_events = [e for e in result3.zone_events if e["event_type"] == "zone_exit"]
+    empty_events = [e for e in result3.zone_events if e["event_type"] == "zone_empty"]
+    assert len(exit_events) == 1
+    assert len(empty_events) == 1
