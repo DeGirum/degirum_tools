@@ -7,7 +7,6 @@
 # Implements unit tests to test video_source metadata feature
 #
 
-import pytest
 import numpy as np
 import cv2
 import time
@@ -30,7 +29,7 @@ def test_video_source_metadata_structure():
 
     try:
         # Write a few frames to the video
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # type: ignore[attr-defined]
         out = cv2.VideoWriter(tmp_path, fourcc, fps_val, (width, height))
 
         for i in range(5):
@@ -109,7 +108,7 @@ def test_video_source_without_metadata():
 
     try:
         # Write a few frames
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # type: ignore[attr-defined]
         out = cv2.VideoWriter(tmp_path, fourcc, 30.0, (320, 240))
 
         for i in range(3):
@@ -121,9 +120,10 @@ def test_video_source_without_metadata():
         # Test video_source without metadata (default)
         with open_video_stream(tmp_path) as stream:
             frame_count = 0
-            for frame in video_source(stream):
+            for item in video_source(stream):
                 # Should be a numpy array, not a tuple
-                assert isinstance(frame, np.ndarray)
+                assert isinstance(item, np.ndarray)
+                frame = item
                 assert not isinstance(frame, tuple)
                 assert frame.shape == (240, 320, 3)
 
@@ -149,7 +149,7 @@ def test_video_source_metadata_with_fps():
 
     try:
         # Write frames
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # type: ignore[attr-defined]
         out = cv2.VideoWriter(tmp_path, fourcc, 30.0, (320, 240))
 
         for i in range(10):
@@ -186,7 +186,7 @@ def test_video_source_metadata_frame_id_increment():
 
     try:
         # Write frames
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # type: ignore[attr-defined]
         out = cv2.VideoWriter(tmp_path, fourcc, 30.0, (320, 240))
 
         for i in range(5):

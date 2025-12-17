@@ -524,11 +524,13 @@ def video2jpegs(
         progress = Progress(nframes)
         # decode video stream into files resized to model input size
         fi = 0
-        for img in video_source(stream):
+        for frame in video_source(stream):  # include_metadata=False by default
+            # Type checker note: video_source yields only frames when include_metadata=False
+            assert isinstance(frame, np.ndarray)
             if preprocessor is not None:
-                img = preprocessor(img)
+                frame = preprocessor(frame)
             fname = str(path_to_jpeg / f"{jpeg_prefix}{fi:05d}.jpg")
-            cv2.imwrite(fname, img)
+            cv2.imwrite(fname, frame)
             progress.step()
             fi += 1
 
