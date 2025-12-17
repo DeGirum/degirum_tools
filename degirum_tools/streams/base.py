@@ -19,6 +19,10 @@ from ..tools import get_test_mode
 from degirum.exceptions import DegirumException
 
 
+# Predefined meta tag for timing metadata
+tag_timing = "dgt_timing"  # tag for gizmo timing metadata
+
+
 class StreamMeta:
     """Stream metainfo class (metadata container).
 
@@ -196,6 +200,42 @@ class StreamData:
             tags (List[str], optional): Tags to associate with this metainfo object. Defaults to [].
         """
         self.meta.append(meta, tags)
+
+
+def get_timing_info(data: StreamData) -> List[Tuple[str, float]]:
+    """Retrieve timing information from StreamData's metadata.
+
+    Returns a list of (gizmo_name, timestamp) tuples representing the timing
+    metadata added by each gizmo in the pipeline.
+
+    Args:
+        data (StreamData): The StreamData object to extract timing information from.
+
+    Returns:
+        List[Tuple[str, float]]: List of (gizmo_name, timestamp) tuples in chronological order.
+            Returns an empty list if no timing metadata is present.
+
+    Example:
+        ```python
+        from degirum_tools.streams import get_timing_info
+
+        for data in sink():
+            timing_info = get_timing_info(data)
+            # timing_info = [("VideoSourceGizmo", 1234567890.123), ("AiSimpleGizmo", 1234567890.456)]
+
+            for gizmo_name, timestamp in timing_info:
+                print(f"{gizmo_name}: {timestamp}")
+        ```
+    """
+    timing_entries = data.meta.find(tag_timing)
+    result = []
+
+    for entry in timing_entries:
+        gizmo_name = entry.get(Gizmo.key_gizmo, "")
+        timestamp = entry.get(Gizmo.key_timestamp, 0.0)
+        result.append((gizmo_name, timestamp))
+
+    return result
 
 
 class Stream(queue.Queue):
@@ -379,6 +419,10 @@ class Gizmo(ABC):
                 self.send_result(StreamData(resized_image, out_meta))
     ```
 
+    Class Variables:
+        key_gizmo (str): Key name for gizmo name in timing metadata entries. Defaults to "gizmo".
+        key_timestamp (str): Key name for timestamp in timing metadata entries. Defaults to "timestamp".
+
     Notes:
         - If your gizmo has multiple inputs, you can call `self.get_input(i)` for each input or iterate over
             `self.get_inputs()` if you need to merge or synchronize multiple streams.
@@ -389,6 +433,10 @@ class Gizmo(ABC):
             - In multi-input gizmos where simple nested for-loops aren't usable, get_nowait() is typically used to read input streams.
             - This way the gizmo code may query all inputs on a non-blocking manner and properly terminate loops.
     """
+
+    # Timing metadata keys
+    key_gizmo = "gizmo"  # key for gizmo name in timing metadata
+    key_timestamp = "timestamp"  # key for timestamp in timing metadata
 
     def __init__(self, input_stream_sizes: List[tuple] = []):
         """Constructor.
@@ -524,6 +572,8 @@ class Gizmo(ABC):
     def send_result(self, data: Optional[StreamData]):
         """Send a result to all connected output streams.
 
+        Automatically adds timing metadata (gizmo name and timestamp) to each result.
+
         Args:
             data (StreamData or None): The data result to send. If None (or a poison pill) is provided, all connected outputs will be closed.
         """
@@ -531,6 +581,14 @@ class Gizmo(ABC):
             self.result_cnt += 1
             if self.watchdog is not None:
                 self.watchdog.tick()
+
+            # Automatically add timing metadata
+            if data is not None:
+                timing_info = {
+                    self.key_gizmo: self.name,
+                    self.key_timestamp: time.time(),
+                }
+                data.meta.append(timing_info, tag_timing)
 
         for out in self._output_refs:
             if data == Stream._poison or data is None:

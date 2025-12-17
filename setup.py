@@ -22,7 +22,7 @@ readme = open(root_path / "README.md", encoding="utf-8").read()
 
 setup(
     name="degirum_tools",
-    version=__version__,  # noqa
+    version=__version__,  # noqa # type: ignore[name-defined]
     description="Tools for PySDK",
     author="DeGirum",
     license="MIT",
