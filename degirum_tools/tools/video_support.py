@@ -349,8 +349,8 @@ class VideoCaptureGst:
 
 def create_video_stream(
     video_source: Union[int, str, Path, None, cv2.VideoCapture, VideoCaptureGst] = None,
-    max_yt_quality: int = 0,
     *,
+    max_yt_quality: int = 0,
     use_gstreamer: bool = False
 ) -> Union[cv2.VideoCapture, VideoCaptureGst]:
     """Create a video stream from various sources.
@@ -447,8 +447,8 @@ def create_video_stream(
 @contextmanager
 def open_video_stream(
     video_source: Union[int, str, Path, None, cv2.VideoCapture, VideoCaptureGst] = None,
-    max_yt_quality: int = 0,
     *,
+    max_yt_quality: int = 0,
     use_gstreamer: bool = False
 ) -> Generator[Union[cv2.VideoCapture, VideoCaptureGst], None, None]:
     """Open a video stream from various sources.
@@ -468,7 +468,7 @@ def open_video_stream(
     Raises:
         Exception: If the video stream cannot be opened.
     """
-    stream = create_video_stream(video_source, max_yt_quality, use_gstreamer=use_gstreamer)
+    stream = create_video_stream(video_source, max_yt_quality=max_yt_quality, use_gstreamer=use_gstreamer)
     try:
         yield stream
     finally:
@@ -503,16 +503,22 @@ def get_video_stream_properties(
 
 def video_source(
     stream: Union[cv2.VideoCapture, VideoCaptureGst],
-    fps: Optional[float] = None
-) -> Generator[np.ndarray, None, None]:
+    fps: Optional[float] = None,
+    include_metadata: bool = False,
+) -> Generator[Union[np.ndarray, Tuple[np.ndarray, dict]], None, None]:
     """Yield frames from a video stream.
 
     Args:
         stream: Open video stream (cv2.VideoCapture or VideoCaptureGst).
         fps: Target frame rate cap.
+        include_metadata: If True, yields (frame, metadata) tuples where
+            metadata contains timestamp, frame_id, fps, frame dimensions. If False, yields
+            only frames. Defaults to False.
 
     Yields:
-        Frames from the stream.
+        If include_metadata is False: Frames from the stream (np.ndarray).
+        If include_metadata is True: Tuples of (frame, metadata) where metadata is a dict
+            containing 'timestamp', 'frame_id', 'fps', 'frame_width', 'frame_height'.
     """
 
     is_file = stream.get(cv2.CAP_PROP_FRAME_COUNT) > 0
@@ -536,8 +542,9 @@ def video_source(
             minimum_elapsed_time = 1.0 / fps
             prev_time = time.time()
 
+    frame_counter = 0
     while True:
-        ret, frame = stream.read()
+        ret, img = stream.read()
         if not ret:
             if report_error:
                 raise Exception(
@@ -545,6 +552,7 @@ def video_source(
                 )
             else:
                 break
+
         if fps:
             if is_file:
                 frame_id += 1
@@ -552,7 +560,21 @@ def video_source(
                 if frame_id % video_fps in drop_indices:
                     continue
 
-                yield frame
+                if include_metadata:
+                    metadata: dict = {
+                        "video_source": {
+                            "timestamp": time.time(),
+                            "frame_id": frame_counter,
+                            "source_fps": stream.get(cv2.CAP_PROP_FPS),
+                            "target_fps": float(fps) if fps is not None else None,
+                            "frame_width": int(stream.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                            "frame_height": int(stream.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+                        }
+                    }
+                    frame_counter += 1
+                    yield (img, metadata)
+                else:
+                    yield img
             else:
                 curr_time = time.time()
                 elapsed_time = curr_time - prev_time
@@ -562,9 +584,37 @@ def video_source(
 
                 prev_time = curr_time - (elapsed_time - minimum_elapsed_time)
 
-                yield frame
+                if include_metadata:
+                    metadata = {
+                        "video_source": {
+                            "timestamp": time.time(),
+                            "frame_id": frame_counter,
+                            "source_fps": stream.get(cv2.CAP_PROP_FPS),
+                            "target_fps": float(fps) if fps is not None else None,
+                            "frame_width": int(stream.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                            "frame_height": int(stream.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+                        }
+                    }
+                    frame_counter += 1
+                    yield (img, metadata)
+                else:
+                    yield img
         else:
-            yield frame
+            if include_metadata:
+                metadata = {
+                    "video_source": {
+                        "timestamp": time.time(),
+                        "frame_id": frame_counter,
+                        "source_fps": stream.get(cv2.CAP_PROP_FPS),
+                        "target_fps": float(fps) if fps is not None else None,
+                        "frame_width": int(stream.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                        "frame_height": int(stream.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+                    }
+                }
+                frame_counter += 1
+                yield (img, metadata)
+            else:
+                yield img
 
 
 # Keep the rest of the file unchanged (VideoWriter, video2jpegs, ClipSaver, etc.)
@@ -650,6 +700,51 @@ def open_video_writer(
         writer.release()
 
 
+def video2jpegs(
+    video_file: str,
+    jpeg_path: str,
+    *,
+    jpeg_prefix: str = "frame_",
+    preprocessor: Optional[Callable[[np.ndarray], np.ndarray]] = None,
+) -> int:
+    """Convert a video file into a sequence of JPEG images.
+
+    Args:
+        video_file (str): Path to the input video file.
+        jpeg_path (str): Directory where JPEG files will be stored.
+        jpeg_prefix (str, optional): Prefix for generated image filenames.
+            Defaults to ``"frame_"``.
+        preprocessor (Callable[[np.ndarray], np.ndarray], optional): Optional
+            function applied to each frame before saving.
+
+    Returns:
+        int: Number of frames written to ``jpeg_path``.
+    """
+
+    path_to_jpeg = Path(jpeg_path)
+    if not path_to_jpeg.exists():  # create directory for annotated images
+        path_to_jpeg.mkdir()
+
+    with open_video_stream(video_file) as stream:  # open video stream form file
+        nframes = int(stream.get(cv2.CAP_PROP_FRAME_COUNT))
+        progress = Progress(nframes)
+        # decode video stream into files resized to model input size
+        fi = 0
+        for item in video_source(stream):
+            assert isinstance(
+                item, np.ndarray
+            ), "video_source should yield frames only when include_metadata=False"
+            img = item
+            if preprocessor is not None:
+                img = preprocessor(img)
+            fname = str(path_to_jpeg / f"{jpeg_prefix}{fi:05d}.jpg")
+            cv2.imwrite(fname, img)
+            progress.step()
+            fi += 1
+
+        return fi
+
+
 def detect_rtsp_cameras(subnet_cidr, *, timeout_s=0.5, port=554, max_workers=16):
     """Scan given subnet for RTSP cameras by probing given port with OPTIONS request.
     Args:
@@ -704,31 +799,6 @@ def detect_rtsp_cameras(subnet_cidr, *, timeout_s=0.5, port=554, max_workers=16)
                 ip, info = result
                 results[ip] = info
     return results
-
-
-def video2jpegs(
-    video_file: str,
-    jpeg_path: str,
-    *,
-    jpeg_prefix: str = "frame_",
-    preprocessor: Optional[Callable[[np.ndarray], np.ndarray]] = None,
-) -> int:
-    path_to_jpeg = Path(jpeg_path)
-    if not path_to_jpeg.exists():
-        path_to_jpeg.mkdir()
-
-    with open_video_stream(video_file) as stream:
-        nframes = int(stream.get(cv2.CAP_PROP_FRAME_COUNT))
-        progress = Progress(nframes)
-        fi = 0
-        for img in video_source(stream):
-            if preprocessor is not None:
-                img = preprocessor(img)
-            fname = str(path_to_jpeg / f"{jpeg_prefix}{fi:05d}.jpg")
-            cv2.imwrite(fname, img)
-            progress.step()
-            fi += 1
-        return fi
 
 
 class ClipSaver:
