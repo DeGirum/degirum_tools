@@ -221,22 +221,36 @@ def get_video_stream_properties(
 
 
 def video_source(
-    stream: cv2.VideoCapture, fps: Optional[float] = None
-) -> Generator[np.ndarray, None, None]:
+    stream: cv2.VideoCapture,
+    fps: Optional[float] = None,
+    include_metadata: bool = False,
+) -> Generator[Union[np.ndarray, Tuple[np.ndarray, dict]], None, None]:
     """Yield frames from a video stream.
 
     Args:
         stream (cv2.VideoCapture): Open video stream.
         fps (Optional[float], optional): Target frame rate cap.
+        include_metadata (bool, optional): If True, yields (frame, metadata) tuples where
+            metadata contains timestamp, frame_id, fps, frame dimensions. If False, yields
+            only frames. Defaults to False.
 
     Yields:
-        Frames from the stream.
+        If include_metadata is False: Frames from the stream (np.ndarray).
+        If include_metadata is True: Tuples of (frame, metadata) where metadata is a dict
+            containing 'timestamp', 'frame_id', 'fps', 'frame_width', 'frame_height'.
     """
 
     is_file = stream.get(cv2.CAP_PROP_FRAME_COUNT) > 0
     # do not report errors for files and in test mode;
     # report errors only for camera streams
     report_error = False if env.get_test_mode() or is_file else True
+
+    # Initialize metadata if requested
+    if include_metadata:
+        frame_width = int(stream.get(cv2.CAP_PROP_FRAME_WIDTH))
+        frame_height = int(stream.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        stream_fps = stream.get(cv2.CAP_PROP_FPS)
+        frame_counter = 0
 
     if fps:
         # Decimate if file
@@ -265,6 +279,19 @@ def video_source(
                 )
             else:
                 break
+        if include_metadata:
+            metadata = {
+                "video_source": {
+                    "timestamp": time.time(),
+                    "frame_id": frame_counter,
+                    "source_fps": stream_fps,
+                    "target_fps": fps,
+                    "frame_width": frame_width,
+                    "frame_height": frame_height,
+                }
+            }
+            frame_counter += 1
+
         if fps:
             if is_file:
                 frame_id += 1
@@ -272,7 +299,7 @@ def video_source(
                 if frame_id % video_fps in drop_indices:
                     continue
 
-                yield frame
+                yield (frame, metadata) if include_metadata else frame
             else:
                 curr_time = time.time()
                 elapsed_time = curr_time - prev_time
@@ -282,9 +309,9 @@ def video_source(
 
                 prev_time = curr_time - (elapsed_time - minimum_elapsed_time)
 
-                yield frame
+                yield (frame, metadata) if include_metadata else frame
         else:
-            yield frame
+            yield (frame, metadata) if include_metadata else frame
 
 
 class VideoWriter:

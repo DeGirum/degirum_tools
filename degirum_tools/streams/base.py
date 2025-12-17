@@ -524,6 +524,8 @@ class Gizmo(ABC):
     def send_result(self, data: Optional[StreamData]):
         """Send a result to all connected output streams.
 
+        Automatically adds timing metadata (gizmo name and timestamp) to each result.
+
         Args:
             data (StreamData or None): The data result to send. If None (or a poison pill) is provided, all connected outputs will be closed.
         """
@@ -531,6 +533,11 @@ class Gizmo(ABC):
             self.result_cnt += 1
             if self.watchdog is not None:
                 self.watchdog.tick()
+
+            # Automatically add timing metadata
+            if data is not None:
+                timing_info = {"gizmo": self.name, "timestamp": time.time()}
+                data.meta.append(timing_info, "dgt_timing")
 
         for out in self._output_refs:
             if data == Stream._poison or data is None:

@@ -53,6 +53,7 @@ tag_inference = "dgt_inference"  # tag for inference result
 tag_preprocess = "dgt_preprocess"  # tag for preprocessor result
 tag_crop = "dgt_crop"  # tag for cropping result
 tag_analyzer = "dgt_analyzer"  # tag for analyzer result
+tag_timing = "dgt_timing"  # tag for gizmo timing metadata
 
 
 class VideoSourceGizmo(Gizmo):
