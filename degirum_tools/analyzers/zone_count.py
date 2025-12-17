@@ -1,5 +1,5 @@
 #
-# zone_count.py: zone object counting with named zone support and clean architecture
+# zone_count.py: zone object counting with clean architecture
 #
 # Copyright DeGirum Corporation 2025
 # All rights reserved
@@ -8,12 +8,12 @@
 #
 
 """
-Named Zone Counter Analyzer Module Overview
-============================================
+Zone Counter Analyzer Module Overview
+=====================================
 
-This module provides an enhanced zone counting analyzer (`ZoneCounter`) with named zones
-and clean separation of concerns. It builds upon the concepts from `ZoneCounter` but with
-improved architecture and a more user-friendly API.
+This module provides a zone counting analyzer (`ZoneCounter`) with support for both
+traditional list-based zones and named zones (dictionary-based). It features clean
+separation of concerns and a user-friendly API.
 
 Key Features:
     - **Named Zones**: Use descriptive names instead of numeric indices
@@ -125,7 +125,7 @@ from ..tools import (
 )
 from .result_analyzer_base import ResultAnalyzerBase
 
-__all__ = ["ZoneCounter", "NamedZoneCounter"]
+__all__ = ["ZoneCounter"]
 
 
 @dataclass
@@ -1236,5 +1236,3 @@ class ZoneCounter(ResultAnalyzerBase):
                 )
 
 
-# Backward compatibility alias
-NamedZoneCounter = ZoneCounter
