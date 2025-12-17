@@ -10,6 +10,7 @@ from .audio_support import *
 from .crop_extent import *
 from .environment import *
 from .figure_annotator import *
+from .gst_support import *
 from .image_tools import *
 from .math_support import *
 from .model_registry import *

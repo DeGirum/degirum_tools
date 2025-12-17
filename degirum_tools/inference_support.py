@@ -119,11 +119,11 @@ from .tools import (
     get_video_stream_properties,
     video_source,
     open_video_writer,
-    Progress,
-    Display,
-    Timer,
-    environment as env,
+    VideoCaptureGst,
+    VideoSourceType,
 )
+from .tools.ui_support import Progress, Display, Timer
+from .tools import environment as env
 
 # Inference options: parameters for connect_model_zoo
 CloudInference = 1  # use DeGirum cloud server for inference
@@ -191,7 +191,8 @@ def connect_model_zoo(
 
     else:
         raise Exception(
-            "Invalid value of inference_option parameter. Should be one of CloudInference, AIServerInference, or LocalHWInference"
+            "Invalid value of inference_option parameter. Should be one of "
+            "CloudInference, AIServerInference, or LocalHWInference"
         )
 
     return zoo
@@ -253,6 +254,7 @@ def attach_analyzers(
 def predict_stream(
     model: dg.model.Model,
     video_source_id: Union[int, str, Path, None],
+    source_type: Union[str, VideoSourceType] = VideoSourceType.AUTO,
     *,
     fps: Optional[float] = None,
     analyzers: Union[ResultAnalyzerBase, List[ResultAnalyzerBase], None] = None,
@@ -275,6 +277,11 @@ def predict_stream(
               - A local file path or string/Path, e.g., "video.mp4".
               - A streaming URL (RTSP/YouTube link).
               - None if no source is available (not typical).
+        source_type (Union[str, VideoSourceType]):
+            Video backend to use. Options:
+              - VideoSourceType.AUTO or "auto": Automatically choose best backend
+              - VideoSourceType.GSTREAMER or "gstream": Force GStreamer backend
+              - VideoSourceType.OPENCV or "opencv": Force OpenCV backend
         fps (Optional[float]):
             If provided, caps the effective reading/processing rate to the given FPS.
             If the input source is slower, this has no effect. If faster, frames are decimated.
@@ -288,7 +295,12 @@ def predict_stream(
 
     Example:
     ```python
-    for res in predict_stream(my_model, "my_video.mp4", fps=15, analyzers=MyAnalyzer()):
+    # Using enum (recommended)
+    for res in predict_stream(my_model, "my_video.mp4", VideoSourceType.GSTREAMER, fps=15, analyzers=MyAnalyzer()):
+        annotated_img = res.image_overlay  # includes custom overlay
+        # do something with annotated_img
+    # Using string (backward compatible)
+    for res in predict_stream(my_model, "my_video.mp4", "gstream", fps=15, analyzers=MyAnalyzer()):
         annotated_img = res.image_overlay  # includes custom overlay
         # do something with annotated_img
     ```
@@ -297,7 +309,11 @@ def predict_stream(
     if analyzers is not None:
         attach_analyzers(model, analyzers)
 
-    with open_video_stream(video_source_id) as stream:
+    # Convert source_type to enum and determine backend
+    source_type_enum = VideoSourceType.from_string(source_type)
+    use_gstreamer = (source_type_enum == VideoSourceType.GSTREAMER)
+
+    with open_video_stream(video_source_id, use_gstreamer=use_gstreamer) as stream:
         for res in model.predict_batch(video_source(stream, fps=fps)):
             yield res
 
@@ -309,6 +325,7 @@ def annotate_video(
     model: dg.model.Model,
     video_source_id: Union[int, str, Path, None, cv2.VideoCapture],
     output_video_path: str,
+    source_type: Union[str, VideoSourceType] = VideoSourceType.AUTO,
     *,
     show_progress: bool = True,
     visual_display: bool = True,
@@ -338,6 +355,11 @@ def annotate_video(
               - A file path or a URL (RTSP/YouTube).
         output_video_path (str):
             Path to the output video file. The file is created or overwritten as needed.
+        source_type (Union[str, VideoSourceType]):
+            Video backend to use. Options:
+              - VideoSourceType.AUTO or "auto": Automatically choose best backend
+              - VideoSourceType.GSTREAMER or "gstream": Force GStreamer backend
+              - VideoSourceType.OPENCV or "opencv": Force OpenCV backend
         show_progress (bool):
             If True, displays a textual progress bar or frame counter (for local file streams).
         visual_display (bool):
@@ -353,7 +375,10 @@ def annotate_video(
 
     Example:
     ```python
-    annotate_video(my_model, "input.mp4", "output.mp4", analyzers=[MyAnalyzer()])
+    # Using enum (recommended)
+    annotate_video(my_model, "input.mp4", "output.mp4", VideoSourceType.GSTREAMER, analyzers=[MyAnalyzer()])
+    # Using string (backward compatible)
+    annotate_video(my_model, "input.mp4", "output.mp4", "gstream", analyzers=[MyAnalyzer()])
     ```
     """
     win_name = f"Annotating {video_source_id}"
@@ -373,10 +398,14 @@ def annotate_video(
         if visual_display:
             display = stack.enter_context(Display(win_name))
 
+        # Convert source_type to enum and determine backend
+        source_type_enum = VideoSourceType.from_string(source_type)
+        use_gstreamer = (source_type_enum == VideoSourceType.GSTREAMER)
+
         if isinstance(video_source_id, cv2.VideoCapture):
-            stream = video_source_id
+            stream: Union[cv2.VideoCapture, VideoCaptureGst] = video_source_id
         else:
-            stream = stack.enter_context(open_video_stream(video_source_id))
+            stream = stack.enter_context(open_video_stream(video_source_id, use_gstreamer=use_gstreamer))
 
         w, h, video_fps = get_video_stream_properties(stream)
 
@@ -535,7 +564,7 @@ def _build_dummy_input(model: dg.model.Model):
     """Helper to build one dummy input tuple/list matching the model's inputs"""
 
     info = model.model_info
-    dummy_inputs: list = []
+    dummy_inputs: list[np.ndarray] = []
 
     for i, input_type in enumerate(info.InputType):
         shape = model.input_shape[i]
