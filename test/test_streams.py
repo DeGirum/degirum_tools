@@ -1353,8 +1353,8 @@ def test_get_timing_info_helper():
 
     with streams.Composition(sink):
         for data in sink():
-            # Use the helper method to get timing info
-            timing_info = data.get_timing_info()
+            # Use the standalone function to get timing info
+            timing_info = streams.get_timing_info(data)
 
             # Should return a list of (gizmo_name, timestamp) tuples
             assert isinstance(timing_info, list)

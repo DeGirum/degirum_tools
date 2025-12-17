@@ -19,6 +19,10 @@ from ..tools import get_test_mode
 from degirum.exceptions import DegirumException
 
 
+# Predefined meta tag for timing metadata
+tag_timing = "dgt_timing"  # tag for gizmo timing metadata
+
+
 class StreamMeta:
     """Stream metainfo class (metadata container).
 
@@ -197,37 +201,41 @@ class StreamData:
         """
         self.meta.append(meta, tags)
 
-    def get_timing_info(self) -> List[Tuple[str, float]]:
-        """Retrieve timing information from this StreamData's metadata.
 
-        Returns a list of (gizmo_name, timestamp) tuples representing the timing
-        metadata added by each gizmo in the pipeline.
+def get_timing_info(data: StreamData) -> List[Tuple[str, float]]:
+    """Retrieve timing information from StreamData's metadata.
 
-        Returns:
-            List[Tuple[str, float]]: List of (gizmo_name, timestamp) tuples in chronological order.
-                Returns an empty list if no timing metadata is present.
+    Returns a list of (gizmo_name, timestamp) tuples representing the timing
+    metadata added by each gizmo in the pipeline.
 
-        Example:
-            ```python
-            for data in sink():
-                timing_info = data.get_timing_info()
-                # timing_info = [("VideoSourceGizmo", 1234567890.123), ("AiSimpleGizmo", 1234567890.456)]
+    Args:
+        data (StreamData): The StreamData object to extract timing information from.
 
-                for gizmo_name, timestamp in timing_info:
-                    print(f"{gizmo_name}: {timestamp}")
-            ```
-        """
-        from .gizmos import tag_timing
+    Returns:
+        List[Tuple[str, float]]: List of (gizmo_name, timestamp) tuples in chronological order.
+            Returns an empty list if no timing metadata is present.
 
-        timing_entries = self.meta.find(tag_timing)
-        result = []
+    Example:
+        ```python
+        from degirum_tools.streams import get_timing_info
 
-        for entry in timing_entries:
-            gizmo_name = entry.get(Gizmo.key_gizmo, "")
-            timestamp = entry.get(Gizmo.key_timestamp, 0.0)
-            result.append((gizmo_name, timestamp))
+        for data in sink():
+            timing_info = get_timing_info(data)
+            # timing_info = [("VideoSourceGizmo", 1234567890.123), ("AiSimpleGizmo", 1234567890.456)]
 
-        return result
+            for gizmo_name, timestamp in timing_info:
+                print(f"{gizmo_name}: {timestamp}")
+        ```
+    """
+    timing_entries = data.meta.find(tag_timing)
+    result = []
+
+    for entry in timing_entries:
+        gizmo_name = entry.get(Gizmo.key_gizmo, "")
+        timestamp = entry.get(Gizmo.key_timestamp, 0.0)
+        result.append((gizmo_name, timestamp))
+
+    return result
 
 
 class Stream(queue.Queue):
@@ -580,7 +588,7 @@ class Gizmo(ABC):
                     self.key_gizmo: self.name,
                     self.key_timestamp: time.time(),
                 }
-                data.meta.append(timing_info, "dgt_timing")
+                data.meta.append(timing_info, tag_timing)
 
         for out in self._output_refs:
             if data == Stream._poison or data is None:
