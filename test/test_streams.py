@@ -1278,12 +1278,12 @@ def test_automatic_timing_metadata():
         ), f"Frame {idx}: Expected 2 timing entries, got {len(timing_data)}"
 
         # Verify structure of timing entries
-        gizmo_names = [t["gizmo"] for t in timing_data]
+        gizmo_names = [t[streams.Gizmo.key_gizmo] for t in timing_data]
         assert "SimpleSourceGizmo" in gizmo_names
         assert "PassthroughGizmo" in gizmo_names
 
         # Verify all timestamps are present and monotonically increasing
-        timestamps = [t["timestamp"] for t in timing_data]
+        timestamps = [t[streams.Gizmo.key_timestamp] for t in timing_data]
         assert all(isinstance(ts, float) for ts in timestamps)
         assert timestamps == sorted(
             timestamps
@@ -1327,9 +1327,46 @@ def test_timing_metadata_structure():
 
             # Each entry should have 'gizmo' and 'timestamp' keys
             for entry in timing_entries:
-                assert "gizmo" in entry
-                assert "timestamp" in entry
-                assert isinstance(entry["gizmo"], str)
-                assert isinstance(entry["timestamp"], float)
+                assert streams.Gizmo.key_gizmo in entry
+                assert streams.Gizmo.key_timestamp in entry
+                assert isinstance(entry[streams.Gizmo.key_gizmo], str)
+                assert isinstance(entry[streams.Gizmo.key_timestamp], float)
+
+            break
+
+
+def test_get_timing_info_helper():
+    """Test the StreamData.get_timing_info() helper method"""
+
+    class TestGizmo(streams.Gizmo):
+        def __init__(self):
+            super().__init__()
+
+        def run(self):
+            data = streams.StreamData("test", streams.StreamMeta())
+            self.send_result(data)
+
+    gizmo = TestGizmo()
+    sink = streams.SinkGizmo()
+
+    gizmo >> sink
+
+    with streams.Composition(sink):
+        for data in sink():
+            # Use the helper method to get timing info
+            timing_info = data.get_timing_info()
+
+            # Should return a list of (gizmo_name, timestamp) tuples
+            assert isinstance(timing_info, list)
+            assert len(timing_info) == 1
+
+            # Verify structure
+            gizmo_name, timestamp = timing_info[0]
+            assert isinstance(gizmo_name, str)
+            assert isinstance(timestamp, float)
+            assert gizmo_name == "TestGizmo"
+
+            # Verify timestamp is recent
+            assert abs(time.time() - timestamp) < 5.0
 
             break

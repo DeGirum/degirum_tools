@@ -245,13 +245,6 @@ def video_source(
     # report errors only for camera streams
     report_error = False if env.get_test_mode() or is_file else True
 
-    # Initialize metadata if requested
-    if include_metadata:
-        frame_width = int(stream.get(cv2.CAP_PROP_FRAME_WIDTH))
-        frame_height = int(stream.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        stream_fps = stream.get(cv2.CAP_PROP_FPS)
-        frame_counter = 0
-
     if fps:
         # Decimate if file
         if is_file:
@@ -270,8 +263,9 @@ def video_source(
             minimum_elapsed_time = 1.0 / fps
             prev_time = time.time()
 
+    frame_counter = 0
     while True:
-        ret, frame = stream.read()
+        ret, img = stream.read()
         if not ret:
             if report_error:
                 raise Exception(
@@ -279,18 +273,6 @@ def video_source(
                 )
             else:
                 break
-        if include_metadata:
-            metadata = {
-                "video_source": {
-                    "timestamp": time.time(),
-                    "frame_id": frame_counter,
-                    "source_fps": stream_fps,
-                    "target_fps": fps,
-                    "frame_width": frame_width,
-                    "frame_height": frame_height,
-                }
-            }
-            frame_counter += 1
 
         if fps:
             if is_file:
@@ -299,7 +281,21 @@ def video_source(
                 if frame_id % video_fps in drop_indices:
                     continue
 
-                yield (frame, metadata) if include_metadata else frame
+                if include_metadata:
+                    metadata: dict = {
+                        "video_source": {
+                            "timestamp": time.time(),
+                            "frame_id": frame_counter,
+                            "source_fps": stream.get(cv2.CAP_PROP_FPS),
+                            "target_fps": float(fps) if fps is not None else None,
+                            "frame_width": int(stream.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                            "frame_height": int(stream.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+                        }
+                    }
+                    frame_counter += 1
+                    yield (img, metadata)
+                else:
+                    yield img
             else:
                 curr_time = time.time()
                 elapsed_time = curr_time - prev_time
@@ -309,9 +305,37 @@ def video_source(
 
                 prev_time = curr_time - (elapsed_time - minimum_elapsed_time)
 
-                yield (frame, metadata) if include_metadata else frame
+                if include_metadata:
+                    metadata = {
+                        "video_source": {
+                            "timestamp": time.time(),
+                            "frame_id": frame_counter,
+                            "source_fps": stream.get(cv2.CAP_PROP_FPS),
+                            "target_fps": float(fps) if fps is not None else None,
+                            "frame_width": int(stream.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                            "frame_height": int(stream.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+                        }
+                    }
+                    frame_counter += 1
+                    yield (img, metadata)
+                else:
+                    yield img
         else:
-            yield (frame, metadata) if include_metadata else frame
+            if include_metadata:
+                metadata = {
+                    "video_source": {
+                        "timestamp": time.time(),
+                        "frame_id": frame_counter,
+                        "source_fps": stream.get(cv2.CAP_PROP_FPS),
+                        "target_fps": float(fps) if fps is not None else None,
+                        "frame_width": int(stream.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                        "frame_height": int(stream.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+                    }
+                }
+                frame_counter += 1
+                yield (img, metadata)
+            else:
+                yield img
 
 
 class VideoWriter:
@@ -524,13 +548,15 @@ def video2jpegs(
         progress = Progress(nframes)
         # decode video stream into files resized to model input size
         fi = 0
-        for frame in video_source(stream):  # include_metadata=False by default
-            # Type checker note: video_source yields only frames when include_metadata=False
-            assert isinstance(frame, np.ndarray)
+        for item in video_source(stream):
+            assert isinstance(
+                item, np.ndarray
+            ), "video_source should yield frames only when include_metadata=False"
+            img = item
             if preprocessor is not None:
-                frame = preprocessor(frame)
+                img = preprocessor(img)
             fname = str(path_to_jpeg / f"{jpeg_prefix}{fi:05d}.jpg")
-            cv2.imwrite(fname, frame)
+            cv2.imwrite(fname, img)
             progress.step()
             fi += 1
 

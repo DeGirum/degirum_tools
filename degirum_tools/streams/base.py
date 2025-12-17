@@ -197,6 +197,38 @@ class StreamData:
         """
         self.meta.append(meta, tags)
 
+    def get_timing_info(self) -> List[Tuple[str, float]]:
+        """Retrieve timing information from this StreamData's metadata.
+
+        Returns a list of (gizmo_name, timestamp) tuples representing the timing
+        metadata added by each gizmo in the pipeline.
+
+        Returns:
+            List[Tuple[str, float]]: List of (gizmo_name, timestamp) tuples in chronological order.
+                Returns an empty list if no timing metadata is present.
+
+        Example:
+            ```python
+            for data in sink():
+                timing_info = data.get_timing_info()
+                # timing_info = [("VideoSourceGizmo", 1234567890.123), ("AiSimpleGizmo", 1234567890.456)]
+
+                for gizmo_name, timestamp in timing_info:
+                    print(f"{gizmo_name}: {timestamp}")
+            ```
+        """
+        from .gizmos import tag_timing
+
+        timing_entries = self.meta.find(tag_timing)
+        result = []
+
+        for entry in timing_entries:
+            gizmo_name = entry.get(Gizmo.key_gizmo, "")
+            timestamp = entry.get(Gizmo.key_timestamp, 0.0)
+            result.append((gizmo_name, timestamp))
+
+        return result
+
 
 class Stream(queue.Queue):
     """Queue-based iterable stream with optional item drop."""
@@ -379,6 +411,10 @@ class Gizmo(ABC):
                 self.send_result(StreamData(resized_image, out_meta))
     ```
 
+    Class Variables:
+        key_gizmo (str): Key name for gizmo name in timing metadata entries. Defaults to "gizmo".
+        key_timestamp (str): Key name for timestamp in timing metadata entries. Defaults to "timestamp".
+
     Notes:
         - If your gizmo has multiple inputs, you can call `self.get_input(i)` for each input or iterate over
             `self.get_inputs()` if you need to merge or synchronize multiple streams.
@@ -389,6 +425,10 @@ class Gizmo(ABC):
             - In multi-input gizmos where simple nested for-loops aren't usable, get_nowait() is typically used to read input streams.
             - This way the gizmo code may query all inputs on a non-blocking manner and properly terminate loops.
     """
+
+    # Timing metadata keys
+    key_gizmo = "gizmo"  # key for gizmo name in timing metadata
+    key_timestamp = "timestamp"  # key for timestamp in timing metadata
 
     def __init__(self, input_stream_sizes: List[tuple] = []):
         """Constructor.
@@ -536,7 +576,10 @@ class Gizmo(ABC):
 
             # Automatically add timing metadata
             if data is not None:
-                timing_info = {"gizmo": self.name, "timestamp": time.time()}
+                timing_info = {
+                    self.key_gizmo: self.name,
+                    self.key_timestamp: time.time(),
+                }
                 data.meta.append(timing_info, "dgt_timing")
 
         for out in self._output_refs:
