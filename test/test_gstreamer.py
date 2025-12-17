@@ -68,7 +68,7 @@ def test_gst_pipeline_fallback():
 
     # Test with invalid source - should fall back to OpenCV
     try:
-        with open_video_stream("nonexistent_file.mp4", use_gstreamer=True) as stream:
+        with open_video_stream("nonexistent_file.mp4", source_type="gstream") as stream:
             # Should still work (fallback to OpenCV)
             ret, frame = stream.read()
             assert isinstance(ret, bool)

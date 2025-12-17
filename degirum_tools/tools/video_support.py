@@ -351,7 +351,7 @@ def create_video_stream(
     video_source: Union[int, str, Path, None, cv2.VideoCapture, VideoCaptureGst] = None,
     *,
     max_yt_quality: int = 0,
-    use_gstreamer: bool = False
+    source_type: Union[str, VideoSourceType] = VideoSourceType.AUTO
 ) -> Union[cv2.VideoCapture, VideoCaptureGst]:
     """Create a video stream from various sources.
 
@@ -369,8 +369,11 @@ def create_video_stream(
             - cv2.VideoCapture or VideoCaptureGst: Pass through existing capture
         max_yt_quality: Maximum video quality for YouTube videos in pixels (height).
             If 0, use best quality. Defaults to 0.
-        use_gstreamer: If True, use GStreamer backend for video files.
-            Only applies to .mp4 files. Defaults to False.
+        source_type: Video backend to use. Options:
+            - VideoSourceType.AUTO or "auto": Automatically choose best backend
+            - VideoSourceType.GSTREAMER or "gstream": Force GStreamer backend
+            - VideoSourceType.OPENCV or "opencv": Force OpenCV backend
+            Defaults to VideoSourceType.AUTO.
 
     Returns:
         cv2.VideoCapture or VideoCaptureGst: Video capture object.
@@ -424,6 +427,10 @@ def create_video_stream(
             else:
                 video_source = pafy.new(video_source).getbest(preftype="mp4").url
 
+    # Convert source_type to enum and determine backend
+    source_type_enum = VideoSourceType.from_string(source_type)
+    use_gstreamer = (source_type_enum == VideoSourceType.GSTREAMER)
+
     # Use GStreamer if requested and available
     if use_gstreamer and GST_AVAILABLE:
         try:
@@ -449,7 +456,7 @@ def open_video_stream(
     video_source: Union[int, str, Path, None, cv2.VideoCapture, VideoCaptureGst] = None,
     *,
     max_yt_quality: int = 0,
-    use_gstreamer: bool = False
+    source_type: Union[str, VideoSourceType] = VideoSourceType.AUTO
 ) -> Generator[Union[cv2.VideoCapture, VideoCaptureGst], None, None]:
     """Open a video stream from various sources.
 
@@ -460,7 +467,11 @@ def open_video_stream(
     Args:
         video_source: Video source specification (see create_video_stream)
         max_yt_quality: Maximum video quality for YouTube videos
-        use_gstreamer: If True, use GStreamer backend for video files
+        source_type: Video backend to use. Options:
+            - VideoSourceType.AUTO or "auto": Automatically choose best backend
+            - VideoSourceType.GSTREAMER or "gstream": Force GStreamer backend
+            - VideoSourceType.OPENCV or "opencv": Force OpenCV backend
+            Defaults to VideoSourceType.AUTO.
 
     Yields:
         cv2.VideoCapture or VideoCaptureGst: Video capture object.
@@ -468,7 +479,7 @@ def open_video_stream(
     Raises:
         Exception: If the video stream cannot be opened.
     """
-    stream = create_video_stream(video_source, max_yt_quality=max_yt_quality, use_gstreamer=use_gstreamer)
+    stream = create_video_stream(video_source, max_yt_quality=max_yt_quality, source_type=source_type)
     try:
         yield stream
     finally:

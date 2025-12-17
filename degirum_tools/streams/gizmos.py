@@ -117,10 +117,9 @@ class VideoSourceGizmo(Gizmo):
     def _open_video_source(self):
         """Open the video source if it is not opened."""
         if self._stream is None:
-            # Convert source_type to enum and determine backend
+            # Convert source_type to enum and pass to create_video_stream
             source_type_enum = VideoSourceType.from_string(self._source_type)
-            use_gstreamer = (source_type_enum == VideoSourceType.GSTREAMER)
-            self._stream = create_video_stream(self._video_source, use_gstreamer=use_gstreamer)
+            self._stream = create_video_stream(self._video_source, source_type=source_type_enum)
             if self._fps_override is not None:
                 # set FPS if override is provided
                 self._stream.set(cv2.CAP_PROP_FPS, self._fps_override)
