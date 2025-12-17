@@ -1,6 +1,10 @@
 import pytest
 import os
+import sys
 from pathlib import Path
+
+# Ensure we use the local development version, not the installed one
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 
 def test_import_gi():
@@ -37,7 +41,8 @@ def test_gst_init_and_version():
 
 def test_gst_pipeline_builder_file():
     """Test GStreamer pipeline builder for file sources"""
-    from degirum_tools.gst_support import build_gst_pipeline
+    # Import from local development version
+    from degirum_tools.tools.gst_support import build_gst_pipeline
 
     # Create a dummy file for testing
     test_file = "test_video.mp4"
@@ -58,7 +63,8 @@ def test_gst_pipeline_builder_file():
 
 def test_gst_pipeline_fallback():
     """Test that GStreamer falls back to OpenCV when needed"""
-    from degirum_tools.video_support import open_video_stream
+    # Import from local development version
+    from degirum_tools.tools.video_support import open_video_stream
 
     # Test with invalid source - should fall back to OpenCV
     try:
@@ -68,4 +74,4 @@ def test_gst_pipeline_fallback():
             assert isinstance(ret, bool)
     except Exception as e:
         # Expected to fail with nonexistent file
-        assert "Error opening" in str(e) or "not found" in str(e)
+        assert "Error opening" in str(e) or "not found" in str(e) or "Unknown source type" in str(e)

@@ -51,8 +51,14 @@ Configuration Options:
 import numpy as np
 import yaml, time, jsonschema
 from .result_analyzer_base import ResultAnalyzerBase
-from .ui_support import put_text, color_complement, deduce_text_color, CornerPosition
-from .math_support import AnchorPoint, get_image_anchor_point
+from ..tools import (
+    put_text,
+    color_complement,
+    deduce_text_color,
+    CornerPosition,
+    AnchorPoint,
+    get_image_anchor_point,
+)
 from collections import deque
 from typing import Union, Optional, Callable
 

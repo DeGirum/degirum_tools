@@ -53,31 +53,14 @@ def logger_add_handler(
 import argparse
 
 from ._version import __version__, __version_info__
-from .audio_support import *
-from .classification_eval import *
-from .clip_saver import *
+from .analyzers import *
 from .compound_models import *
-from .crop_extent import *
-from .detection_eval import *
-from .environment import *
-from .event_detector import *
-from .figure_annotator import *
+from .evaluators import *
 from .inference_support import *
-from .line_count import *
-from .math_support import *
-from .model_registry import *
-from .notifier import *
-from .object_selector import *
-from .object_storage_support import *
-from .object_tracker import *
-from .regression_eval import *
-from .ui_support import *
-from .video_support import *
-from .zone_count import *
-
+from .tools import *
 
 # aliases for backward compatibility
-from .environment import (
+from .tools import (
     in_colab as _in_colab,
     reload_env as _reload_env,
     get_test_mode as _get_test_mode,
@@ -85,7 +68,7 @@ from .environment import (
 
 
 def _command_entrypoint(arg_str=None):
-    from .figure_annotator import (
+    from .tools.figure_annotator import (
         _figure_annotator_args,
         _zone_annotator_args,
         _line_annotator_args,

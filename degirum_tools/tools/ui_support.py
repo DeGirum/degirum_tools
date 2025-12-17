@@ -861,6 +861,8 @@ class Progress:
             )
         if delta >= 100 / self._len or self._time_to_refresh():
             self._update()
+        if self._percent >= 100 and not in_notebook():
+            print(f"\033[{self._longest_line}C")
 
     @property
     def message(self) -> str:
@@ -924,6 +926,9 @@ class Progress:
                 self._longest_line = len(prog_str)
 
             print(prog_str, end="\r")
+
+            if self._last_step is not None and self._step >= self._last_step:
+                print(f"\033[{self._longest_line}C")
 
         self._last_update_time = time.time()
 

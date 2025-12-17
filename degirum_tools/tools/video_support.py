@@ -63,6 +63,7 @@ from .ui_support import Progress
 from .image_tools import ImageType, image_size, resize_image, to_opencv
 from typing import Union, Generator, Optional, Callable, Any, List, Tuple
 from .gst_support import build_gst_pipeline
+from enum import Enum
 
 # Import GStreamer libraries
 try:
@@ -73,6 +74,34 @@ try:
     Gst.init(None)
 except ImportError:
     GST_AVAILABLE = False
+
+
+class VideoSourceType(Enum):
+    """Enumeration of supported video source types for inference."""
+    AUTO = "auto"           # Automatically detect best backend (OpenCV or GStreamer)
+    GSTREAMER = "gstream"   # Force GStreamer backend
+    OPENCV = "opencv"       # Force OpenCV backend
+
+    @classmethod
+    def from_string(cls, value: Union[str, 'VideoSourceType']) -> 'VideoSourceType':
+        """Convert string to enum, maintaining backward compatibility.
+        Args:
+            value: String value or VideoSourceType enum
+        Returns:
+            VideoSourceType enum value
+        Raises:
+            ValueError: If string value is not a valid VideoSourceType
+            TypeError: If value is not str or VideoSourceType
+        """
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, str):
+            try:
+                return cls(value)
+            except ValueError:
+                valid_options = [e.value for e in cls]
+                raise ValueError(f"Invalid source_type: '{value}'. Valid options: {valid_options}")
+        raise TypeError(f"Expected str or VideoSourceType, got {type(value)}")
 
 
 class VideoCaptureGst:
@@ -277,6 +306,31 @@ class VideoCaptureGst:
                 return int((duration[1] / Gst.SECOND) * fps)
             return 0
         return None
+
+    def set(self, prop: int, value: float) -> bool:
+        """Set capture properties (mimics cv2.VideoCapture.set).
+
+        Note: GStreamer pipelines are typically configured at creation time.
+        Most properties cannot be changed dynamically after the pipeline is created.
+        This method provides limited support for interface compatibility.
+
+        Args:
+            prop: OpenCV property constant (e.g., cv2.CAP_PROP_FPS)
+            value: Property value to set
+
+        Returns:
+            bool: True if property was acknowledged, False if not supported
+        """
+        # GStreamer pipelines are configured at creation time via the pipeline string
+        # Most properties (like FPS) are set in the pipeline and cannot be changed dynamically
+        # For FPS override, it's typically handled in the pipeline string or metadata
+        if prop == cv2.CAP_PROP_FPS:
+            # FPS is set in the pipeline configuration, so we can't change it here
+            # Return True to indicate "acknowledged" but don't actually change anything
+            # The actual FPS comes from the pipeline configuration
+            return True
+        # For other properties, return False (not supported)
+        return False
 
     def isOpened(self):
         """Check if the capture is opened.
@@ -1031,7 +1085,7 @@ class VideoStreamer:
         fps: float = 30.0,
         pix_fmt="bgr24",
         gop_size: int = 50,
-        verbose: bool = True,
+        verbose: bool = False,
     ):
         """Initializes the video streamer.
 

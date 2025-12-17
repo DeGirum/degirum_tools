@@ -7,11 +7,14 @@
 # Implements various gizmos for streaming pipelines
 #
 
-import queue, copy, time, cv2, numpy as np
+import io, queue, copy, time, cv2, numpy as np
+from urllib.parse import urlparse
 import degirum as dg
 from abc import abstractmethod
 from typing import Iterator, Optional, List, Union
 from contextlib import ExitStack
+
+import requests
 
 try:
     from PIL import Image
@@ -19,14 +22,17 @@ except ImportError:
     Image = None  # type: ignore
 
 from .base import Stream, StreamData, StreamMeta, Gizmo
-from ..crop_extent import CropExtentOptions, extend_bbox
-from ..environment import get_test_mode, get_token
-from ..event_detector import EventDetector
-from ..image_tools import crop_image, resize_image, image_size, ImageType
-from ..notifier import EventNotifier
-from ..result_analyzer_base import image_overlay_substitute, clone_result
-from ..ui_support import Display
-from ..video_support import (
+
+from ..tools import (
+    CropExtentOptions,
+    extend_bbox,
+    get_test_mode,
+    get_token,
+    crop_image,
+    resize_image,
+    image_size,
+    ImageType,
+    Display,
     create_video_stream,
     get_video_stream_properties,
     open_video_writer,
@@ -34,6 +40,11 @@ from ..video_support import (
     VideoCaptureGst,
 )
 from ..inference_support import VideoSourceType
+
+from ..analyzers.event_detector import EventDetector
+from ..analyzers.notifier import EventNotifier
+from ..analyzers.result_analyzer_base import image_overlay_substitute, clone_result
+
 
 # predefined meta tags
 tag_video = "dgt_video"  # tag for video source data
@@ -76,6 +87,7 @@ class VideoSourceGizmo(Gizmo):
         source_type: Union[str, VideoSourceType] = VideoSourceType.AUTO,
         stop_composition_on_end: bool = False,
         retry_on_error: bool = False,
+        fps_override: Optional[float] = None,
     ):
         """Constructor.
 
@@ -88,12 +100,14 @@ class VideoSourceGizmo(Gizmo):
                 - VideoSourceType.OPENCV or "opencv": Force OpenCV backend
             stop_composition_on_end (bool): If True, stop the [Composition](streams_base.md#composition) when the video source is over. Defaults to False.
             retry_on_error (bool): If True, retry opening the video source on error after some time. Defaults to False.
+            fps_override (float, optional): If provided, overrides the FPS value reported by source (some IP cameras report 100FPS). Defaults to None.
         """
         super().__init__()
         self._video_source = video_source
         self._source_type = source_type
         self._stop_composition_on_end = stop_composition_on_end and not get_test_mode()
         self._retry_on_error = retry_on_error
+        self._fps_override = fps_override
         self._stream: Optional[Union[cv2.VideoCapture, VideoCaptureGst]] = None
 
     def get_video_properties(self) -> tuple:
@@ -107,6 +121,9 @@ class VideoSourceGizmo(Gizmo):
             source_type_enum = VideoSourceType.from_string(self._source_type)
             use_gstreamer = (source_type_enum == VideoSourceType.GSTREAMER)
             self._stream = create_video_stream(self._video_source, use_gstreamer=use_gstreamer)
+            if self._fps_override is not None:
+                # set FPS if override is provided
+                self._stream.set(cv2.CAP_PROP_FPS, self._fps_override)
 
     def _close_video_source(self):
         """Open the video source if it is not opened."""
@@ -142,7 +159,11 @@ class VideoSourceGizmo(Gizmo):
                     meta = {
                         self.key_frame_width: int(src.get(cv2.CAP_PROP_FRAME_WIDTH)),
                         self.key_frame_height: int(src.get(cv2.CAP_PROP_FRAME_HEIGHT)),
-                        self.key_fps: src.get(cv2.CAP_PROP_FPS),
+                        self.key_fps: (
+                            src.get(cv2.CAP_PROP_FPS)
+                            if self._fps_override is None
+                            else self._fps_override
+                        ),
                         self.key_frame_count: int(src.get(cv2.CAP_PROP_FRAME_COUNT)),
                     }
                     while not self._abort:
@@ -222,13 +243,37 @@ class IteratorSourceGizmo(Gizmo):
             FileNotFoundError: If image file path doesn't exist
         """
         if isinstance(image_input, str):
-            # Load image from file path
-            img = cv2.imread(image_input)
-            if img is None:
-                raise FileNotFoundError(
-                    f"Could not load image from path: {image_input}"
+
+            if "http:" == image_input[:5] or "https:" == image_input[:6]:
+                # load image from URL
+                headers = {
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9",
+                    "Accept-Encoding": "gzip, deflate",
+                    "Accept-Language": "en-GB,en-US;q=0.9,en;q=0.8",
+                    "Dnt": "1",
+                    "Host": urlparse(image_input).netloc,
+                    "Upgrade-Insecure-Requests": "1",
+                    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.0.0 Safari/537.36",
+                }
+                buf = io.BytesIO(
+                    requests.get(image_input, headers=headers, timeout=5).content
                 )
-            return img
+                img = cv2.imdecode(
+                    np.frombuffer(buf.read(), np.uint8), cv2.IMREAD_COLOR
+                )
+                if img is None:
+                    raise dg.exceptions.DegirumException(
+                        f"Failed to decode image from '{image_input}'"
+                    )
+                return img
+            else:
+                # Load image from file path
+                img = cv2.imread(image_input)
+                if img is None:
+                    raise dg.exceptions.DegirumException(
+                        f"Could not load image from path: {image_input}"
+                    )
+                return img
 
         elif isinstance(image_input, np.ndarray):
             # Already a numpy array, just ensure it's in the right format
@@ -711,7 +756,9 @@ class AiGizmoBase(Gizmo):
 
             meta = result.info
             # If input was preprocessed bytes, attempt to attach original image for better visualization
-            if isinstance(result._input_image, bytes):
+            if isinstance(result._input_image, bytes) or isinstance(
+                result._input_image, memoryview
+            ):
                 preprocess_meta = meta.find_last(tag_preprocess)
                 if preprocess_meta:
                     # Restore original input image for result visualization
@@ -728,6 +775,10 @@ class AiGizmoBase(Gizmo):
                                     *converter(*box[:2]),
                                     *converter(*box[2:]),
                                 ]
+                            if "landmarks" in res:
+                                for m in res["landmarks"]:
+                                    m["landmark"][:2] = converter(*m["landmark"][:2])
+
             self.on_result(result)
             if self._abort:
                 break

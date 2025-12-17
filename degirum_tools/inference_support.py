@@ -43,14 +43,14 @@ Key Concepts
 Basic Usage Example
 -------------------
 ```python
-from degirum_tools import ModelSpec, remote_assets
-from degirum_tools.inference_support import (
+from degirum_tools import (
+    ModelSpec,
+    remote_assets,
     attach_analyzers,
     annotate_video,
     model_time_profile,
+    ResultAnalyzerBase,
 )
-from degirum_tools.result_analyzer_base import ResultAnalyzerBase
-
 
 # Define a simple analyzer that draws text on each frame
 class MyDummyAnalyzer(ResultAnalyzerBase):
@@ -113,46 +113,17 @@ from pathlib import Path
 from typing import Union, List, Optional, Iterator, Final
 from dataclasses import dataclass
 from .compound_models import CompoundModelBase
-from .video_support import (
+from .analyzers import ResultAnalyzerBase, subclass_result_with_analyzers
+from .tools import (
     open_video_stream,
     get_video_stream_properties,
     video_source,
     open_video_writer,
-    VideoCaptureGst
+    VideoCaptureGst,
+    VideoSourceType,
 )
-from .ui_support import Progress, Display, Timer
-from .result_analyzer_base import ResultAnalyzerBase, subclass_result_with_analyzers
-from . import environment as env
-from enum import Enum
-
-
-class VideoSourceType(Enum):
-    """Enumeration of supported video source types for inference."""
-    AUTO = "auto"           # Automatically detect best backend (OpenCV or GStreamer)
-    GSTREAMER = "gstream"   # Force GStreamer backend
-    OPENCV = "opencv"       # Force OpenCV backend
-
-    @classmethod
-    def from_string(cls, value: Union[str, 'VideoSourceType']) -> 'VideoSourceType':
-        """Convert string to enum, maintaining backward compatibility.
-        Args:
-            value: String value or VideoSourceType enum
-        Returns:
-            VideoSourceType enum value
-        Raises:
-            ValueError: If string value is not a valid VideoSourceType
-            TypeError: If value is not str or VideoSourceType
-        """
-        if isinstance(value, cls):
-            return value
-        if isinstance(value, str):
-            try:
-                return cls(value)
-            except ValueError:
-                valid_options = [e.value for e in cls]
-                raise ValueError(f"Invalid source_type: '{value}'. Valid options: {valid_options}")
-        raise TypeError(f"Expected str or VideoSourceType, got {type(value)}")
-
+from .tools.ui_support import Progress, Display, Timer
+from .tools import environment as env
 
 # Inference options: parameters for connect_model_zoo
 CloudInference = 1  # use DeGirum cloud server for inference
@@ -578,8 +549,12 @@ def model_time_profile(
     return ModelTimeProfile(
         elapsed=elapsed,
         iterations=iterations,
-        observed_fps=iterations / elapsed,
-        max_possible_fps=1e3 / stats["CoreInferenceDuration_ms"].avg,
+        observed_fps=iterations / elapsed if elapsed > 0 else 0.0,
+        max_possible_fps=(
+            1e3 / stats["CoreInferenceDuration_ms"].avg
+            if stats["CoreInferenceDuration_ms"].avg > 0
+            else 0.0
+        ),
         parameters=model.model_info,
         time_stats=stats,
     )

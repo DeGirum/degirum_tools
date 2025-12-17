@@ -7,7 +7,7 @@ import os
 import subprocess
 from pathlib import Path
 from typing import Tuple
-from . import logger_get
+from .. import logger_get
 
 
 def _run_command(cmd: list, timeout: int = 5, check_for_lingering_process: bool = False) -> Tuple[str, str, int]:

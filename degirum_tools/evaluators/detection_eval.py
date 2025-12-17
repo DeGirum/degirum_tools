@@ -10,9 +10,8 @@ from typing import List, Optional
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 from pycocotools.mask import encode
-from .math_support import xyxy2xywh
+from ..tools import xyxy2xywh, Progress, stdoutRedirector
 from .eval_support import ModelEvaluatorBase
-from .ui_support import Progress, stdoutRedirector
 
 
 class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
@@ -41,7 +40,7 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
         # path to save the predictions as a JSON file
         self.pred_path: Optional[str] = None
 
-        if model.output_postprocess_type not in [
+        allowed_model_types = [
             "Detection",
             "DetectionYolo",
             "DetectionYoloV8",
@@ -49,7 +48,12 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
             "DetectionYoloHailo",
             "PoseDetectionYoloV8",
             "SegmentationYoloV8",
-        ]:
+        ]
+
+        if (
+            model.output_postprocess_type not in allowed_model_types
+            and model.inference_results_type not in allowed_model_types
+        ):
             raise Exception("Model loaded for evaluation is not a Detection Model")
 
         self.is_segmentation_model: bool = model.output_postprocess_type in [

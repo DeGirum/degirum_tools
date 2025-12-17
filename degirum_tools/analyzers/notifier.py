@@ -16,7 +16,7 @@ It implements the `EventNotifier` analyzer for triggering notifications and opti
 
 Key Features:
     - Event-Based Triggers: Generates notifications when user-defined event conditions are met
-    - Message Formatting: Supports Python format strings for dynamic notification content
+    - Message Formatting: Supports `${expression}` fields for dynamic notification content
     - Holdoff Control: Configurable time/frame windows to suppress repeat notifications
     - Video Clip Saving: Optional video clip saving with local or cloud storage
     - Visual Overlay: Annotates active notification status on images
@@ -47,13 +47,13 @@ Configuration Options:
     - `show_overlay`: Enable/disable visual annotations
 
 Message Formatting:
-    - Use Python format strings in the `message` parameter to include dynamic content (e.g., `{time}` for the time the notification was sent)
+    - Use `${expression}` fields in the `message` parameter to include dynamic content (e.g., `${time}` for the time the notification was sent)
     - Use markdown formatting for rich text notifications (e.g. `**bold**`, `*italic*`, `[link](url)`)
-    - Supported placeholders include:
-        - `{result}`: The inference result
-        - `{time}`: The time the notification was sent
-        - `{url}`: The URL of the uploaded file
-        - `{filename}`: The name of the uploaded file
+    - Supported variables to use in `${expression}` fields include:
+        - `${result}`: The inference result
+        - `${time}`: The time the notification was sent
+        - `${url}`: The URL of the uploaded file
+        - `${filename}`: The name of the uploaded file
 
 Example:
     For local storage configuration:
@@ -66,17 +66,26 @@ Example:
     )
     ```
 """
-import numpy as np, sys, multiprocessing, threading, time, os, queue, tempfile, shutil, datetime
-from typing import Tuple, List, Union, Optional, Dict
+
+import numpy as np, sys, multiprocessing, threading, time, os, queue, tempfile, shutil, datetime, requests, re
+from typing import Any, Tuple, List, Union, Optional, Dict
 from contextvars import ContextVar
-from . import logger_get
+from .. import logger_get
 from .result_analyzer_base import ResultAnalyzerBase
-from .ui_support import put_text, color_complement, deduce_text_color, CornerPosition
-from .math_support import AnchorPoint, get_image_anchor_point
 from .event_detector import EventDetector
-from .environment import import_optional_package
-from .video_support import ClipSaver
-from .object_storage_support import ObjectStorageConfig, ObjectStorage
+from ..tools import (
+    put_text,
+    color_complement,
+    deduce_text_color,
+    CornerPosition,
+    AnchorPoint,
+    get_image_anchor_point,
+    import_optional_package,
+    ClipSaver,
+    ObjectStorageConfig,
+    ObjectStorage,
+    expression_substitute,
+)
 
 
 # special notification configuration for console output
@@ -102,10 +111,6 @@ class NotificationServer:
     Usage:
         Instantiate with the desired configuration, then send jobs using `send_job()`.
     """
-
-    class DefaultDict(dict):
-        def __missing__(self, key):
-            return f"{{{key}}}"  # Return the literal placeholder if key is missing
 
     class Job:
         """Encapsulates a notification job for the NotificationServer.
@@ -190,6 +195,7 @@ class NotificationServer:
                 storage_cfg,
                 pending_timeout_s,
             ),
+            daemon=True,
         )
         self._process.start()
 
@@ -207,7 +213,7 @@ class NotificationServer:
                 exc = self._response_queue.get_nowait()
                 if isinstance(exc, Exception):
                     logger.error(f"Notification error: {exc}")
-            except queue.Empty:
+            except Exception:
                 break
 
     def send_job(self, job_type, payload: str, dependent: Optional[int] = None):
@@ -266,7 +272,24 @@ class NotificationServer:
             return None
 
         def configure_notifications():
+
+            class WebhookNotifier:
+                def __init__(self, url: str) -> None:
+                    self.url = url
+
+                def notify(self, body: str, title: str, tag: Any) -> bool:
+                    try:
+                        requests.post(self.url, data=body)
+                    except Exception:
+                        return False
+                    return True
+
             if notification_cfg:
+
+                if re.match(r"https?://", notification_cfg):
+                    # configure general webhook notifier (instead of Apprise)
+                    return WebhookNotifier(notification_cfg)
+
                 try:
                     apprise = import_optional_package(
                         "apprise",
@@ -290,6 +313,8 @@ class NotificationServer:
                             raise ValueError(
                                 f"Invalid configuration URL: {notification_cfg}"
                             )
+
+                    apprise_obj.asset.body_format = apprise.NotifyFormat.MARKDOWN
                     return apprise_obj
                 except Exception as e:
                     response_queue.put(e)
@@ -339,7 +364,7 @@ class NotificationServer:
         def run_notification_job(job, params):
 
             message = job.payload
-            need_params = "{" in message and "}" in message
+            need_params = "${" in message
 
             if need_params and not params:
                 job.is_done = False  # no params available yet: job is not done
@@ -357,7 +382,7 @@ class NotificationServer:
 
                 # replace placeholders in the message
                 if need_params:
-                    message = message.format_map(NotificationServer.DefaultDict(params))
+                    message = expression_substitute(message, params)
 
                 if notification_config_console in notification_cfg:
                     print(
@@ -453,8 +478,16 @@ class NotificationServer:
             Exception: Any exception that occurs during response queue processing.
         """
         if self._process is not None:
-            self._job_queue.put(None)
-            self._process.join()
+            try:
+                self._job_queue.put_nowait(None)
+            except Exception:
+                pass
+
+            try:
+                self._process.join(3.0)
+            except Exception:
+                pass
+
             self._process = None
             self._process_response_queue()
 
@@ -470,7 +503,7 @@ class EventNotifier(ResultAnalyzerBase):
     Generates notifications when user-defined event conditions are met.
 
     Features:
-        * Message formatting using Python format strings (e.g., `{result}` for inference results)
+        * Message Formatting: supports `${expression}` fields for dynamic notification content.
         * Holdoff to suppress repeat notifications within a specified time/frame window
         * Optional video clip saving upon notification trigger with local or cloud storage
         * Records triggered notifications in the result object's `notifications` dictionary
@@ -485,6 +518,7 @@ class EventNotifier(ResultAnalyzerBase):
         condition: str,
         *,
         message: str = "",
+        notify_while_true: bool = False,
         holdoff: Union[Tuple[float, str], int, float] = 0,
         notification_config: Optional[str] = None,
         notification_tags: Optional[str] = None,
@@ -510,6 +544,7 @@ class EventNotifier(ResultAnalyzerBase):
             name (str): Name of the notification.
             condition (str): Python expression defining the condition to trigger the notification (references event names from `EventDetector`).
             message (str, optional): Notification message format string. If empty, uses "Notification triggered: {name}". Default is "".
+            notify_while_true (bool, optional): Whether to notify continuously while the condition is true. Default is False: notify only when condition changes from False to True.
             holdoff (int | float | Tuple[float, str], optional): Holdoff duration to suppress repeated notifications. If int, interpreted as frames; if float, as seconds; if tuple (value, "seconds"/"frames"), uses the specified unit. Default is 0 (no holdoff).
             notification_config (str, optional): Notification service config file path, Apprise URL, or "json://console" for stdout output. If None, notifications are not sent to any external service.
             notification_tags (str, optional): Tags to attach to notifications for filtering. Multiple tags can be separated by commas (for logical AND) or spaces (for logical OR).
@@ -529,6 +564,16 @@ class EventNotifier(ResultAnalyzerBase):
         Raises:
             ValueError: If holdoff unit is not "seconds" or "frames".
             ImportError: If required optional packages are not installed.
+
+        Message Formatting:
+            - Use `${expression}` fields in the `message` parameter to include dynamic content (e.g., `${time}` for the time the notification was sent)
+            - Use markdown formatting for rich text notifications (e.g. `**bold**`, `*italic*`, `[link](url)`)
+            - Supported variables to use in `${expression}` fields include:
+                - `${result}`: The inference result
+                - `${time}`: The time the notification was sent
+                - `${url}`: The URL of the uploaded file
+                - `${filename}`: The name of the uploaded file
+            - `re` and `json` modules are also available for advanced formatting
         """
 
         self._frame = 0
@@ -544,6 +589,7 @@ class EventNotifier(ResultAnalyzerBase):
 
         self._name = name
         self._message = message if message else f"Notification triggered: {name}"
+        self._notify_while_true = notify_while_true
         self._show_overlay = show_overlay
         self._annotation_color = annotation_color
         self._annotation_font_scale = annotation_font_scale
@@ -599,7 +645,7 @@ class EventNotifier(ResultAnalyzerBase):
                 notification_tags=notification_tags,
                 storage_cfg=self._storage_cfg if clip_save else None,
                 pending_timeout_s=(
-                    2 * clip_duration / clip_target_fps
+                    max(1.0, 2 * clip_duration / clip_target_fps)
                     if notification_timeout_s is None
                     else notification_timeout_s
                 ),
@@ -633,8 +679,10 @@ class EventNotifier(ResultAnalyzerBase):
         if not hasattr(result, self.key_notifications):
             result.notifications = {}
 
+        # fire when edge trigger is selected and condition is met for the first time
+        # OR level trigger is selected and condition is true
         fired = False
-        if cond and not self._prev_cond:  # condition is met for the first time
+        if cond and (self._notify_while_true or not self._prev_cond):
             # check for holdoff time
             if (
                 (self._holdoff_frames == 0 and self._holdoff_sec == 0)  # no holdoff
@@ -652,8 +700,8 @@ class EventNotifier(ResultAnalyzerBase):
         # send notification if event is fired
         notification_job_id: Optional[int] = None
         if fired:
-            message = self._message.format_map(
-                NotificationServer.DefaultDict(result=result, time=time.asctime())
+            message = expression_substitute(
+                self._message, {"result": result, "time": time.asctime()}
             )
             result.notifications[self._name] = message
 
