@@ -291,9 +291,7 @@ class _ZoneState:
         self._was_occupied: bool = False
         self._state_change_time: Optional[float] = None  # Track last transition time
 
-    def add_track(
-        self, track_id: int, label: str, timestamp: float
-    ) -> Tuple[bool, bool]:
+    def add_track(self, track_id: int, label: str, timestamp: float) -> bool:
         """Add or update a tracked object detected in the zone.
 
         Increments the hysteresis counter (capped at timeout_frames + 1).
@@ -305,9 +303,7 @@ class _ZoneState:
             timestamp: Current frame timestamp
 
         Returns:
-            Tuple of (entry_event, is_fresh_entry):
-                - entry_event: True if object just became established
-                - is_fresh_entry: True if this is a brand new track
+            True if object just became established (entry event)
         """
         max_count = self._timeout_frames + 1
 
@@ -326,13 +322,13 @@ class _ZoneState:
                 obj_state.is_established = True
                 obj_state.established_time = timestamp
                 obj_state.presence_count = 1  # First frame as established
-                return True, False  # Entry event
+                return True  # Entry event
 
             # Only increment presence_count if already established
             if obj_state.is_established:
                 obj_state.presence_count += 1
 
-            return False, False  # No entry event
+            return False  # No entry event
         else:
             # New object entering zone for the first time
             is_immediate = self._timeout_frames == 0
@@ -343,7 +339,7 @@ class _ZoneState:
                 established_time=timestamp if is_immediate else None,
                 is_established=is_immediate,  # Immediate if timeout_frames == 0
             )
-            return is_immediate, True
+            return is_immediate
 
     def decrement_counter(self, track_id: int) -> bool:
         """Decrement hysteresis counter for a track outside zone or missing.
@@ -822,7 +818,7 @@ class ZoneCounter(ResultAnalyzerBase):
         """Handle an object that is currently in the zone."""
         if self._use_tracking:
             tid = obj["track_id"]
-            entry_event, _ = state.add_track(
+            entry_event = state.add_track(
                 tid, obj.get("label", "unknown"), timestamp
             )
 
