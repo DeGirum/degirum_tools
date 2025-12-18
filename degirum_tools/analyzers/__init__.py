@@ -15,4 +15,4 @@ from .notifier import *
 from .object_selector import *
 from .object_tracker import *
 from .result_analyzer_base import *
-from .zone_count import *  # Exports ZoneCounter and NamedZoneCounter (alias)
+from .zone_count import *

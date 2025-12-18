@@ -1227,7 +1227,7 @@ class MockResult:
         self.overlay_font_scale = 0.5
 
 
-def test_timeout_frames_hysteresis():
+def test_zone_counter_timeout_frames_hysteresis():
     """Test timeout_frames parameter for symmetric hysteresis smoothing.
 
     With timeout_frames=2, objects need 3 consecutive in-zone detections to
@@ -1267,7 +1267,7 @@ def test_timeout_frames_hysteresis():
     assert len(result3.zone_events) == 2  # entry + occupied
 
 
-def test_multi_zone_tracking():
+def test_zone_counter_multi_zone_tracking():
     """Test tracking across multiple zones."""
     from degirum_tools.analyzers.zone_count import ZoneCounter
 
@@ -1298,7 +1298,7 @@ def test_multi_zone_tracking():
     assert result1.zone_counts["zone_C"]["total"] == 0
 
 
-def test_per_class_counting():
+def test_zone_counter_per_class_counting():
     """Test per-class display mode."""
     from degirum_tools.analyzers.zone_count import ZoneCounter
 
@@ -1329,7 +1329,7 @@ def test_per_class_counting():
     assert counts["bicycle"] == 0
 
 
-def test_zone_events():
+def test_zone_counter_zone_events():
     """Test zone event generation."""
     from degirum_tools.analyzers.zone_count import ZoneCounter
 
@@ -1374,7 +1374,7 @@ def test_zone_events():
     assert len(empty_events) == 1
 
 
-def test_hysteresis_established_brief_departure():
+def test_zone_counter_hysteresis_established_brief_departure():
     """Test that established objects maintain count during brief departures.
 
     With timeout_frames=2, once an object is established (counter=3), a brief
@@ -1419,7 +1419,7 @@ def test_hysteresis_established_brief_departure():
     assert len(entry_events) == 0  # No new entry event
 
 
-def test_hysteresis_departure_during_establishment():
+def test_zone_counter_hysteresis_departure_during_establishment():
     """Test that objects leaving before establishment lose their progress.
 
     With timeout_frames=2, if an object leaves before reaching counter=3,
@@ -1457,7 +1457,7 @@ def test_hysteresis_departure_during_establishment():
     assert result3.zone_counts["test_zone"]["total"] == 0  # Still not established
 
 
-def test_hysteresis_counter_saturation():
+def test_zone_counter_hysteresis_counter_saturation():
     """Test that the hysteresis counter doesn't exceed max value.
 
     Once established, staying in the zone shouldn't increase the counter
@@ -1497,7 +1497,7 @@ def test_hysteresis_counter_saturation():
     assert len(exit_events) == 1
 
 
-def test_immediate_mode_timeout_zero():
+def test_zone_counter_immediate_mode_timeout_zero():
     """Test timeout_frames=0 provides immediate entry/exit behavior.
 
     With timeout_frames=0, objects are counted immediately on first detection
@@ -1532,7 +1532,7 @@ def test_immediate_mode_timeout_zero():
     assert len(exit_events) == 1
 
 
-def test_parameter_validation():
+def test_zone_counter_parameter_validation():
     """
     Test parameter validation for ZoneCounter
     """
