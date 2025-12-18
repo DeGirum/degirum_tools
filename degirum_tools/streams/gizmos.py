@@ -88,7 +88,7 @@ class VideoSourceGizmo(Gizmo):
         stop_composition_on_end: bool = False,
         retry_on_error: bool = False,
         fps_override: Optional[float] = None,
-        resolution_override: Optional[Tuple[int,int]] = None,
+        resolution_override: Optional[Tuple[int,int]] = None
     ):
         """Constructor.
 
