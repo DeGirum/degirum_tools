@@ -291,10 +291,11 @@ class _ZoneState:
         self._was_occupied: bool = False
         self._state_change_time: Optional[float] = None  # Track last transition time
 
-    def add_track(self, track_id: int, label: str, timestamp: float) -> bool:
-        """Add or update a tracked object detected in the zone.
+    def add_or_update_track(self, track_id: int, label: str, timestamp: float) -> bool:
+        """Add a new track or update an existing track detected in the zone.
 
-        Increments the hysteresis counter (capped at timeout_frames + 1).
+        For new tracks, creates state and starts hysteresis counting.
+        For existing tracks, increments the hysteresis counter (capped at timeout_frames + 1).
         When counter reaches the threshold, object becomes established.
 
         Args:
@@ -818,7 +819,7 @@ class ZoneCounter(ResultAnalyzerBase):
         """Handle an object that is currently in the zone."""
         if self._use_tracking:
             tid = obj["track_id"]
-            entry_event = state.add_track(
+            entry_event = state.add_or_update_track(
                 tid, obj.get("label", "unknown"), timestamp
             )
 
