@@ -1228,5 +1228,3 @@ class ZoneCounter(ResultAnalyzerBase):
                     bg_color=bg_color,
                     font_scale=result.overlay_font_scale,
                 )
-
-
