@@ -231,7 +231,7 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
                     continue
                 box = xyxy2xywh(np.asarray(result["bbox"]).reshape(1, 4) * 1.0)  # xywh
                 box[:, :2] -= box[:, 2:] / 2  # xy center to top-left corner
-                box_list = box.reshape(-1).tolist()
+                box_list = box.reshape(-1).tolist()  # type: ignore
                 category_id = (
                     class_map[result["category_id"]]
                     if class_map
