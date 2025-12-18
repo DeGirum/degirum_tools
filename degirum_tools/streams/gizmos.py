@@ -88,7 +88,7 @@ class VideoSourceGizmo(Gizmo):
         stop_composition_on_end: bool = False,
         retry_on_error: bool = False,
         fps_override: Optional[float] = None,
-        resolution_override: Optional[Tuple[int,int]] = None
+        resolution_override: Optional[Tuple[int, int]] = None
     ):
         """Constructor.
 
@@ -102,7 +102,7 @@ class VideoSourceGizmo(Gizmo):
             stop_composition_on_end (bool): If True, stop the [Composition](streams_base.md#composition) when the video source is over. Defaults to False.
             retry_on_error (bool): If True, retry opening the video source on error after some time. Defaults to False.
             fps_override (float, optional): If provided, overrides the FPS value reported by source (some IP cameras report 100FPS). Defaults to None.
-            resolution_override (Tuple[int,int], optional): If provided, overrides the resolution (width, height) reported by source. Defaults to None.
+            resolution_override (Tuple[int, int], optional): If provided, overrides the resolution (width, height) reported by source. Defaults to None.
         """
         super().__init__()
         self._video_source = video_source
