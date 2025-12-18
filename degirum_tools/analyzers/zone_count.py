@@ -806,6 +806,7 @@ class ZoneCounter(ResultAnalyzerBase):
         """
         obj[self.key_in_zone][zone_index] = True
         obj[self.key_frames_in_zone][zone_index] = obj_state.presence_count
+        assert obj_state.established_time is not None
         obj[self.key_time_in_zone][zone_index] = timestamp - obj_state.established_time
 
     def _handle_object_in_zone(
@@ -895,6 +896,7 @@ class ZoneCounter(ResultAnalyzerBase):
         else:
             # Counter reached 0 - generate exit event if established, then remove
             if self._enable_zone_events and obj_state.is_established:
+                assert obj_state.established_time is not None
                 dwell_time = timestamp - obj_state.established_time
                 self._generate_event(
                     result,
