@@ -789,6 +789,25 @@ class ZoneCounter(ResultAnalyzerBase):
                 result, zone_index, zone_name, state, current_count, timestamp
             )
 
+    def _set_object_zone_attr(
+        self,
+        obj: dict,
+        zone_index: int,
+        obj_state: _ObjectState,
+        timestamp: float,
+    ):
+        """Set zone presence fields on an object.
+
+        Args:
+            obj: Object dictionary to update
+            zone_index: Index of the zone
+            obj_state: Current state of the object
+            timestamp: Current frame timestamp
+        """
+        obj[self.key_in_zone][zone_index] = True
+        obj[self.key_frames_in_zone][zone_index] = obj_state.presence_count
+        obj[self.key_time_in_zone][zone_index] = timestamp - obj_state.established_time
+
     def _handle_object_in_zone(
         self,
         result,
@@ -812,9 +831,7 @@ class ZoneCounter(ResultAnalyzerBase):
 
             # Only mark in_zone, update metrics, and count when established
             if obj_state.is_established:
-                obj[self.key_in_zone][zone_index] = True
-                obj[self.key_frames_in_zone][zone_index] = obj_state.presence_count
-                obj[self.key_time_in_zone][zone_index] = timestamp - obj_state.established_time
+                self._set_object_zone_attr(obj, zone_index, obj_state, timestamp)
                 zone_counts["total"] += 1
                 if self._per_class_display and obj.get("label"):
                     zone_counts[obj["label"]] += 1
@@ -838,7 +855,7 @@ class ZoneCounter(ResultAnalyzerBase):
             if self._per_class_display and obj.get("label"):
                 zone_counts[obj["label"]] += 1
 
-    def _process_outside_zone(
+    def _update_zone_state_for_absence(
         self,
         result,
         zone_index: int,
@@ -849,10 +866,10 @@ class ZoneCounter(ResultAnalyzerBase):
         zone_counts: dict,
         timestamp: float,
     ) -> bool:
-        """Process an object that is outside zone or missing (hysteresis decrement).
+        """Update zone state when an object is absent (outside zone or missing).
 
-        Decrements the hysteresis counter, counts if still valid and established,
-        generates exit event and removes track if counter reaches 0.
+        Decrements the hysteresis counter, updates zone counts if still valid and
+        established, generates exit event and removes track if counter reaches 0.
 
         Args:
             result: Inference result for event generation
@@ -914,17 +931,13 @@ class ZoneCounter(ResultAnalyzerBase):
         obj_state = state.get_state(tid)
 
         if obj_state is not None:
-            still_valid = self._process_outside_zone(
+            still_valid = self._update_zone_state_for_absence(
                 result, zone_index, zone_name, tid, obj_state, state, zone_counts, timestamp
             )
 
             # Only set per-object fields if still valid AND established
             if still_valid and obj_state.is_established:
-                obj[self.key_in_zone][zone_index] = True
-                obj[self.key_frames_in_zone][zone_index] = obj_state.presence_count
-                obj[self.key_time_in_zone][zone_index] = (
-                    timestamp - obj_state.established_time
-                )
+                self._set_object_zone_attr(obj, zone_index, obj_state, timestamp)
 
     def _handle_missing_detections(
         self,
@@ -947,7 +960,7 @@ class ZoneCounter(ResultAnalyzerBase):
                 # Defensive check - should never happen since tid came from state.get_tracked_ids()
                 continue
 
-            self._process_outside_zone(
+            self._update_zone_state_for_absence(
                 result, zone_index, zone_name, tid, obj_state, state, zone_counts, timestamp
             )
 
