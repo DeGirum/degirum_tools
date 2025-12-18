@@ -1221,3 +1221,152 @@ def test_streams_require_tags_and_check_requirements():
     with pytest.raises(Exception) as excinfo3:
         streams.Composition(src5 >> two_in5[0])
     assert "unmet tag requirements" in str(excinfo3.value)
+
+
+def test_automatic_timing_metadata():
+    """Test that all gizmos automatically add timing metadata via base send_result()"""
+
+    # Create a simple pipeline: Source -> Passthrough -> Sink
+    class SimpleSourceGizmo(streams.Gizmo):
+        def __init__(self, frame_count=5):
+            super().__init__()
+            self.frame_count = frame_count
+
+        def run(self):
+            for i in range(self.frame_count):
+                if self._abort:
+                    break
+                # Create simple data
+                data = streams.StreamData(f"frame_{i}", streams.StreamMeta())
+                self.send_result(data)
+                time.sleep(0.01)  # Small delay to ensure different timestamps
+
+    class PassthroughGizmo(streams.Gizmo):
+        def __init__(self):
+            super().__init__([(10, False)])
+
+        def run(self):
+            for data in self.get_input(0):
+                if self._abort:
+                    break
+                # Pass through, which will add another timing entry
+                self.send_result(data)
+
+    source = SimpleSourceGizmo(frame_count=3)
+    passthrough = PassthroughGizmo()
+    sink = streams.SinkGizmo()
+
+    source >> passthrough >> sink
+
+    with streams.Composition(sink):
+        results = []
+        for data in sink():
+            results.append(data)
+            if len(results) >= 3:
+                break
+
+    # Verify we got results
+    assert len(results) == 3
+
+    # Check each result has timing metadata
+    for idx, result in enumerate(results):
+        timing_data = result.meta.find(streams.tag_timing)
+
+        # Should have timing entries from 2 gizmos (SinkGizmo doesn't call send_result)
+        assert (
+            len(timing_data) == 2
+        ), f"Frame {idx}: Expected 2 timing entries, got {len(timing_data)}"
+
+        # Verify structure of timing entries
+        gizmo_names = [t[streams.Gizmo.key_gizmo] for t in timing_data]
+        assert "SimpleSourceGizmo" in gizmo_names
+        assert "PassthroughGizmo" in gizmo_names
+
+        # Verify all timestamps are present and monotonically increasing
+        timestamps = [t[streams.Gizmo.key_timestamp] for t in timing_data]
+        assert all(isinstance(ts, float) for ts in timestamps)
+        assert timestamps == sorted(
+            timestamps
+        ), f"Frame {idx}: Timestamps not monotonically increasing"
+
+        # Verify timestamps are reasonable (within last few seconds)
+        for ts in timestamps:
+            assert (
+                abs(time.time() - ts) < 5.0
+            ), f"Frame {idx}: Timestamp too old or in future"
+
+
+def test_timing_metadata_tag():
+    """Test that tag_timing constant is properly defined and exported"""
+    assert hasattr(streams, "tag_timing")
+    assert streams.tag_timing == "dgt_timing"
+
+
+def test_timing_metadata_structure():
+    """Test the structure of timing metadata entries"""
+
+    class TestGizmo(streams.Gizmo):
+        def __init__(self):
+            super().__init__()
+
+        def run(self):
+            data = streams.StreamData("test", streams.StreamMeta())
+            self.send_result(data)
+
+    gizmo = TestGizmo()
+    sink = streams.SinkGizmo()
+
+    gizmo >> sink
+
+    with streams.Composition(sink):
+        for data in sink():
+            timing_entries = data.meta.find(streams.tag_timing)
+
+            # Should have exactly 1 entry (TestGizmo only, SinkGizmo doesn't call send_result)
+            assert len(timing_entries) == 1
+
+            # Each entry should have 'gizmo' and 'timestamp' keys
+            for entry in timing_entries:
+                assert streams.Gizmo.key_gizmo in entry
+                assert streams.Gizmo.key_timestamp in entry
+                assert isinstance(entry[streams.Gizmo.key_gizmo], str)
+                assert isinstance(entry[streams.Gizmo.key_timestamp], float)
+
+            break
+
+
+def test_get_timing_info_helper():
+    """Test the StreamData.get_timing_info() helper method"""
+
+    class TestGizmo(streams.Gizmo):
+        def __init__(self):
+            super().__init__()
+
+        def run(self):
+            data = streams.StreamData("test", streams.StreamMeta())
+            self.send_result(data)
+
+    gizmo = TestGizmo()
+    sink = streams.SinkGizmo()
+
+    gizmo >> sink
+
+    with streams.Composition(sink):
+        for data in sink():
+            # Use the standalone function to get timing info
+            timing_info = streams.get_timing_info(data)
+
+            # Should return a list of (gizmo_name, timestamp) tuples
+            assert isinstance(timing_info, list)
+            assert len(timing_info) == 1
+
+            # Verify structure
+            gizmo_name, timestamp = timing_info[0]
+            assert isinstance(gizmo_name, str)
+            assert isinstance(timestamp, float)
+            assert gizmo_name == "TestGizmo"
+
+            # Verify timestamp is recent
+            assert abs(time.time() - timestamp) < 5.0
+
+            break
