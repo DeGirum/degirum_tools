@@ -309,10 +309,11 @@ def predict_stream(
     if analyzers is not None:
         attach_analyzers(model, analyzers)
 
-    # Convert source_type to enum
+    # Convert source_type to enum and determine backend
     source_type_enum = VideoSourceType.from_string(source_type)
+    use_gstreamer = (source_type_enum == VideoSourceType.GSTREAMER)
 
-    with open_video_stream(video_source_id, source_type=source_type_enum) as stream:
+    with open_video_stream(video_source_id, use_gstreamer=use_gstreamer) as stream:
         for res in model.predict_batch(video_source(stream, fps=fps)):
             yield res
 
@@ -397,13 +398,14 @@ def annotate_video(
         if visual_display:
             display = stack.enter_context(Display(win_name))
 
-        # Convert source_type to enum
+        # Convert source_type to enum and determine backend
         source_type_enum = VideoSourceType.from_string(source_type)
+        use_gstreamer = (source_type_enum == VideoSourceType.GSTREAMER)
 
         if isinstance(video_source_id, cv2.VideoCapture):
             stream: Union[cv2.VideoCapture, VideoCaptureGst] = video_source_id
         else:
-            stream = stack.enter_context(open_video_stream(video_source_id, source_type=source_type_enum))
+            stream = stack.enter_context(open_video_stream(video_source_id, use_gstreamer=use_gstreamer))
 
         w, h, video_fps = get_video_stream_properties(stream)
 
