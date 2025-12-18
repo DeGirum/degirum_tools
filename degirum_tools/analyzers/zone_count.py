@@ -40,8 +40,7 @@ Typical Usage:
             "exit_area": exit_polygon,
         },
         use_tracking=True,
-        timeout_frames=5,
-        entry_delay_frames=3,
+        timeout_frames=3,  # Hysteresis threshold
         enable_zone_events=True,
     )
 
@@ -59,8 +58,8 @@ Typical Usage:
 Zone Events:
     When `enable_zone_events=True`, the analyzer generates four types of events:
 
-    - **zone_entry**: Track becomes established in zone (after entry_delay_frames consecutive detections)
-    - **zone_exit**: Track exits zone (after timeout_frames consecutive missing detections)
+    - **zone_entry**: Track becomes established in zone (after timeout_frames + 1 consecutive in-zone detections)
+    - **zone_exit**: Track exits zone (hysteresis counter reaches 0)
     - **zone_occupied**: Zone transitions from empty to occupied (when first track becomes established)
     - **zone_empty**: Zone transitions from occupied to empty (after all tracks exit)
 
@@ -88,22 +87,24 @@ Configuration Options:
     - `zones`: Dictionary mapping zone names to polygons
     - `class_list`: Optional list of class labels to count
     - `triggering_position`: Anchor point or IoPA-based triggering
-    - `timeout_frames`: Grace period for flickering/occlusion (exit smoothing)
-    - `entry_delay_frames`: Consecutive frames required to establish presence (entry smoothing)
+    - `timeout_frames`: Hysteresis threshold for symmetric entry/exit smoothing
     - `enable_zone_events`: Generate zone-level events
     - `show_overlay`: Visual annotations
     - `per_class_display`: Show per-class counts
 
-Smoothing Parameters:
-    The analyzer provides symmetric smoothing for both entries and exits:
+Hysteresis Smoothing:
+    The analyzer uses symmetric hysteresis for stable zone presence detection:
 
-    - **timeout_frames** (exit smoothing): Objects must be absent for N consecutive frames
-      before triggering exit events. Prevents false exits from brief occlusions or
-      flickering detections. Default: 0 (exit on first missing frame). Requires `use_tracking=True` if > 0.
+    - **timeout_frames**: Controls the hysteresis threshold. Objects need `timeout_frames + 1`
+      consecutive in-zone detections to become "established" (counted). The internal counter
+      increments when in zone, decrements when outside or missing, and is clamped to
+      [0, timeout_frames + 1]. Objects exit when the counter reaches 0.
 
-    - **entry_delay_frames** (entry smoothing): Objects must be detected for N consecutive
-      frames before triggering entry events. Prevents false entries from spurious or
-      transient detections. Default: 1 (count on first detection). Requires `use_tracking=True` if > 1.
+    - **Symmetric behavior**: The same threshold applies for both entry and exit, providing
+      smooth transitions without flickering. Brief departures don't reset the counter,
+      and brief appearances don't immediately establish presence.
+
+    - **Default**: 0 (immediate entry/exit on first detection). Requires `use_tracking=True` if > 0.
 """
 
 import numpy as np
@@ -133,19 +134,20 @@ class _ObjectState:
     """Tracks the state of an object within a zone.
 
     Attributes:
-        exit_delay_count: Frames remaining before object is considered exited
-        entry_delay_count: Frames accumulated to establish presence (for entry smoothing)
+        accum_in_zone_count: Hysteresis counter for zone presence.
+            Increments when object is in zone, decrements when outside/missing.
+            Range: [0, timeout_frames + 1]. Object becomes established when
+            counter reaches timeout_frames + 1, exits when counter reaches 0.
         object_label: Class label of the tracked object
-        presence_count: Number of frames object has been in the zone
-        entering_time: Timestamp when object first entered the zone
-        is_established: Whether object presence is confirmed (entry delay threshold met)
+        presence_count: Number of frames object has been established in zone
+        established_time: Timestamp when object became established
+        is_established: Whether object presence is confirmed (hysteresis threshold met)
     """
 
-    exit_delay_count: int
-    entry_delay_count: int
+    accum_in_zone_count: int
     object_label: str
     presence_count: int
-    entering_time: float
+    established_time: Optional[float] = None
     is_established: bool = False
 
 
@@ -263,23 +265,28 @@ class _ZoneGeometry:
 class _ZoneState:
     """Manages temporal state for a single zone.
 
-    This class tracks object presence over time, handles timeouts for flickering,
+    This class tracks object presence over time using symmetric hysteresis,
     and maintains zone-level occupancy state for event generation.
+
+    The hysteresis counter (accum_in_zone_count) increments when an object is
+    detected in the zone and decrements when outside or missing. Objects become
+    "established" when the counter reaches timeout_frames + 1, and exit when
+    the counter reaches 0.
 
     Attributes:
         object_states: Dictionary mapping track_id to _ObjectState
         was_occupied: Previous frame's occupancy state
     """
 
-    def __init__(self, timeout_frames: int, entry_delay_frames: int):
+    def __init__(self, timeout_frames: int):
         """Initialize zone state.
 
         Args:
-            timeout_frames: Number of frames to tolerate absence before exit
-            entry_delay_frames: Number of frames required to establish presence
+            timeout_frames: Hysteresis threshold. Objects need timeout_frames + 1
+                consecutive in-zone detections to become established, and
+                timeout_frames + 1 consecutive out-of-zone/missing detections to exit.
         """
         self._timeout_frames = timeout_frames
-        self._entry_delay_frames = entry_delay_frames
         self._object_states: Dict[int, _ObjectState] = {}
         self._was_occupied: bool = False
         self._state_change_time: Optional[float] = None  # Track last transition time
@@ -287,7 +294,10 @@ class _ZoneState:
     def add_track(
         self, track_id: int, label: str, timestamp: float
     ) -> Tuple[bool, bool]:
-        """Add or update a tracked object in the zone.
+        """Add or update a tracked object detected in the zone.
+
+        Increments the hysteresis counter (capped at timeout_frames + 1).
+        When counter reaches the threshold, object becomes established.
 
         Args:
             track_id: Unique object identifier
@@ -296,72 +306,64 @@ class _ZoneState:
 
         Returns:
             Tuple of (entry_event, is_fresh_entry):
-                - entry_event: True if object just became established (entry delay threshold met)
-                - is_fresh_entry: True if this is a brand new track (not a re-entry)
+                - entry_event: True if object just became established
+                - is_fresh_entry: True if this is a brand new track
         """
+        max_count = self._timeout_frames + 1
+
         if track_id in self._object_states:
-            # Object already tracked
+            # Existing tracked object - increment hysteresis counter
             obj_state = self._object_states[track_id]
+            obj_state.accum_in_zone_count = min(
+                obj_state.accum_in_zone_count + 1, max_count
+            )
 
-            # Check if this is a re-entry (object was in timeout/exit period)
-            is_reentry = obj_state.exit_delay_count < self._timeout_frames
+            # Check if object just became established
+            if (
+                not obj_state.is_established
+                and obj_state.accum_in_zone_count == max_count
+            ):
+                obj_state.is_established = True
+                obj_state.established_time = timestamp
+                obj_state.presence_count = 1  # First frame as established
+                return True, False  # Entry event
 
-            # Reset exit delay
-            obj_state.exit_delay_count = self._timeout_frames
-
-            if is_reentry:
-                # Object left and came back - reset presence tracking
-                obj_state.presence_count = 1
-                obj_state.entering_time = timestamp
-                obj_state.entry_delay_count = 1
-                obj_state.is_established = self._entry_delay_frames == 1
-                return (
-                    self._entry_delay_frames == 1
-                ), False  # Entry event if immediate
-            else:
-                # Continuous presence - increment counter
+            # Only increment presence_count if already established
+            if obj_state.is_established:
                 obj_state.presence_count += 1
 
-                # Check if object just became established
-                if not obj_state.is_established:
-                    obj_state.entry_delay_count += 1
-                    if obj_state.entry_delay_count >= self._entry_delay_frames:
-                        obj_state.is_established = True
-                        return True, False  # Entry event when entry delay threshold met
-
-                return False, False  # No entry event for already-established tracks
+            return False, False  # No entry event
         else:
             # New object entering zone for the first time
+            is_immediate = self._timeout_frames == 0
             self._object_states[track_id] = _ObjectState(
-                exit_delay_count=self._timeout_frames,
-                entry_delay_count=1,  # Start counting entry delay
+                accum_in_zone_count=1,
                 object_label=label,
-                presence_count=1,
-                entering_time=timestamp,
-                is_established=(
-                    self._entry_delay_frames == 1
-                ),  # Immediately established if threshold is exactly 1 (immediate counting)
+                presence_count=1 if is_immediate else 0,
+                established_time=timestamp if is_immediate else None,
+                is_established=is_immediate,  # Immediate if timeout_frames == 0
             )
-            # Generate entry event only if immediately established
-            return (self._entry_delay_frames == 1), True
+            return is_immediate, True
 
-    def update_exit_delay(self, track_id: int) -> bool:
-        """Decrement exit delay for a track not currently detected.
+    def decrement_counter(self, track_id: int) -> bool:
+        """Decrement hysteresis counter for a track outside zone or missing.
 
         Args:
             track_id: Track ID to update
 
         Returns:
-            True if track is still valid, False if exit delay expired
+            True if track is still valid (counter > 0), False if counter reached 0
         """
         if track_id not in self._object_states:
             return False
 
         obj_state = self._object_states[track_id]
-        obj_state.presence_count += 1
-        obj_state.exit_delay_count -= 1
+        # Only increment presence_count if established (tracks frames while established)
+        if obj_state.is_established:
+            obj_state.presence_count += 1
+        obj_state.accum_in_zone_count -= 1
 
-        return obj_state.exit_delay_count >= 0
+        return obj_state.accum_in_zone_count > 0
 
     def remove_track(self, track_id: int) -> Optional[_ObjectState]:
         """Remove a track from the zone.
@@ -396,10 +398,10 @@ class _ZoneState:
             track_id: Track ID to check
 
         Returns:
-            True if exit delay has expired (ready for exit)
+            True if hysteresis counter has reached 0 (ready for exit)
         """
         obj_state = self._object_states.get(track_id)
-        return obj_state is not None and obj_state.exit_delay_count == 0
+        return obj_state is not None and obj_state.accum_in_zone_count == 0
 
     def update_occupancy(
         self, current_count: int, timestamp: float
@@ -442,7 +444,8 @@ class ZoneCounter(ResultAnalyzerBase):
 
     This analyzer integrates with PySDK inference results to determine whether detected or
     tracked objects lie within user-defined polygon zones. It supports per-class counting,
-    object tracking with separate entry/exit delays, zone events, and interactive editing.
+    object tracking with symmetric hysteresis (timeout_frames) for entry/exit smoothing,
+    zone events, and interactive editing.
 
     Backward compatible with old ZoneCounter API (list of zones) while supporting new
     dict-based named zones interface.
@@ -475,7 +478,6 @@ class ZoneCounter(ResultAnalyzerBase):
         iopa_threshold: Union[float, List[float]] = 0.0,
         use_tracking: bool = False,
         timeout_frames: int = 0,
-        entry_delay_frames: int = 1,
         enable_zone_events: bool = False,
         window_name: Optional[str] = None,
         show_overlay: bool = True,
@@ -493,8 +495,10 @@ class ZoneCounter(ResultAnalyzerBase):
             bounding_box_scale: Scale factor for bboxes (greater than 0, up to 1)
             iopa_threshold: IoPA threshold (single value or list per zone)
             use_tracking: Enable object tracking
-            timeout_frames: Number of consecutive missing frames tolerated before object exits zone (requires tracking if > 0)
-            entry_delay_frames: Number of consecutive frames required to establish object presence before entry (requires tracking if > 1)
+            timeout_frames: Hysteresis threshold for zone presence (requires tracking if > 0).
+                Objects need timeout_frames + 1 consecutive in-zone detections to become
+                established (counted), and the counter decrements when outside/missing.
+                Objects exit when counter reaches 0.
             enable_zone_events: Generate zone-level events (requires tracking)
             window_name: OpenCV window name for interactive polygon editing (None = disabled)
             show_overlay: Draw zone overlays
@@ -563,15 +567,8 @@ class ZoneCounter(ResultAnalyzerBase):
             raise ValueError("timeout_frames must be a non-negative integer (>= 0)")
         self._timeout_frames = timeout_frames
 
-        # Validate entry_delay_frames
-        if not isinstance(entry_delay_frames, int) or entry_delay_frames < 1:
-            raise ValueError("entry_delay_frames must be a positive integer (>= 1)")
-        self._entry_delay_frames = entry_delay_frames
-
         if self._timeout_frames > 0 and not self._use_tracking:
             raise ValueError("timeout_frames > 0 requires use_tracking=True")
-        if self._entry_delay_frames > 1 and not self._use_tracking:
-            raise ValueError("entry_delay_frames > 1 requires use_tracking=True")
 
         self._enable_zone_events = enable_zone_events
         if self._enable_zone_events and not self._use_tracking:
@@ -635,7 +632,7 @@ class ZoneCounter(ResultAnalyzerBase):
                 for name in self._zone_names
             }
 
-        if self._enable_zone_events:
+        if self._enable_zone_events and not hasattr(result, "zone_events"):
             result.zone_events = []
 
         # Lazy initialization
@@ -686,8 +683,7 @@ class ZoneCounter(ResultAnalyzerBase):
 
             # Create state components
             self._states = [
-                _ZoneState(self._timeout_frames, self._entry_delay_frames)
-                for _ in self._zone_names
+                _ZoneState(self._timeout_frames) for _ in self._zone_names
             ]
 
             # Install mouse callback for interactive editing if window_name specified
@@ -697,8 +693,11 @@ class ZoneCounter(ResultAnalyzerBase):
     def _filter_objects(self, result) -> List[dict]:
         """Filter objects based on class list and tracking requirements.
 
-        Returns only fresh detections - no synthetic objects from stale trails.
-        Missing tracked objects are handled via exit_delay_frames in zone state.
+        Returns objects from `result.results` which have bounding boxes, match `class_list`,
+        and (when tracking is enabled) provide a `track_id`.
+
+        Missing tracked objects are handled via the hysteresis counter in zone state
+        rather than by synthesizing detections in `result.results`.
         """
 
         def in_class_list(label):
@@ -801,12 +800,9 @@ class ZoneCounter(ResultAnalyzerBase):
         timestamp: float,
     ):
         """Handle an object that is currently in the zone."""
-        # Mark object as in zone
-        obj[self.key_in_zone][zone_index] = True
-
         if self._use_tracking:
             tid = obj["track_id"]
-            entry_event, is_fresh = state.add_track(
+            entry_event, _ = state.add_track(
                 tid, obj.get("label", "unknown"), timestamp
             )
 
@@ -814,8 +810,11 @@ class ZoneCounter(ResultAnalyzerBase):
             obj_state = state.get_state(tid)
             assert obj_state is not None  # Type guard for mypy
 
-            # Count all established objects (zone_counts resets each frame)
+            # Only mark in_zone, update metrics, and count when established
             if obj_state.is_established:
+                obj[self.key_in_zone][zone_index] = True
+                obj[self.key_frames_in_zone][zone_index] = obj_state.presence_count
+                obj[self.key_time_in_zone][zone_index] = timestamp - obj_state.established_time
                 zone_counts["total"] += 1
                 if self._per_class_display and obj.get("label"):
                     zone_counts[obj["label"]] += 1
@@ -832,16 +831,67 @@ class ZoneCounter(ResultAnalyzerBase):
                     timestamp,
                     None,  # No dwell_time for entry
                 )
-
-            # Update time-in-zone metrics
-            assert obj_state is not None  # Type guard for mypy
-            obj[self.key_frames_in_zone][zone_index] = obj_state.presence_count
-            obj[self.key_time_in_zone][zone_index] = timestamp - obj_state.entering_time
         else:
             # Non-tracking mode: count all objects immediately
+            obj[self.key_in_zone][zone_index] = True
             zone_counts["total"] += 1
             if self._per_class_display and obj.get("label"):
                 zone_counts[obj["label"]] += 1
+
+    def _process_outside_zone(
+        self,
+        result,
+        zone_index: int,
+        zone_name: str,
+        tid: int,
+        obj_state: _ObjectState,
+        state: _ZoneState,
+        zone_counts: dict,
+        timestamp: float,
+    ) -> bool:
+        """Process an object that is outside zone or missing (hysteresis decrement).
+
+        Decrements the hysteresis counter, counts if still valid and established,
+        generates exit event and removes track if counter reaches 0.
+
+        Args:
+            result: Inference result for event generation
+            zone_index: Index of the zone
+            zone_name: Name of the zone
+            tid: Track ID of the object
+            obj_state: Current state of the object
+            state: Zone state manager
+            zone_counts: Dictionary to update counts
+            timestamp: Current frame timestamp
+
+        Returns:
+            True if track is still valid (counter > 0), False if removed
+        """
+        still_valid = state.decrement_counter(tid)
+
+        if still_valid:
+            # Counter > 0, still tracked - count if established
+            if obj_state.is_established:
+                zone_counts["total"] += 1
+                if self._per_class_display and obj_state.object_label:
+                    zone_counts[obj_state.object_label] += 1
+        else:
+            # Counter reached 0 - generate exit event if established, then remove
+            if self._enable_zone_events and obj_state.is_established:
+                dwell_time = timestamp - obj_state.established_time
+                self._generate_event(
+                    result,
+                    "zone_exit",
+                    zone_index,
+                    zone_name,
+                    tid,
+                    obj_state.object_label,
+                    timestamp,
+                    dwell_time,
+                )
+            state.remove_track(tid)
+
+        return still_valid
 
     def _handle_detected_outside_zone(
         self,
@@ -853,64 +903,28 @@ class ZoneCounter(ResultAnalyzerBase):
         zone_counts: dict,
         timestamp: float,
     ):
-        """Handle fresh detection outside zone (Case 2: grace period).
+        """Handle fresh detection outside zone (hysteresis decrement).
 
-        Object detected this frame but bbox doesn't trigger zone geometry.
-        If it was previously in zone, apply grace period (timeout).
+        Object is detected this frame but its bbox does not trigger the zone geometry.
+        If it was previously tracked in this zone, decrement the hysteresis counter.
+        While the counter remains > 0, the object is still considered "in zone" for
+        counting/event purposes (even if it is currently outside the polygon).
         """
         tid = obj["track_id"]
         obj_state = state.get_state(tid)
 
         if obj_state is not None:
-            # Object was previously in zone - check if grace period configured
-            if self._timeout_frames > 0:
-                # Apply grace period
-                still_valid = state.update_exit_delay(tid)
+            still_valid = self._process_outside_zone(
+                result, zone_index, zone_name, tid, obj_state, state, zone_counts, timestamp
+            )
 
-                if still_valid:
-                    # Still within timeout - mark as in-zone
-                    obj[self.key_in_zone][zone_index] = True
-
-                    # Only count if established
-                    if obj_state.is_established:
-                        zone_counts["total"] += 1
-                        if self._per_class_display and obj_state.object_label:
-                            zone_counts[obj_state.object_label] += 1
-
-                    obj[self.key_frames_in_zone][zone_index] = obj_state.presence_count
-                    obj[self.key_time_in_zone][zone_index] = (
-                        timestamp - obj_state.entering_time
-                    )
-                else:
-                    # Timeout expired - generate exit event
-                    if self._enable_zone_events and obj_state.is_established:
-                        dwell_time = timestamp - obj_state.entering_time
-                        self._generate_event(
-                            result,
-                            "zone_exit",
-                            zone_index,
-                            zone_name,
-                            tid,
-                            obj_state.object_label,
-                            timestamp,
-                            dwell_time,
-                        )
-                    state.remove_track(tid)
-            else:
-                # No timeout configured - immediate exit
-                if self._enable_zone_events and obj_state.is_established:
-                    dwell_time = timestamp - obj_state.entering_time
-                    self._generate_event(
-                        result,
-                        "zone_exit",
-                        zone_index,
-                        zone_name,
-                        tid,
-                        obj_state.object_label,
-                        timestamp,
-                        dwell_time,
-                    )
-                state.remove_track(tid)
+            # Only set per-object fields if still valid AND established
+            if still_valid and obj_state.is_established:
+                obj[self.key_in_zone][zone_index] = True
+                obj[self.key_frames_in_zone][zone_index] = obj_state.presence_count
+                obj[self.key_time_in_zone][zone_index] = (
+                    timestamp - obj_state.established_time
+                )
 
     def _handle_missing_detections(
         self,
@@ -922,10 +936,10 @@ class ZoneCounter(ResultAnalyzerBase):
         missing_tids: set,
         timestamp: float,
     ):
-        """Handle missing detections (Case 3: tracked but not detected).
+        """Handle missing detections (hysteresis decrement).
 
         These tracks are in zone state but have no detection this frame.
-        They could be temporarily occluded or truly exited.
+        Treated as outside zone - decrement hysteresis counter.
         """
         for tid in missing_tids:
             obj_state = state.get_state(tid)
@@ -933,46 +947,9 @@ class ZoneCounter(ResultAnalyzerBase):
                 # Defensive check - should never happen since tid came from state.get_tracked_ids()
                 continue
 
-            if self._timeout_frames > 0:
-                # Apply grace period - count missing objects during timeout
-                still_valid = state.update_exit_delay(tid)
-
-                if still_valid:
-                    # Still in grace period - count established objects
-                    if obj_state.is_established:
-                        zone_counts["total"] += 1
-                        if self._per_class_display and obj_state.object_label:
-                            zone_counts[obj_state.object_label] += 1
-                else:
-                    # Timeout expired - exit event
-                    if self._enable_zone_events and obj_state.is_established:
-                        dwell_time = timestamp - obj_state.entering_time
-                        self._generate_event(
-                            result,
-                            "zone_exit",
-                            zone_index,
-                            zone_name,
-                            tid,
-                            obj_state.object_label,
-                            timestamp,
-                            dwell_time,
-                        )
-                    state.remove_track(tid)
-            else:
-                # No timeout configured - immediate exit
-                if self._enable_zone_events and obj_state.is_established:
-                    dwell_time = timestamp - obj_state.entering_time
-                    self._generate_event(
-                        result,
-                        "zone_exit",
-                        zone_index,
-                        zone_name,
-                        tid,
-                        obj_state.object_label,
-                        timestamp,
-                        dwell_time,
-                    )
-                state.remove_track(tid)
+            self._process_outside_zone(
+                result, zone_index, zone_name, tid, obj_state, state, zone_counts, timestamp
+            )
 
     def _generate_occupancy_events(
         self,
