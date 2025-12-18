@@ -1065,13 +1065,17 @@ class ZoneCounter(ResultAnalyzerBase):
                     self._gui_state["update"] = idx
                     break
         if event == cv2.EVENT_RBUTTONDOWN:
+            found = False
             for idx, polygon in enumerate(self._zone_polygons):
                 for pt in polygon:
                     if np.linalg.norm(pt - click_point) < 10:
                         self._gui_state["dragging"] = pt
                         self._gui_state["offset"] = click_point
                         self._gui_state["update"] = idx
+                        found = True
                         break
+                if found:
+                    break
         elif event == cv2.EVENT_MOUSEMOVE:
             if self._gui_state.get("dragging") is not None:
                 delta = click_point - self._gui_state["offset"]
