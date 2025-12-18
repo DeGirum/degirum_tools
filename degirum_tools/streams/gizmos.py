@@ -11,7 +11,7 @@ import io, queue, copy, time, cv2, numpy as np
 from urllib.parse import urlparse
 import degirum as dg
 from abc import abstractmethod
-from typing import Iterator, Optional, List, Union
+from typing import Iterator, Optional, List, Union, Tuple
 from contextlib import ExitStack
 
 import requests
@@ -88,6 +88,7 @@ class VideoSourceGizmo(Gizmo):
         stop_composition_on_end: bool = False,
         retry_on_error: bool = False,
         fps_override: Optional[float] = None,
+        resolution_override: Optional[Tuple[int,int]] = None,
     ):
         """Constructor.
 
@@ -101,6 +102,7 @@ class VideoSourceGizmo(Gizmo):
             stop_composition_on_end (bool): If True, stop the [Composition](streams_base.md#composition) when the video source is over. Defaults to False.
             retry_on_error (bool): If True, retry opening the video source on error after some time. Defaults to False.
             fps_override (float, optional): If provided, overrides the FPS value reported by source (some IP cameras report 100FPS). Defaults to None.
+            resolution_override (Tuple[int,int], optional): If provided, overrides the resolution (width, height) reported by source. Defaults to None.
         """
         super().__init__()
         self._video_source = video_source
@@ -108,6 +110,7 @@ class VideoSourceGizmo(Gizmo):
         self._stop_composition_on_end = stop_composition_on_end and not get_test_mode()
         self._retry_on_error = retry_on_error
         self._fps_override = fps_override
+        self._resolution_override = resolution_override
         self._stream: Optional[Union[cv2.VideoCapture, VideoCaptureGst]] = None
 
     def get_video_properties(self) -> tuple:
@@ -124,6 +127,11 @@ class VideoSourceGizmo(Gizmo):
             if self._fps_override is not None:
                 # set FPS if override is provided
                 self._stream.set(cv2.CAP_PROP_FPS, self._fps_override)
+            if self._resolution_override is not None:
+                # set resolution if override is provided
+                w, h = self._resolution_override
+                self._stream.set(cv2.CAP_PROP_FRAME_WIDTH, w)
+                self._stream.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
 
     def _close_video_source(self):
         """Open the video source if it is not opened."""
