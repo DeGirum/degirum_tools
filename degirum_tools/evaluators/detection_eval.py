@@ -30,6 +30,8 @@ class ObjectDetectionModelEvaluator(ModelEvaluatorBase):
                 show_progress (bool): show progress bar
                 classmap (dict): dictionary which maps model category IDs to dataset category IDs
                 pred_path (str): path to save the predictions as a JSON file of None if not required
+                kpt_sigmas (Collection, optional): sigma values for each keypoint. If not provided,
+                    default COCO sigmas will be used.
         """
 
         #
