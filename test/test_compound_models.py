@@ -17,11 +17,13 @@ def test_compound_model_properties(zoo_dir, detection_model, classification_mode
         detection_model, classification_model
     )
 
-    assert model._master_model == detection_model
+    assert model.model1 == detection_model
+    assert model.model2 == classification_model
+    master_model = model.model1
 
     all_props = {
         k
-        for cls in model._master_model.__class__.__mro__
+        for cls in master_model.__class__.__mro__
         for k, v in cls.__dict__.items()
         if isinstance(v, property) and not k.startswith("__")
     }
@@ -29,20 +31,20 @@ def test_compound_model_properties(zoo_dir, detection_model, classification_mode
     # check that all properties can be read from the compound model
     # and they are equal to the master model
     for prop in all_props:
-        master_value = getattr(model._master_model, prop)
+        master_value = getattr(master_model, prop)
         compound_value = getattr(model, prop)
         if not isinstance(master_value, dg.aiclient.ModelParams):
             assert master_value == compound_value
 
     # check few properties that they can be set in the compound model
-    assert not model._master_model.measure_time
+    assert not master_model.measure_time
     model.measure_time = True
-    assert model._master_model.measure_time
+    assert master_model.measure_time
     assert not classification_model.measure_time
 
-    assert model._master_model.input_pad_method == "letterbox"
+    assert master_model.input_pad_method == "letterbox"
     model.input_pad_method = "stretch"
-    assert model._master_model.input_pad_method == "stretch"
+    assert master_model.input_pad_method == "stretch"
     assert classification_model.input_pad_method == "letterbox"
 
 
@@ -97,9 +99,8 @@ def test_compound_model_cropping(
             assert dr["score"] != cr["score"]
             assert dr["category_id"] != cr["category_id"]
 
-    tiler = degirum_tools.RegionExtractionPseudoModel(
-        [[0, 0, 640, 720], [640, 0, 1280, 720]], detection_model
-    )
+    tiles = [[0, 0, 640, 720], [640, 0, 1280, 720]]
+    tiler = degirum_tools.RegionExtractionPseudoModel(tiles, detection_model)
     model2 = degirum_tools.CroppingAndDetectingCompoundModel(tiler, detection_model)
 
     with degirum_tools.open_video_stream(short_video) as stream:
@@ -111,3 +112,33 @@ def test_compound_model_cropping(
     for d, c in zip(detection_results, compound_results2):
         assert len(d.results) <= len(c.results)
         assert all(cr["label"] == "Car" for cr in c.results)
+        assert all("crop_index" not in cr for cr in c.results)
+
+    model2a = degirum_tools.CroppingAndDetectingCompoundModel(
+        tiler, detection_model, add_model1_results=True
+    )
+
+    with degirum_tools.open_video_stream(short_video) as stream:
+        compound_results2a = list(
+            model2a.predict_batch(degirum_tools.video_source(stream))
+        )
+
+    def is_rect_inside(inner, outer):
+        """
+        Returns True if the rectangle 'inner' is fully inside rectangle 'outer'.
+        Rectangles are [x1, y1, x2, y2].
+        """
+        return (
+            inner[0] >= outer[0]
+            and inner[1] >= outer[1]
+            and inner[2] <= outer[2]
+            and inner[3] <= outer[3]
+        )
+
+    for d, c in zip(detection_results, compound_results2a):
+        assert all("crop_index" in cr for cr in c.results if cr["label"] == "Car")
+        assert all(
+            is_rect_inside(cr["bbox"], c.results[cr["crop_index"]]["bbox"])
+            for cr in c.results
+            if cr["label"] == "Car"
+        )

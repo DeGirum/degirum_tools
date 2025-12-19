@@ -1,2 +1,2 @@
 include requirements.txt
-graft degirum_tools/assets
+recursive-include degirum_tools *.ico

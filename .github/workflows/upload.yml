@@ -14,7 +14,7 @@ jobs:
   release:
     name: Upload
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       - name: Check tag
         if: ${{ inputs.release_tag == '' }}

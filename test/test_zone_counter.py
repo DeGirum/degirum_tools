@@ -495,7 +495,10 @@ def test_zone_counter():
                             "frames_in_zone": [0, 0],
                         },
                     ],
-                    [{"total": 1}, {"total": 0}],
+                    [
+                        {"total": 0},
+                        {"total": 0},
+                    ],  # Object 0 missing, immediately deleted (timeout_frames=0)
                 ],
                 [
                     [
@@ -504,7 +507,10 @@ def test_zone_counter():
                             "label": "label1",
                             "track_id": 0,
                             "in_zone": [True, False],
-                            "frames_in_zone": [3, 0],
+                            "frames_in_zone": [
+                                1,
+                                0,
+                            ],  # Track re-created, starts fresh at 1
                         },
                         {
                             "bbox": box_2_zone_1,
@@ -645,12 +651,12 @@ def test_zone_counter():
             ],
         },
         {
-            "case": "One trigger, object exits and re-enters zone within timeout period",
+            "case": "One trigger, object exits and re-enters zone (immediate mode)",
             "params": {
                 "count_polygons": zones,
                 "triggering_position": AnchorPoint.TOP_RIGHT,
                 "use_tracking": True,
-                "timeout_frames": 1,
+                "timeout_frames": 0,  # Immediate entry/exit
             },
             "inp": [
                 [
@@ -757,8 +763,8 @@ def test_zone_counter():
                             "bbox": box_1_zone_1_shifted,
                             "label": "label1",
                             "track_id": 0,
-                            "in_zone": [True, False],
-                            "frames_in_zone": [2, 0],
+                            "in_zone": [False, False],  # Outside zone, immediately removed with timeout_frames=0
+                            "frames_in_zone": [0, 0],
                         },
                         {
                             "bbox": box_2_zone_1,
@@ -775,7 +781,7 @@ def test_zone_counter():
                             "frames_in_zone": [0, 0],
                         },
                     ],
-                    [{"total": 1}, {"total": 0}],
+                    [{"total": 0}, {"total": 0}],  # Object outside zone, not counted
                 ],
                 [
                     [
@@ -783,7 +789,7 @@ def test_zone_counter():
                             "bbox": box_1_zone_1,
                             "label": "label1",
                             "track_id": 0,
-                            "in_zone": [True, False],
+                            "in_zone": [True, False],  # Re-entered, new track starts fresh
                             "frames_in_zone": [1, 0],
                         },
                         {
@@ -806,12 +812,12 @@ def test_zone_counter():
             ],
         },
         {
-            "case": "One trigger, object exits and re-enters the zone late",
+            "case": "One trigger, object exits and re-enters the zone (immediate mode)",
             "params": {
                 "count_polygons": zones,
                 "triggering_position": AnchorPoint.TOP_RIGHT,
                 "use_tracking": True,
-                "timeout_frames": 1,
+                "timeout_frames": 0,  # Immediate entry/exit
             },
             "inp": [
                 [
@@ -952,8 +958,8 @@ def test_zone_counter():
                             "bbox": box_1_zone_1_shifted,
                             "label": "label1",
                             "track_id": 0,
-                            "in_zone": [True, False],
-                            "frames_in_zone": [2, 0],
+                            "in_zone": [False, False],  # Outside zone, immediately removed with timeout_frames=0
+                            "frames_in_zone": [0, 0],
                         },
                         {
                             "bbox": box_2_zone_1,
@@ -970,7 +976,7 @@ def test_zone_counter():
                             "frames_in_zone": [0, 0],
                         },
                     ],
-                    [{"total": 1}, {"total": 0}],
+                    [{"total": 0}, {"total": 0}],  # Object outside zone, not counted
                 ],
                 [
                     [
@@ -978,7 +984,7 @@ def test_zone_counter():
                             "bbox": box_1_zone_1_shifted,
                             "label": "label1",
                             "track_id": 0,
-                            "in_zone": [False, False],
+                            "in_zone": [False, False],  # Still outside zone
                             "frames_in_zone": [0, 0],
                         },
                         {
@@ -1026,6 +1032,138 @@ def test_zone_counter():
                 ],
             ],
         },
+        # ----------------------------------------------------------------
+        # IoPA threshold list tests
+        # ----------------------------------------------------------------
+        {
+            "case": "IoPA list - different thresholds per zone",
+            "params": {
+                "count_polygons": zones,
+                "triggering_position": None,
+                "iopa_threshold": [0.1, 0.5],  # Different thresholds for each zone
+                "use_tracking": False,
+            },
+            "inp": [
+                [
+                    {
+                        "bbox": box_1_zone_1,
+                        "label": "label1",
+                    },  # Small overlap with zone 1
+                    {
+                        "bbox": box_2_zone_1,
+                        "label": "label2",
+                    },  # Larger overlap with zone 1
+                    {"bbox": box_1_zone_2, "label": "label3"},  # Overlap with zone 2
+                ]
+            ],
+            "res": [
+                [
+                    [
+                        {
+                            "bbox": box_1_zone_1,
+                            "label": "label1",
+                            "in_zone": [
+                                False,
+                                False,
+                            ],  # Low IoPA with zone 1, doesn't meet 0.1 threshold
+                        },
+                        {
+                            "bbox": box_2_zone_1,
+                            "label": "label2",
+                            "in_zone": [
+                                True,
+                                False,
+                            ],  # Good IoPA with zone 1, meets 0.1 threshold
+                        },
+                        {
+                            "bbox": box_1_zone_2,
+                            "label": "label3",
+                            "in_zone": [
+                                False,
+                                True,
+                            ],  # IoPA with zone 2 meets 0.5 threshold
+                        },
+                    ],
+                    [{"total": 1}, {"total": 1}],
+                ]
+            ],
+        },
+        {
+            "case": "IoPA list - scalar vs list equivalence",
+            "params": {
+                "count_polygons": zones,
+                "triggering_position": None,
+                "iopa_threshold": [0.2, 0.2],  # Same threshold for both zones
+                "use_tracking": False,
+            },
+            "inp": [
+                [
+                    {"bbox": box_1_zone_1, "label": "label1"},
+                    {"bbox": box_2_zone_1, "label": "label2"},
+                    {"bbox": box_1_zone_2, "label": "label3"},
+                ]
+            ],
+            "res": [
+                [
+                    [
+                        {
+                            "bbox": box_1_zone_1,
+                            "label": "label1",
+                            "in_zone": [False, False],
+                        },
+                        {
+                            "bbox": box_2_zone_1,
+                            "label": "label2",
+                            "in_zone": [True, False],
+                        },
+                        {
+                            "bbox": box_1_zone_2,
+                            "label": "label3",
+                            "in_zone": [False, True],
+                        },
+                    ],
+                    [{"total": 1}, {"total": 1}],
+                ]
+            ],
+        },
+        {
+            "case": "IoPA list - very strict thresholds",
+            "params": {
+                "count_polygons": zones,
+                "triggering_position": None,
+                "iopa_threshold": [0.8, 0.9],  # Very high thresholds
+                "use_tracking": False,
+            },
+            "inp": [
+                [
+                    {"bbox": box_1_zone_1, "label": "label1"},
+                    {"bbox": box_2_zone_1, "label": "label2"},
+                    {"bbox": box_1_zone_2, "label": "label3"},
+                ]
+            ],
+            "res": [
+                [
+                    [
+                        {
+                            "bbox": box_1_zone_1,
+                            "label": "label1",
+                            "in_zone": [False, False],  # Doesn't meet high threshold
+                        },
+                        {
+                            "bbox": box_2_zone_1,
+                            "label": "label2",
+                            "in_zone": [False, False],  # Doesn't meet high threshold
+                        },
+                        {
+                            "bbox": box_1_zone_2,
+                            "label": "label3",
+                            "in_zone": [False, False],  # Doesn't meet high threshold
+                        },
+                    ],
+                    [{"total": 0}, {"total": 0}],
+                ]
+            ],
+        },
     ]
 
     keys_to_ignore = ["time_in_zone"]
@@ -1043,7 +1181,6 @@ def test_zone_counter():
         for i, input in enumerate(case["inp"]):
             inference_results = input[0] if case["params"]["use_tracking"] else input
             result = dg.postprocessor.InferenceResults(
-                model_params=None,
                 input_image=np.zeros((200, 200)),
                 inference_results=inference_results,
                 conversion=None,
@@ -1067,3 +1204,378 @@ def test_zone_counter():
                 + f"do not match expected `{case['res'][i][1]}`."
                 + f"\nConfig: {case['params']}"
             )
+
+
+def test_zone_counter_new_features():
+    """
+    Consolidated test for new ZoneCounter features.
+    Contains multiple test cases for hysteresis, multi-zone tracking,
+    per-class counting, zone events, and parameter validation.
+    """
+    import degirum_tools
+    import pytest
+    from degirum_tools.analyzers.zone_count import ZoneCounter
+
+    class MockResult:
+        """Mock inference result for testing."""
+
+        def __init__(self, detections, frame_number=0):
+            self.results = detections
+            self.image = np.zeros((480, 640, 3), dtype=np.uint8)
+            self.image_overlay = self.image.copy()
+            self.inference_results = {"frame_number": frame_number}
+            self.zone_counts = {}  # Will be replaced by ZoneCounter with list or dict
+            self.zone_events = []
+            # Attributes for annotate() method
+            self.overlay_color = (255, 0, 0)  # Red
+            self.overlay_line_width = 2
+            self.overlay_font_scale = 0.5
+
+    def test_timeout_frames_hysteresis():
+        """Test timeout_frames parameter for symmetric hysteresis smoothing.
+
+        With timeout_frames=2, objects need 3 consecutive in-zone detections to
+        become established (counted), and 3 consecutive out-of-zone/missing
+        detections to exit.
+        """
+        zone_polygon = np.array([[100, 100], [300, 100], [300, 300], [100, 300]])
+        counter = ZoneCounter(
+            zones={"test_zone": zone_polygon},
+            use_tracking=True,
+            timeout_frames=2,  # Need 3 consecutive detections to establish
+            enable_zone_events=True,
+        )
+
+        # Frame 1: Object enters - counter=1, not established yet
+        result1 = MockResult(
+            [{"bbox": [150, 150, 200, 200], "track_id": 1, "label": "person"}], 1
+        )
+        counter.analyze(result1)
+        assert result1.zone_counts["test_zone"]["total"] == 0
+
+        # Frame 2: Still in zone - counter=2, not established yet
+        result2 = MockResult(
+            [{"bbox": [150, 150, 200, 200], "track_id": 1, "label": "person"}], 2
+        )
+        counter.analyze(result2)
+        assert result2.zone_counts["test_zone"]["total"] == 0
+
+        # Frame 3: Still in zone - counter=3, now established
+        result3 = MockResult(
+            [{"bbox": [150, 150, 200, 200], "track_id": 1, "label": "person"}], 3
+        )
+        counter.analyze(result3)
+        assert result3.zone_counts["test_zone"]["total"] == 1
+        assert len(result3.zone_events) == 2  # entry + occupied
+
+    def test_multi_zone_tracking():
+        """Test tracking across multiple zones."""
+        zones = {
+            "zone_A": np.array([[50, 50], [200, 50], [200, 200], [50, 200]]),
+            "zone_B": np.array([[250, 50], [400, 50], [400, 200], [250, 200]]),
+            "zone_C": np.array([[150, 250], [300, 250], [300, 400], [150, 400]]),
+        }
+
+        counter = ZoneCounter(
+            zones=zones,
+            use_tracking=True,
+            timeout_frames=0,  # Immediate entry/exit
+            enable_zone_events=True,
+        )
+
+        # Frame 1: Object in zone_A, another in zone_B
+        result1 = MockResult(
+            [
+                {"bbox": [75, 75, 125, 125], "track_id": 1, "label": "person"},
+                {"bbox": [275, 75, 325, 125], "track_id": 2, "label": "car"},
+            ],
+            1,
+        )
+        counter.analyze(result1)
+        assert result1.zone_counts["zone_A"]["total"] == 1
+        assert result1.zone_counts["zone_B"]["total"] == 1
+        assert result1.zone_counts["zone_C"]["total"] == 0
+
+    def test_per_class_counting():
+        """Test per-class display mode."""
+        zone_polygon = np.array([[100, 100], [300, 100], [300, 300], [100, 300]])
+        counter = ZoneCounter(
+            zones={"test_zone": zone_polygon},
+            class_list=["person", "car", "bicycle"],
+            per_class_display=True,
+            use_tracking=True,
+            timeout_frames=0,  # Immediate entry
+        )
+
+        # Frame 1: Mixed objects
+        result = MockResult(
+            [
+                {"bbox": [120, 120, 170, 170], "track_id": 1, "label": "person"},
+                {"bbox": [180, 180, 230, 230], "track_id": 2, "label": "person"},
+                {"bbox": [240, 240, 290, 290], "track_id": 3, "label": "car"},
+            ],
+            1,
+        )
+        counter.analyze(result)
+
+        counts = result.zone_counts["test_zone"]
+        assert counts["total"] == 3
+        assert counts["person"] == 2
+        assert counts["car"] == 1
+        assert counts["bicycle"] == 0
+
+    def test_zone_events():
+        """Test zone event generation."""
+        zone_polygon = np.array([[100, 100], [300, 100], [300, 300], [100, 300]])
+        counter = ZoneCounter(
+            zones={"test_zone": zone_polygon},
+            use_tracking=True,
+            timeout_frames=1,  # Need 2 consecutive detections to establish, 2 to exit
+            enable_zone_events=True,
+        )
+
+        # Frame 1: Object enters - counter=1, not established yet
+        result1 = MockResult(
+            [{"bbox": [150, 150, 200, 200], "track_id": 1, "label": "person"}], 1
+        )
+        counter.analyze(result1)
+        assert len(result1.zone_events) == 0  # Not established yet
+
+        # Frame 2: Object still in zone - counter=2, now established
+        result2 = MockResult(
+            [{"bbox": [150, 150, 200, 200], "track_id": 1, "label": "person"}], 2
+        )
+        counter.analyze(result2)
+        entry_events = [
+            e for e in result2.zone_events if e["event_type"] == "zone_entry"
+        ]
+        occupied_events = [
+            e for e in result2.zone_events if e["event_type"] == "zone_occupied"
+        ]
+        assert len(entry_events) == 1
+        assert len(occupied_events) == 1
+
+        # Frame 3: Object missing - counter decrements to 1 (still valid)
+        result3 = MockResult([], 3)
+        counter.analyze(result3)
+        assert len(result3.zone_events) == 0  # Still within hysteresis
+
+        # Frame 4: Object still missing - counter reaches 0, exit
+        result4 = MockResult([], 4)
+        counter.analyze(result4)
+        exit_events = [e for e in result4.zone_events if e["event_type"] == "zone_exit"]
+        empty_events = [
+            e for e in result4.zone_events if e["event_type"] == "zone_empty"
+        ]
+        assert len(exit_events) == 1
+        assert len(empty_events) == 1
+
+    def test_hysteresis_established_brief_departure():
+        """Test that established objects maintain count during brief departures.
+
+        With timeout_frames=2, once an object is established (counter=3), a brief
+        departure decrements the counter but the object remains counted until
+        counter reaches 0.
+        """
+        zone_polygon = np.array([[100, 100], [300, 100], [300, 300], [100, 300]])
+        counter = ZoneCounter(
+            zones={"test_zone": zone_polygon},
+            use_tracking=True,
+            timeout_frames=2,  # Need 3 consecutive detections to establish
+            enable_zone_events=True,
+        )
+
+        # Frames 1-3: Object enters and becomes established
+        for frame in range(1, 4):
+            result = MockResult(
+                [{"bbox": [150, 150, 200, 200], "track_id": 1, "label": "person"}],
+                frame,
+            )
+            counter.analyze(result)
+
+        assert result.zone_counts["test_zone"]["total"] == 1  # Established on frame 3
+
+        # Frame 4: Object briefly leaves zone (outside polygon)
+        result4 = MockResult(
+            [{"bbox": [350, 350, 400, 400], "track_id": 1, "label": "person"}], 4
+        )
+        counter.analyze(result4)
+        # Counter decrements to 2, still counted
+        assert result4.zone_counts["test_zone"]["total"] == 1
+
+        # Frame 5: Object returns to zone
+        result5 = MockResult(
+            [{"bbox": [150, 150, 200, 200], "track_id": 1, "label": "person"}], 5
+        )
+        counter.analyze(result5)
+        # Counter increments back to 3, still counted, no new entry event
+        assert result5.zone_counts["test_zone"]["total"] == 1
+        entry_events = [
+            e for e in result5.zone_events if e["event_type"] == "zone_entry"
+        ]
+        assert len(entry_events) == 0  # No new entry event
+
+    def test_hysteresis_departure_during_establishment():
+        """Test that objects leaving before establishment lose their progress.
+
+        With timeout_frames=2, if an object leaves before reaching counter=3,
+        the counter decrements and eventually the track is removed.
+        """
+        zone_polygon = np.array([[100, 100], [300, 100], [300, 300], [100, 300]])
+        counter = ZoneCounter(
+            zones={"test_zone": zone_polygon},
+            use_tracking=True,
+            timeout_frames=2,  # Need 3 consecutive detections to establish
+            enable_zone_events=True,
+        )
+
+        # Frame 1: Object enters - counter=1, not established
+        result1 = MockResult(
+            [{"bbox": [150, 150, 200, 200], "track_id": 1, "label": "person"}], 1
+        )
+        counter.analyze(result1)
+        assert result1.zone_counts["test_zone"]["total"] == 0  # Not established
+
+        # Frame 2: Object leaves zone - counter decrements to 0, track removed
+        result2 = MockResult(
+            [{"bbox": [350, 350, 400, 400], "track_id": 1, "label": "person"}], 2
+        )
+        counter.analyze(result2)
+        assert result2.zone_counts["test_zone"]["total"] == 0
+
+        # Frame 3: Object returns - starts fresh, counter=1
+        result3 = MockResult(
+            [{"bbox": [150, 150, 200, 200], "track_id": 1, "label": "person"}], 3
+        )
+        counter.analyze(result3)
+        assert result3.zone_counts["test_zone"]["total"] == 0  # Still not established
+
+    def test_hysteresis_counter_saturation():
+        """Test that the hysteresis counter doesn't exceed max value.
+
+        Once established, staying in the zone shouldn't increase the counter
+        beyond timeout_frames + 1. This ensures consistent exit behavior.
+        """
+        zone_polygon = np.array([[100, 100], [300, 100], [300, 300], [100, 300]])
+        counter = ZoneCounter(
+            zones={"test_zone": zone_polygon},
+            use_tracking=True,
+            timeout_frames=1,  # Need 2 consecutive detections, max counter=2
+            enable_zone_events=True,
+        )
+
+        # Frames 1-5: Object stays in zone for 5 frames
+        for frame in range(1, 6):
+            result = MockResult(
+                [{"bbox": [150, 150, 200, 200], "track_id": 1, "label": "person"}],
+                frame,
+            )
+            counter.analyze(result)
+
+        # Object established on frame 2, stays established
+        assert result.zone_counts["test_zone"]["total"] == 1
+
+        # Frame 6-7: Object leaves for 2 frames - should exit (counter: 2->1->0)
+        result6 = MockResult([], 6)
+        counter.analyze(result6)
+        assert result6.zone_counts["test_zone"]["total"] == 1  # Counter=1, still valid
+
+        result7 = MockResult([], 7)
+        counter.analyze(result7)
+        assert result7.zone_counts["test_zone"]["total"] == 0  # Counter=0, exited
+
+        # Verify exit event was generated
+        exit_events = [e for e in result7.zone_events if e["event_type"] == "zone_exit"]
+        assert len(exit_events) == 1
+
+    def test_immediate_mode_timeout_zero():
+        """Test timeout_frames=0 provides immediate entry/exit behavior.
+
+        With timeout_frames=0, objects are counted immediately on first detection
+        and removed immediately when they leave or go missing.
+        """
+        zone_polygon = np.array([[100, 100], [300, 100], [300, 300], [100, 300]])
+        counter = ZoneCounter(
+            zones={"test_zone": zone_polygon},
+            use_tracking=True,
+            timeout_frames=0,  # Immediate mode
+            enable_zone_events=True,
+        )
+
+        # Frame 1: Object enters - immediately counted
+        result1 = MockResult(
+            [{"bbox": [150, 150, 200, 200], "track_id": 1, "label": "person"}], 1
+        )
+        counter.analyze(result1)
+        assert result1.zone_counts["test_zone"]["total"] == 1
+        entry_events = [
+            e for e in result1.zone_events if e["event_type"] == "zone_entry"
+        ]
+        assert len(entry_events) == 1
+
+        # Frame 2: Object leaves - immediately removed
+        result2 = MockResult(
+            [{"bbox": [350, 350, 400, 400], "track_id": 1, "label": "person"}], 2
+        )
+        counter.analyze(result2)
+        assert result2.zone_counts["test_zone"]["total"] == 0
+        exit_events = [e for e in result2.zone_events if e["event_type"] == "zone_exit"]
+        assert len(exit_events) == 1
+
+    def test_parameter_validation():
+        """Test parameter validation for ZoneCounter."""
+        zone = np.array([[10, 10], [90, 10], [90, 90], [10, 90]])
+
+        # Test valid parameters (should not raise)
+        degirum_tools.ZoneCounter(
+            count_polygons=[zone],
+            timeout_frames=0,
+            use_tracking=True,
+        )
+
+        degirum_tools.ZoneCounter(
+            count_polygons=[zone],
+            timeout_frames=10,
+            use_tracking=True,
+        )
+
+        # Test invalid timeout_frames (negative)
+        with pytest.raises(
+            ValueError, match="timeout_frames must be a non-negative integer"
+        ):
+            degirum_tools.ZoneCounter(
+                count_polygons=[zone],
+                timeout_frames=-1,
+                use_tracking=True,
+            )
+
+        # Test invalid timeout_frames (float)
+        with pytest.raises(
+            ValueError, match="timeout_frames must be a non-negative integer"
+        ):
+            degirum_tools.ZoneCounter(
+                count_polygons=[zone],
+                timeout_frames=1.5,  # type: ignore[arg-type]
+                use_tracking=True,
+            )
+
+        # Test timeout_frames > 0 requires use_tracking=True
+        with pytest.raises(
+            ValueError, match="timeout_frames > 0 requires use_tracking=True"
+        ):
+            degirum_tools.ZoneCounter(
+                count_polygons=[zone],
+                timeout_frames=1,
+                use_tracking=False,
+            )
+
+    # Run all test cases
+    test_timeout_frames_hysteresis()
+    test_multi_zone_tracking()
+    test_per_class_counting()
+    test_zone_events()
+    test_hysteresis_established_brief_departure()
+    test_hysteresis_departure_during_establishment()
+    test_hysteresis_counter_saturation()
+    test_immediate_mode_timeout_zero()
+    test_parameter_validation()

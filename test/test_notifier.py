@@ -9,15 +9,46 @@
 
 from typing import List
 import pytest
+import socketserver
+import http.server
+import threading
+import re
+import degirum_tools, degirum as dg
+import numpy as np
 
 
-def test_notifier(s3_credentials, msteams_test_workflow_url):
+class WebhookHandler(http.server.BaseHTTPRequestHandler):
+    """HTTP request handler for webhook notifications."""
+
+    received_notifications: list = []
+
+    def do_POST(self):
+        if self.path == "/webhook":
+            try:
+                content_length = int(self.headers["Content-Length"])
+                post_data = self.rfile.read(content_length)
+                notification_data = post_data.decode("utf-8")
+                WebhookHandler.received_notifications.append(notification_data)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"status": "ok"}')
+            except Exception as e:
+                self.send_response(400)
+                self.end_headers()
+                self.wfile.write(f'{{"error": "{str(e)}"}}'.encode())
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def log_message(self, format, *args):
+        pass  # Suppress server logging
+
+
+def _run_notifier_tests(s3_credentials, webhook_url):
     """
-    Test for EventNotifier analyzer
+    Run the actual notifier tests with the webhook URL.
     """
-
-    import degirum_tools, degirum as dg
-    import numpy as np
 
     test_cases: List[dict] = [
         # ----------------------------------------------------------------
@@ -65,7 +96,7 @@ def test_notifier(s3_credentials, msteams_test_workflow_url):
             "params": {
                 "name": "test",
                 "condition": "myevent",
-                "message": "{result.events_detected}",
+                "message": "${result.events_detected}",
             },
             "inp": [{"events_detected": {"myevent"}}],
             "res": [{"test": "{'myevent'}"}],
@@ -75,6 +106,89 @@ def test_notifier(s3_credentials, msteams_test_workflow_url):
             "params": {"name": "test", "condition": "a and b and not c"},
             "inp": [{"events_detected": {"a", "b"}}],
             "res": [{"test": "Notification triggered: test"}],
+        },
+        # ----------------------------------------------------------------
+        # notify_while_true tests
+        # ----------------------------------------------------------------
+        # edge trigger (default): notify only on first True
+        {
+            "params": {
+                "name": "test",
+                "condition": "a",
+                "message": "OK",
+                "notify_while_true": False,
+            },
+            "inp": [
+                {"events_detected": {}},
+                {"events_detected": {"a"}},
+                {"events_detected": {"a"}},
+                {"events_detected": {"a"}},
+                {"events_detected": {}},
+                {"events_detected": {"a"}},
+                {"events_detected": {"a"}},
+            ],
+            "res": [{}, {"test": "OK"}, {}, {}, {}, {"test": "OK"}, {}],
+        },
+        # level trigger: notify on every True
+        {
+            "params": {
+                "name": "test",
+                "condition": "a",
+                "message": "OK",
+                "notify_while_true": True,
+            },
+            "inp": [
+                {"events_detected": {}},
+                {"events_detected": {"a"}},
+                {"events_detected": {"a"}},
+                {"events_detected": {"a"}},
+                {"events_detected": {}},
+                {"events_detected": {"a"}},
+                {"events_detected": {"a"}},
+            ],
+            "res": [
+                {},
+                {"test": "OK"},
+                {"test": "OK"},
+                {"test": "OK"},
+                {},
+                {"test": "OK"},
+                {"test": "OK"},
+            ],
+        },
+        # edge trigger with complex condition
+        {
+            "params": {
+                "name": "test",
+                "condition": "a and b",
+                "message": "OK",
+                "notify_while_true": False,
+            },
+            "inp": [
+                {"events_detected": {"a"}},
+                {"events_detected": {"a", "b"}},
+                {"events_detected": {"a", "b"}},
+                {"events_detected": {"a"}},
+                {"events_detected": {"a", "b"}},
+            ],
+            "res": [{}, {"test": "OK"}, {}, {}, {"test": "OK"}],
+        },
+        # level trigger with complex condition
+        {
+            "params": {
+                "name": "test",
+                "condition": "a and b",
+                "message": "OK",
+                "notify_while_true": True,
+            },
+            "inp": [
+                {"events_detected": {"a"}},
+                {"events_detected": {"a", "b"}},
+                {"events_detected": {"a", "b"}},
+                {"events_detected": {"a"}},
+                {"events_detected": {"a", "b"}},
+            ],
+            "res": [{}, {"test": "OK"}, {"test": "OK"}, {}, {"test": "OK"}],
         },
         # ----------------------------------------------------------------
         # Holdoff tests
@@ -163,6 +277,40 @@ def test_notifier(s3_credentials, msteams_test_workflow_url):
             ],
             "res": [{}, {"test": "OK"}, {}, {}, {}, {}, {}, {}, {}],
         },
+        # level trigger with holdoff in frames
+        {
+            "params": {
+                "name": "test",
+                "condition": "a",
+                "message": "OK",
+                "notify_while_true": True,
+                "holdoff": 2,
+            },
+            "inp": [
+                {"events_detected": {}},
+                {"events_detected": {"a"}},
+                {"events_detected": {"a"}},
+                {"events_detected": {"a"}},
+                {"events_detected": {}},
+                {"events_detected": {}},
+                {"events_detected": {}},
+                {"events_detected": {"a"}},
+                {"events_detected": {"a"}},
+                {"events_detected": {"a"}},
+            ],
+            "res": [
+                {},
+                {"test": "OK"},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {"test": "OK"},
+                {},
+                {},
+            ],
+        },
         # -------------------------------------------------------
         # Notification Tests
         # -------------------------------------------------------
@@ -171,9 +319,9 @@ def test_notifier(s3_credentials, msteams_test_workflow_url):
             "params": {
                 "name": "test",
                 "condition": "a",
-                "message": "{result.msg}",
+                "message": "${result.msg}",
                 "notification_tags": "Test, Tg",
-                "notification_config": "json://unittest",
+                "notification_config": webhook_url,
             },
             "inp": [
                 {"events_detected": {"a"}, "msg": "e1"},
@@ -181,6 +329,7 @@ def test_notifier(s3_credentials, msteams_test_workflow_url):
                 {"events_detected": {"a"}, "msg": "e2"},
             ],
             "res": [{"test": "e1"}, {}, {"test": "e2"}],
+            "webhook_expected": ["e1", "e2"],
         },
         # -------------------------------------------------------
         # Clip saving tests
@@ -189,9 +338,9 @@ def test_notifier(s3_credentials, msteams_test_workflow_url):
             "params": {
                 "name": "test",
                 "condition": "a",
-                "message": "Unit test: [Uploaded file]({url})",
+                "message": '{ "Unit test": "[Uploaded file](${url})" }',
                 "notification_tags": "all",
-                "notification_config": msteams_test_workflow_url,
+                "notification_config": webhook_url,
                 "clip_save": True,
                 "clip_sub_dir": "test",
                 "clip_duration": 3,
@@ -206,7 +355,14 @@ def test_notifier(s3_credentials, msteams_test_workflow_url):
                 {"events_detected": {""}},
                 {"events_detected": {""}},
             ],
-            "res": [{}, {}, {"test": "Unit test: [Uploaded file]({url})"}, {}, {}],
+            "res": [
+                {},
+                {},
+                {"test": '{ "Unit test": "[Uploaded file](${url})" }'},
+                {},
+                {},
+            ],
+            "webhook_expected": ['{ "Unit test": "[Uploaded file](${url})" }'],
         },
     ]
 
@@ -234,13 +390,15 @@ def test_notifier(s3_credentials, msteams_test_workflow_url):
             )
             continue
 
+        # Clear webhook notifications before each test case
+        WebhookHandler.received_notifications = []
+
         notifier = degirum_tools.EventNotifier(**params)
 
         try:
             for i, input in enumerate(case["inp"]):
 
                 result = dg.postprocessor.InferenceResults(
-                    model_params=None,
                     input_image=(
                         np.zeros((100, 100, 3)) if notifier._clip_save else None
                     ),
@@ -263,9 +421,51 @@ def test_notifier(s3_credentials, msteams_test_workflow_url):
                         + f"\nConfig: {case['params']}"
                     )
 
+            notifier.finalize()
+
+            # Validate webhook notifications if expected
+            if "webhook_expected" in case:
+                received_messages = WebhookHandler.received_notifications
+                expected_messages = case["webhook_expected"]
+
+                assert len(received_messages) == len(expected_messages)
+
+                for j, (received, expected) in enumerate(
+                    zip(received_messages, expected_messages)
+                ):
+                    # Treat ${...} placeholders
+                    pattern = re.escape(expected)
+                    pattern = re.sub(r"\\\$\\\{[^}]+\\\}", r".*?", pattern)
+
+                    assert re.fullmatch(pattern, received), (
+                        f"Case {ci} webhook message {j} failed: "
+                        + f"received `{received}` "
+                        + f"does not match expected pattern `{expected}`"
+                    )
+
         finally:
             if notifier._clip_save:
                 # cleanup bucket contents for clip saving tests
                 storage = degirum_tools.ObjectStorage(notifier._storage_cfg)
                 del notifier  # delete notifier to finalize clip saving
                 storage.delete_bucket_contents()
+
+
+def test_notifier(s3_credentials):
+    """
+    Test for EventNotifier analyzer
+    """
+
+    # Start HTTP server for webhook testing
+    with socketserver.TCPServer(("localhost", 0), WebhookHandler) as httpd:
+        port = httpd.server_address[1]
+        webhook_url = f"http://127.0.0.1:{port}/webhook"
+
+        # Start server in a background thread
+        server_thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        server_thread.start()
+
+        try:
+            _run_notifier_tests(s3_credentials, webhook_url)
+        finally:
+            httpd.shutdown()

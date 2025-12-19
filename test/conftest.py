@@ -1,6 +1,6 @@
 #
 # conftest.py - DeGirum Tools: pytest configuration file
-# Copyright DeGirum Corp. 2024
+# Copyright DeGirum Corp. 2025
 #
 # Contains common pytest configuration and common test fixtures
 #
@@ -11,6 +11,40 @@ sys.path.insert(0, os.getcwd())
 
 import degirum as dg
 import degirum_tools
+import logging
+
+
+def pytest_addoption(parser):
+    """Add custom command line options for pytest"""
+
+    parser.addoption(
+        "--loglevel",
+        action="store",
+        default=None,
+        help="Set log level (e.g. DEBUG, INFO, WARNING)",
+    )
+    parser.addoption(
+        "--token", action="store", default="", help="cloud server token value to use"
+    )
+
+
+def pytest_configure(config):
+    """Configure pytest with custom options"""
+
+    loglevel = config.getoption("--loglevel")
+    if loglevel:
+        dg.enable_default_logger(getattr(logging, loglevel.upper(), logging.ERROR))
+
+
+@pytest.fixture(scope="session", autouse=True)
+def cloud_token(request):
+    """Get cloud server token passed from the command line and install it system-wide"""
+    token = request.config.getoption("--token")
+    if token:
+        from degirum._tokens import TokenManager
+
+        TokenManager().token_install(token, True)
+    return token
 
 
 @pytest.fixture(scope="session")
@@ -87,18 +121,16 @@ def regression_model(zoo_dir, regression_model_name):
 
 @pytest.fixture(scope="session")
 def s3_credentials():
-    degirum_tools.environment.reload_env()
+    degirum_tools.reload_env()
     return dict(
         endpoint="s3.us-west-1.amazonaws.com",
-        access_key=os.getenv(degirum_tools.environment.var_S3AccessKey),
-        secret_key=os.getenv(degirum_tools.environment.var_S3SecretKey),
+        access_key=os.getenv(degirum_tools.var_S3AccessKey),
+        secret_key=os.getenv(degirum_tools.var_S3SecretKey),
         bucket="dg-degirum-tools-test-s3",
     )
 
 
 @pytest.fixture(scope="session")
 def msteams_test_workflow_url():
-    degirum_tools.environment.reload_env()
-    return os.getenv(
-        degirum_tools.environment.var_MSTeamsTestWorkflowURL, "json://unittest"
-    )
+    degirum_tools.reload_env()
+    return os.getenv(degirum_tools.var_MSTeamsTestWorkflowURL, "json://unittest")

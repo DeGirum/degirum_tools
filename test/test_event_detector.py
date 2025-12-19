@@ -563,6 +563,218 @@ def test_event_detector():
             "res": [{"MyEvent"}],
         },
         # ----------------------------------------------------------------
+        # Tests for ZoneCount metric - DICT FORMAT (Named Zones)
+        # ----------------------------------------------------------------
+        {
+            "case": "ZoneCount (dict): empty zones dict",
+            "params": """
+                Trigger: MyEvent
+                when: ZoneCount
+                is equal to: 0
+                during: [1, frame]
+            """,
+            "inp": [{"zone_counts": {}}],
+            "res": [{"MyEvent"}],
+        },
+        {
+            "case": "ZoneCount (dict): single named zone, no parameters",
+            "params": """
+                Trigger: MyEvent
+                when: ZoneCount
+                is equal to: 5
+                during: [1, frame]
+            """,
+            "inp": [{"zone_counts": {"entrance": {"total": 5}}}],
+            "res": [{"MyEvent"}],
+        },
+        {
+            "case": "ZoneCount (dict): multiple named zones, no parameters (sum all)",
+            "params": """
+                Trigger: MyEvent
+                when: ZoneCount
+                is equal to: 10
+                during: [1, frame]
+            """,
+            "inp": [
+                {
+                    "zone_counts": {
+                        "entrance": {"total": 3},
+                        "exit": {"total": 2},
+                        "parking": {"total": 5},
+                    }
+                }
+            ],
+            "res": [{"MyEvent"}],
+        },
+        {
+            "case": "ZoneCount (dict): zone filter by name (string index)",
+            "params": """
+                Trigger: MyEvent
+                when: ZoneCount
+                with:
+                    index: exit
+                is equal to: 7
+                during: [1, frame]
+            """,
+            "inp": [
+                {
+                    "zone_counts": {
+                        "entrance": {"total": 3},
+                        "exit": {"total": 7},
+                        "parking": {"total": 5},
+                    }
+                }
+            ],
+            "res": [{"MyEvent"}],
+        },
+        {
+            "case": "ZoneCount (dict): zone filter by numeric index (position)",
+            "params": """
+                Trigger: MyEvent
+                when: ZoneCount
+                with:
+                    index: 1
+                is equal to: 7
+                during: [1, frame]
+            """,
+            "inp": [
+                {
+                    "zone_counts": {
+                        "entrance": {"total": 3},
+                        "exit": {"total": 7},
+                        "parking": {"total": 5},
+                    }
+                }
+            ],
+            "res": [{"MyEvent"}],
+        },
+        {
+            "case": "ZoneCount (dict): zone filter by name - zone not found",
+            "params": """
+                Trigger: MyEvent
+                when: ZoneCount
+                with:
+                    index: nonexistent_zone
+                is equal to: 1
+                during: [1, frame]
+            """,
+            "inp": [
+                {
+                    "zone_counts": {
+                        "entrance": {"total": 3},
+                        "exit": {"total": 7},
+                    }
+                }
+            ],
+            "res": None,
+        },
+        {
+            "case": "ZoneCount (dict): numeric index out of range",
+            "params": """
+                Trigger: MyEvent
+                when: ZoneCount
+                with:
+                    index: 5
+                is equal to: 1
+                during: [1, frame]
+            """,
+            "inp": [
+                {
+                    "zone_counts": {
+                        "entrance": {"total": 3},
+                        "exit": {"total": 7},
+                    }
+                }
+            ],
+            "res": None,
+        },
+        {
+            "case": "ZoneCount (dict): class filter on named zone",
+            "params": """
+                Trigger: MyEvent
+                when: ZoneCount
+                with:
+                    index: entrance
+                    classes: ["person", "bicycle"]
+                is equal to: 8
+                during: [1, frame]
+            """,
+            "inp": [
+                {
+                    "zone_counts": {
+                        "entrance": {"person": 5, "bicycle": 3, "car": 2},
+                        "exit": {"person": 1},
+                    }
+                }
+            ],
+            "res": [{"MyEvent"}],
+        },
+        {
+            "case": "ZoneCount (dict): aggregation max across named zones",
+            "params": """
+                Trigger: MyEvent
+                when: ZoneCount
+                with:
+                    aggregation: max
+                is equal to: 8
+                during: [1, frame]
+            """,
+            "inp": [
+                {
+                    "zone_counts": {
+                        "zone_A": {"total": 3},
+                        "zone_B": {"total": 8},
+                        "zone_C": {"total": 5},
+                    }
+                }
+            ],
+            "res": [{"MyEvent"}],
+        },
+        {
+            "case": "ZoneCount (dict): aggregation min across named zones",
+            "params": """
+                Trigger: MyEvent
+                when: ZoneCount
+                with:
+                    aggregation: min
+                is equal to: 2
+                during: [1, frame]
+            """,
+            "inp": [
+                {
+                    "zone_counts": {
+                        "zone_A": {"total": 5},
+                        "zone_B": {"total": 2},
+                        "zone_C": {"total": 8},
+                    }
+                }
+            ],
+            "res": [{"MyEvent"}],
+        },
+        {
+            "case": "ZoneCount (dict): named zone with class filter and aggregation",
+            "params": """
+                Trigger: MyEvent
+                when: ZoneCount
+                with:
+                    index: parking
+                    classes: ["car", "truck"]
+                    aggregation: sum
+                is equal to: 12
+                during: [1, frame]
+            """,
+            "inp": [
+                {
+                    "zone_counts": {
+                        "entrance": {"person": 5, "car": 1},
+                        "parking": {"car": 8, "truck": 4, "bicycle": 2},
+                        "exit": {"person": 3},
+                    }
+                }
+            ],
+            "res": [{"MyEvent"}],
+        },
+        # ----------------------------------------------------------------
         # Tests for LineCount metric
         # ----------------------------------------------------------------
         {
@@ -756,17 +968,71 @@ def test_event_detector():
             ],
             "res": [{"MyEvent"}],
         },
+        # ----------------------------------------------------------------
+        # Tests for Custom metric
+        # ----------------------------------------------------------------
+        {
+            "case": "Custom metric: no metric - expect to fail",
+            "params": """
+                Trigger: MyEvent
+                when: CustomMetric
+                is equal to: 1
+                during: [1, frame]
+            """,
+        },
+        {
+            "case": "Custom metric: simple case with no event",
+            "params": """
+                Trigger: MyEvent
+                when: CustomMetric
+                is equal to: 1
+                during: [1, frame]
+            """,
+            "custom_metric": lambda result, params: 0,
+            "inp": [{"results": []}],
+            "res": [set()],
+        },
+        {
+            "case": "Custom metric: simple case with event",
+            "params": """
+                Trigger: MyEvent
+                when: CustomMetric
+                is equal to: 1
+                during: [1, frame]
+            """,
+            "custom_metric": lambda result, params: 1,
+            "inp": [{"results": []}],
+            "res": [{"MyEvent"}],
+        },
+        {
+            "case": "Custom metric: custom params",
+            "params": """
+                Trigger: MyEvent
+                when: CustomMetric
+                with:
+                    some_param: 42
+                is equal to: 42
+                during: [1, frame]
+            """,
+            "custom_metric": lambda result, params: params.get("some_param", 0),
+            "inp": [{"results": []}],
+            "res": [{"MyEvent"}],
+        },
     ]
 
     for ci, case in enumerate(test_cases):
         if "res" not in case:
             # expected to fail
             with pytest.raises(Exception):
-                event_detector = degirum_tools.EventDetector(case["params"])
+                event_detector = degirum_tools.EventDetector(
+                    case["params"], custom_metric=case.get("custom_metric")
+                )
             continue
 
         try:
-            event_detector = degirum_tools.EventDetector(case["params"])
+            event_detector = degirum_tools.EventDetector(
+                case["params"], custom_metric=case.get("custom_metric")
+            )
         except Exception as e:
             raise Exception(
                 f"Case `{case['case']}` failed: {e}\nConfig: {case['params']}"

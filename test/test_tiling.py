@@ -1,5 +1,11 @@
-from degirum_tools.tile_compound_models import TileExtractorPseudoModel
-from degirum_tools.math_support import edge_box_fusion
+#
+# test_tiling.py: Unit tests for tiling and box fusion functionalities
+#
+# Copyright DeGirum Corporation 2025
+# All rights reserved
+#
+
+from degirum_tools import TileExtractorPseudoModel, edge_box_fusion
 import numpy as np, pytest
 
 

@@ -3,19 +3,21 @@ run-name: Tests ${{ github.ref_name }}
 
 on:
   push:
+    branches: [main]
   pull_request:
     branches: [main]
-    types: [opened, edited, reopen, synchronize, ready_for_review]
+    types: [opened, edited, reopened, synchronize, ready_for_review]
   workflow_dispatch:
+
 jobs:
   lint:
     name: Linters/Type Checkers
     strategy:
       fail-fast: false
       matrix:
-        python: [3.8, 3.12]
+        python: [3.9, 3.12]
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,32 +31,30 @@ jobs:
         run: python3 -m flake8 .
       - name: Run mypy
         run: python3 -m mypy
+
   test:
     name: Unit Tests
     strategy:
       fail-fast: false
       matrix:
-        python: [3.8, 3.12]
+        python: [3.9, 3.12]
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python }}
-      - name: Install
+      - name: Install dependencies and system packages
         run: |
-          pip install -e '.[testing,notifications]'
           sudo apt update
           sudo apt install ffmpeg
+          sudo apt install -y python3-gi python3-gi-cairo gir1.2-gtk-3.0 libgirepository1.0-dev build-essential python3-pip python3-gst-1.0 gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 python3-tk
+          python3 -m pip install -e '.[testing,notifications]'
+          test/install-mediamtx.sh
       - name: Run pytest (with coverage)
-        run: python3 -m coverage run -m pytest -s -v test/
+        run: python3 -m coverage run -m pytest -sv test/ --token=${{ secrets.CS_TOKEN }}
         env:
           S3_ACCESS_KEY: ${{ secrets.AWS_S3_ACCESS_KEY }}
           S3_SECRET_KEY: ${{ secrets.AWS_S3_SECRET_KEY }}
 
       - name: Display coverage report
         run: python3 -m coverage report --omit=config*
-

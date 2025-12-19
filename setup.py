@@ -9,7 +9,7 @@
 #
 
 
-from setuptools import setup
+from setuptools import setup, find_packages
 from pathlib import Path
 
 root_path = Path(__file__).resolve().parent
@@ -22,18 +22,15 @@ readme = open(root_path / "README.md", encoding="utf-8").read()
 
 setup(
     name="degirum_tools",
-    version=__version__,  # noqa
+    version=__version__,  # noqa # type: ignore[name-defined]
     description="Tools for PySDK",
     author="DeGirum",
-    license="",
+    license="MIT",
     long_description=readme,
     long_description_content_type="text/markdown",
-    packages=[
-        "degirum_tools",
-    ],
+    packages=find_packages(),
     classifiers=[
         "Programming Language :: Python :: 3",
-        "License :: OSI Approved :: MIT License",
     ],
     entry_points={
         "console_scripts": [
