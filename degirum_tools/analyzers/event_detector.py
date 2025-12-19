@@ -134,8 +134,10 @@ properties:
                     type: string
                 description: The class labels to count; if not specified, all classes are counted
             {Key_Index}:
-                type: integer
-                description: The location number (zone or line index) to count; if not specified, all locations are counted
+                oneOf:
+                    - type: integer
+                    - type: string
+                description: The location number (zone or line index) or zone name to count; if not specified, all locations are counted
             {Key_Directions}:
                 type: array
                 items:
@@ -222,7 +224,7 @@ def ZoneCount(result, params):
         result (InferenceResults): Inference results object containing zone count data.
         params (dict, optional): Additional parameters to filter/aggregate the count.
             classes (List[str]): Class labels to include. If None, all classes are counted.
-            index (int): Zone index to count. If None, all zones are included.
+            index (int or str): Zone index (int) or zone name (str) to count. If None, all zones are included.
             aggregation (str): Aggregation function to apply across zones. One of 'sum', 'max', 'min', 'mean', 'std'. Defaults to 'sum'.
 
     Returns:
@@ -230,7 +232,7 @@ def ZoneCount(result, params):
 
     Raises:
         AttributeError: If `result.zone_counts` is missing (no ZoneCounter applied upstream).
-        ValueError: If a specified zone index is out of range for the available zones.
+        ValueError: If a specified zone index/name is out of range or not found.
     """
 
     if not hasattr(result, "zone_counts"):
@@ -247,16 +249,41 @@ def ZoneCount(result, params):
         classes = params.get(Key_Classes)
         aggregate = params.get(Key_Aggregation, Aggregate_Sum)
 
+    # Handle both list (old style) and dict (new style) formats
+    is_dict_format = isinstance(result.zone_counts, dict)
+
     if index is None:
-        zone_counts = result.zone_counts
-    else:
-        if index >= 0 and index < len(result.zone_counts):
-            # select particular zone
-            zone_counts = result.zone_counts[index : index + 1]
+        # All zones
+        if is_dict_format:
+            zone_counts = list(result.zone_counts.values())
         else:
-            raise ValueError(
-                f"Zone index {index} is out of range [0, {len(result.zone_counts)})"
-            )
+            zone_counts = result.zone_counts
+    else:
+        # Specific zone
+        if is_dict_format:
+            # New style: index can be zone name (str) or numeric index (int)
+            if isinstance(index, str):
+                if index in result.zone_counts:
+                    zone_counts = [result.zone_counts[index]]
+                else:
+                    raise ValueError(f"Zone '{index}' not found in zone_counts")
+            else:
+                # Numeric index for dict format - get by position
+                zone_names = list(result.zone_counts.keys())
+                if 0 <= index < len(zone_names):
+                    zone_counts = [result.zone_counts[zone_names[index]]]
+                else:
+                    raise ValueError(
+                        f"Zone index {index} is out of range [0, {len(zone_names)})"
+                    )
+        else:
+            # Old style: index must be int
+            if index >= 0 and index < len(result.zone_counts):
+                zone_counts = result.zone_counts[index : index + 1]
+            else:
+                raise ValueError(
+                    f"Zone index {index} is out of range [0, {len(result.zone_counts)})"
+                )
 
     # count objects in the zone(s) belonging to the specified classes
     counts = [

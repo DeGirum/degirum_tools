@@ -225,11 +225,15 @@ def put_text(
     max_width = max_height = 0
 
     # Helper function that measures how much width and height to use for font
-    def _measure_block(lines, font_face, font_scale, font_thickness, margin, line_spacing):
+    def _measure_block(
+        lines, font_face, font_scale, font_thickness, margin, line_spacing
+    ):
         max_w = 0
         total_h = 0
         for i, line in enumerate(lines):
-            (w, h_no), baseline = cv2.getTextSize(line, font_face, font_scale, font_thickness)
+            (w, h_no), baseline = cv2.getTextSize(
+                line, font_face, font_scale, font_thickness
+            )
             line_h = h_no + baseline + margin
             max_w = max(max_w, w + margin)  # add right margin (matches your drawing)
             total_h += line_h if i == 0 else int(line_h * line_spacing)
@@ -240,7 +244,12 @@ def put_text(
     # 1) initial measure at requested font_scale
     req_scale = float(font_scale)
     block_w, block_h = _measure_block(
-        lines_text, font_face, req_scale, font_thickness, margin=6, line_spacing=line_spacing
+        lines_text,
+        font_face,
+        req_scale,
+        font_thickness,
+        margin=6,
+        line_spacing=line_spacing,
     )
 
     # 2) compute available space (whole image; change if you want a smaller box)
@@ -259,7 +268,9 @@ def put_text(
 
     # (optional) adjust thickness proportionally, keep ≥1
     if font_thickness > 0:
-        font_thickness = max(1, int(round(font_thickness * (font_scale / max(req_scale, 1e-6)))))
+        font_thickness = max(
+            1, int(round(font_thickness * (font_scale / max(req_scale, 1e-6))))
+        )
 
     for line in lines_text:
         li = _LineInfo()
@@ -344,7 +355,7 @@ def put_text(
         image = cv2.putText(
             image,
             li.line,
-            (text_x, text_y),                 # bottom-left origin
+            (text_x, text_y),  # bottom-left origin
             font_face,
             font_scale,
             font_color,
@@ -672,7 +683,7 @@ class Display:
                     )
 
         def preprocess_img(img):
-            if "image_overlay" in vars(type(img)):
+            if any("image_overlay" in vars(cls) for cls in type(img).__mro__):
                 # special case for model results: use image_overlay property
                 img = img.image_overlay
             if isinstance(img, PIL.Image.Image):
