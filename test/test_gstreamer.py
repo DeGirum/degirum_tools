@@ -1,3 +1,12 @@
+#
+# test_gstreamer.py: unit tests for GStreamer integration
+#
+# Copyright DeGirum Corporation 2025
+# All rights reserved
+#
+# Implements unit tests to test GStreamer pipeline building and integration
+#
+
 import pytest
 import os
 import sys
@@ -7,18 +16,17 @@ from pathlib import Path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 
-def test_import_gi():
-    """Test that gi module is available"""
+def test_gstreamer():
+    """Test GStreamer integration: imports, initialization, pipeline building, and fallback"""
+
+    # Test 1: Test that gi module is available
     try:
         import gi
     except ImportError:
         pytest.skip("gi module not available")
     assert hasattr(gi, "require_version")
 
-
-def test_import_gst():
-    """Test that GStreamer is available"""
-    import gi
+    # Test 2: Test that GStreamer is available
     try:
         gi.require_version("Gst", "1.0")
         from gi.repository import Gst
@@ -26,22 +34,14 @@ def test_import_gst():
         pytest.skip("Gst namespace not available")
     assert hasattr(Gst, "init")
 
-
-def test_gst_init_and_version():
-    """Test GStreamer initialization and version"""
-    import gi
-    gi.require_version("Gst", "1.0")
-    from gi.repository import Gst
+    # Test 3: Test GStreamer initialization and version
     if not Gst.is_initialized():
         Gst.init(None)
     version = Gst.version_string()
     assert isinstance(version, str)
     assert version.count('.') >= 2
 
-
-def test_gst_pipeline_builder_file():
-    """Test GStreamer pipeline builder for file sources"""
-    # Import from local development version
+    # Test 4: Test GStreamer pipeline builder for file sources
     from degirum_tools.tools.gst_support import build_gst_pipeline
 
     # Create a dummy file for testing
@@ -60,18 +60,14 @@ def test_gst_pipeline_builder_file():
         if os.path.exists(test_file):
             os.remove(test_file)
 
-
-def test_gst_pipeline_fallback():
-    """Test that GStreamer falls back to OpenCV when needed"""
-    # Import from local development version
+    # Test 5: Test that GStreamer falls back to OpenCV when needed
     from degirum_tools.tools.video_support import open_video_stream
 
-    # Test with invalid source - should fall back to OpenCV
-    try:
+    # Test with invalid source - should raise an exception
+    with pytest.raises(Exception) as exc_info:
         with open_video_stream("nonexistent_file.mp4", use_gstreamer=True) as stream:
-            # Should still work (fallback to OpenCV)
             ret, frame = stream.read()
-            assert isinstance(ret, bool)
-    except Exception as e:
-        # Expected to fail with nonexistent file
-        assert "Error opening" in str(e) or "not found" in str(e) or "Unknown source type" in str(e)
+
+    # Verify the error message contains expected text
+    error_msg = str(exc_info.value)
+    assert "Error opening" in error_msg or "not found" in error_msg or "Unknown source type" in error_msg

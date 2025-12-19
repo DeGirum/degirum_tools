@@ -1,3 +1,12 @@
+#
+# gst_support.py: GStreamer pipeline builder for video sources
+#
+# Copyright DeGirum Corporation 2025
+# All rights reserved
+#
+# Implements functions to build GStreamer pipelines for various video sources
+#
+
 """
 Simple GStreamer Pipeline Builder
 Focus: Compatibility over optimization
@@ -115,6 +124,41 @@ def _detect_platform() -> str:
 
 
 def build_gst_pipeline(source):
+    """
+    Build a GStreamer pipeline string for various video sources.
+
+    This function automatically detects the source type and constructs an appropriate
+    GStreamer pipeline. It supports camera devices, RTSP streams, video files, and
+    custom GStreamer pipelines.
+
+    Args:
+        source: Video source specification. Can be one of:
+            - int: Camera device index (e.g., 0, 1)
+            - str (digits): Camera device index as string (e.g., "0", "1")
+            - str (rtsp://...): RTSP stream URL
+            - str (file path): Path to video file
+            - str (GStreamer pipeline): Custom GStreamer pipeline string
+
+    Returns:
+        str: GStreamer pipeline string ready to be used with OpenCV or GStreamer
+
+    Raises:
+        ValueError: If the source type is unknown or file not found
+        FileNotFoundError: If camera device path doesn't exist (raised by _detect_camera_type)
+
+    Examples:
+        >>> build_gst_pipeline(0)  # USB camera device 0
+        'v4l2src device=/dev/video0 ! videoscale ! videoconvert ! video/x-raw,format=BGR ! appsink name=sink'
+
+        >>> build_gst_pipeline("rtsp://example.com/stream")
+        'rtspsrc location="rtsp://example.com/stream" latency=0 protocols=tcp ! decodebin ! videoconvert ! videoscale ! appsink name=sink'
+
+        >>> build_gst_pipeline("/path/to/video.mp4")
+        'filesrc location="/path/to/video.mp4" ! decodebin ! videoconvert ! videoscale ! video/x-raw, format=BGR ! appsink name=sink'
+
+        >>> build_gst_pipeline("v4l2src ! videoconvert ! appsink")
+        'v4l2src ! videoconvert ! appsink'  # Returns custom pipeline as-is
+    """
     platform = _detect_platform()
     format = "BGR"  # Default format for OpenCV compatibility
 
