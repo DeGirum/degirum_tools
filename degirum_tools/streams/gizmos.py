@@ -119,8 +119,10 @@ class VideoSourceGizmo(Gizmo):
         if self._stream is None:
             # Convert source_type to enum and determine backend
             source_type_enum = VideoSourceType.from_string(self._source_type)
-            use_gstreamer = (source_type_enum == VideoSourceType.GSTREAMER)
-            self._stream = create_video_stream(self._video_source, use_gstreamer=use_gstreamer)
+            use_gstreamer = source_type_enum == VideoSourceType.GSTREAMER
+            self._stream = create_video_stream(
+                self._video_source, use_gstreamer=use_gstreamer
+            )
             if self._fps_override is not None:
                 # set FPS if override is provided
                 self._stream.set(cv2.CAP_PROP_FPS, self._fps_override)
@@ -681,6 +683,7 @@ class AiGizmoBase(Gizmo):
         self,
         model: Union[dg.model.Model, str],
         *,
+        analyzers: Optional[list] = None,
         non_blocking_batch_predict_timeout_s: float = 0.01,
         stream_depth: int = 10,
         allow_drop: bool = False,
@@ -691,6 +694,7 @@ class AiGizmoBase(Gizmo):
 
         Args:
             model (dg.model.Model or str): A DeGirum model object or model name string to load. If a string is provided, the model will be loaded via `degirum.load_model()` using the given kwargs.
+            analyzers (list, optional): List of analyzer objects to apply to inference results (e.g., EventDetector, EventNotifier instances). Defaults to None.
             non_blocking_batch_predict_timeout_s (float): Input queue get timeout for non-blocking batch prediction mode. Defaults to 0.001 seconds.
             stream_depth (int): Depth of the input stream queue. Defaults to 10.
             allow_drop (bool): If True, allow dropping frames on input overflow. Defaults to False.
@@ -699,6 +703,7 @@ class AiGizmoBase(Gizmo):
         """
         super().__init__([(stream_depth, allow_drop)] * inp_cnt)
 
+        self._analyzers = analyzers if analyzers is not None else []
         self._non_blocking_batch_predict_timeout_s = (
             non_blocking_batch_predict_timeout_s
         )
@@ -779,9 +784,20 @@ class AiGizmoBase(Gizmo):
                                 for m in res["landmarks"]:
                                     m["landmark"][:2] = converter(*m["landmark"][:2])
 
+            # Apply analyzers if provided
+            if self._analyzers:
+                for analyzer in self._analyzers:
+                    analyzer.analyze(result)
+                # Substitute overlay image if needed
+                image_overlay_substitute(result, self._analyzers)
+
             self.on_result(result)
             if self._abort:
                 break
+
+        # Finalize all analyzers after processing
+        for analyzer in self._analyzers:
+            analyzer.finalize()
 
     @abstractmethod
     def on_result(self, result):

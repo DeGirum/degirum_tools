@@ -409,8 +409,27 @@ def test_streams_simple_ai(short_video, detection_model):
     bboxes = [[0, 0, 10, 20], [20, 30, 100, 200]]
     model = degirum_tools.RegionExtractionPseudoModel(bboxes, detection_model)
 
+    # Create a mock analyzer to verify it gets applied and finalized
+    class MockAnalyzer(degirum_tools.ResultAnalyzerBase):
+        def __init__(self):
+            self.analyze_count = 0
+            self.finalize_called = False
+            self.results_seen = []
+
+        def analyze(self, result):
+            self.analyze_count += 1
+            self.results_seen.append(result)
+            # Add a custom attribute to verify analyzer was applied
+            result.mock_analyzer_applied = True
+            return result
+
+        def finalize(self):
+            self.finalize_called = True
+
+    mock_analyzer = MockAnalyzer()
+
     source = streams.VideoSourceGizmo(short_video)
-    ai = streams.AiSimpleGizmo(model)
+    ai = streams.AiSimpleGizmo(model, analyzers=[mock_analyzer])
     sink = VideoSink()
 
     streams.Composition(source >> ai >> sink).start()
@@ -423,6 +442,16 @@ def test_streams_simple_ai(short_video, detection_model):
         assert isinstance(orig_meta, streams.StreamMeta)
         assert not (orig_meta is ai_meta)
         assert all(bbox == obj["bbox"] for bbox, obj in zip(bboxes, ai_meta.results))
+        # Verify analyzer was applied
+        assert hasattr(ai_meta, "mock_analyzer_applied")
+        assert ai_meta.mock_analyzer_applied is True
+
+    # Verify analyzer was called for each frame
+    assert mock_analyzer.analyze_count == len(sink.frames)
+    assert len(mock_analyzer.results_seen) == len(sink.frames)
+
+    # Verify finalize was called
+    assert mock_analyzer.finalize_called is True
 
 
 def test_streams_simple_ai_construction(detection_model_name, zoo_dir):
