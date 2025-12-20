@@ -88,7 +88,7 @@ class VideoSourceGizmo(Gizmo):
         stop_composition_on_end: bool = False,
         retry_on_error: bool = False,
         fps_override: Optional[float] = None,
-        resolution_override: Optional[Tuple[int, int]] = None
+        resolution_override: Optional[Tuple[int, int]] = None,
     ):
         """Constructor.
 
@@ -427,6 +427,10 @@ class VideoDisplayGizmo(Gizmo):
                         if data == Stream._poison:
                             input_done[ii] = True
                             break
+
+                        if ii == 0:
+                            self.send_result(data)  # send result only from first input
+
                         img = data.data
                         if self._show_ai_overlay:
                             inference_meta = data.meta.find_last(tag_inference)
@@ -484,7 +488,11 @@ class VideoSaverGizmo(Gizmo):
                     frame = inference_meta.image_overlay
             return frame
 
-        img = get_img(self.get_input(0).get())
+        data = self.get_input(0).get()
+        if self._abort:
+            return
+        self.send_result(data)
+        img = get_img(data)
         w, h = image_size(img)
         with open_video_writer(self._filename, w, h) as writer:
             self.result_cnt += 1
@@ -492,6 +500,7 @@ class VideoSaverGizmo(Gizmo):
             for data in self.get_input(0):
                 if self._abort:
                     break
+                self.send_result(data)
                 writer.write(get_img(data))
 
 
@@ -539,6 +548,7 @@ class VideoStreamerGizmo(Gizmo):
                 inference_meta = data.meta.find_last(tag_inference)
                 if inference_meta:
                     frame = inference_meta.image_overlay
+            self.send_result(data)
             return frame
 
         input_q = self.get_input(0)

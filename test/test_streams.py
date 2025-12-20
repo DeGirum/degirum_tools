@@ -1094,21 +1094,6 @@ def test_streams_load_composition(zoo_dir, detection_model_name):
             """
         )
 
-    class FailingGizmo(streams.Gizmo):
-        pass
-
-    with pytest.raises(RuntimeError, match="error creating instance of"):
-        streams.load_composition(
-            """
-            gizmos:
-                source:
-                    FailingGizmo: {}
-            connections:
-                - [source]
-            """,
-            local_context=locals(),
-        )
-
     def failing_func():
         raise ValueError("Test exception")
 
@@ -1252,9 +1237,14 @@ def test_streams_require_tags_and_check_requirements():
     assert "unmet tag requirements" in str(excinfo3.value)
 
 
-def test_automatic_timing_metadata():
-    """Test that all gizmos automatically add timing metadata via base send_result()"""
+def test_streams_timing():
+    """Test timing metadata functionality including automatic timing, tag, structure, and helper methods"""
 
+    # Test that tag_timing constant is properly defined and exported
+    assert hasattr(streams, "tag_timing")
+    assert streams.tag_timing == "dgt_timing"
+
+    # Test automatic timing metadata - all gizmos automatically add timing metadata via base send_result()
     # Create a simple pipeline: Source -> Passthrough -> Sink
     class SimpleSourceGizmo(streams.Gizmo):
         def __init__(self, frame_count=5):
@@ -1324,16 +1314,7 @@ def test_automatic_timing_metadata():
                 abs(time.time() - ts) < 5.0
             ), f"Frame {idx}: Timestamp too old or in future"
 
-
-def test_timing_metadata_tag():
-    """Test that tag_timing constant is properly defined and exported"""
-    assert hasattr(streams, "tag_timing")
-    assert streams.tag_timing == "dgt_timing"
-
-
-def test_timing_metadata_structure():
-    """Test the structure of timing metadata entries"""
-
+    # Test the structure of timing metadata entries
     class TestGizmo(streams.Gizmo):
         def __init__(self):
             super().__init__()
@@ -1363,11 +1344,8 @@ def test_timing_metadata_structure():
 
             break
 
-
-def test_get_timing_info_helper():
-    """Test the StreamData.get_timing_info() helper method"""
-
-    class TestGizmo(streams.Gizmo):
+    # Test the StreamData.get_timing_info() helper method
+    class TestGizmo2(streams.Gizmo):
         def __init__(self):
             super().__init__()
 
@@ -1375,13 +1353,13 @@ def test_get_timing_info_helper():
             data = streams.StreamData("test", streams.StreamMeta())
             self.send_result(data)
 
-    gizmo = TestGizmo()
-    sink = streams.SinkGizmo()
+    gizmo2 = TestGizmo2()
+    sink2 = streams.SinkGizmo()
 
-    gizmo >> sink
+    gizmo2 >> sink2
 
-    with streams.Composition(sink):
-        for data in sink():
+    with streams.Composition(sink2):
+        for data in sink2():
             # Use the standalone function to get timing info
             timing_info = streams.get_timing_info(data)
 
@@ -1393,9 +1371,78 @@ def test_get_timing_info_helper():
             gizmo_name, timestamp = timing_info[0]
             assert isinstance(gizmo_name, str)
             assert isinstance(timestamp, float)
-            assert gizmo_name == "TestGizmo"
+            assert gizmo_name == "TestGizmo2"
 
             # Verify timestamp is recent
             assert abs(time.time() - timestamp) < 5.0
 
             break
+
+
+def test_streams_empty_run():
+    """Test that gizmos with @empty decorated run() don't start threads"""
+
+    # Gizmo without overriding run() - uses base class @empty run()
+    class EmptyRunGizmo(streams.Gizmo):
+        def __init__(self):
+            super().__init__()
+
+    # Gizmo with custom run() - should start a thread
+    class ActiveGizmo(streams.Gizmo):
+        def __init__(self):
+            super().__init__()
+            self.ran = False
+
+        def run(self):
+            self.ran = True
+
+    # Gizmo with @empty decorated custom run() - should NOT start a thread
+    class CustomEmptyGizmo(streams.Gizmo):
+        def __init__(self):
+            super().__init__()
+            self.ran = False
+
+        @streams.Gizmo.empty
+        def run(self):
+            self.ran = True
+
+    # Test 1: EmptyRunGizmo should not start a thread
+    empty_gizmo = EmptyRunGizmo()
+    c1 = streams.Composition(empty_gizmo)
+    with c1:
+        # No threads should be started for empty_gizmo
+        assert len(c1._threads) == 0
+
+    # Test 2: ActiveGizmo should start a thread and run
+    active_gizmo = ActiveGizmo()
+    c2 = streams.Composition(active_gizmo)
+    with c2:
+        # One thread should be started for active_gizmo
+        assert len(c2._threads) == 1
+
+    # Verify the run() method was executed
+    assert active_gizmo.ran is True
+
+    # Test 3: CustomEmptyGizmo with @empty decorator should not start a thread
+    custom_empty_gizmo = CustomEmptyGizmo()
+    c3 = streams.Composition(custom_empty_gizmo)
+    with c3:
+        # No threads should be started for custom_empty_gizmo
+        assert len(c3._threads) == 0
+
+    # Verify the run() method was NOT executed (because no thread was started)
+    assert custom_empty_gizmo.ran is False
+
+    # Test 4: Mixed composition - empty and active gizmos
+    empty_gizmo2 = EmptyRunGizmo()
+    active_gizmo2 = ActiveGizmo()
+    custom_empty_gizmo2 = CustomEmptyGizmo()
+
+    c4 = streams.Composition(empty_gizmo2, active_gizmo2, custom_empty_gizmo2)
+    with c4:
+        # Only one thread should be started (for active_gizmo2)
+        assert len(c4._threads) == 1
+
+    # Verify only the active gizmo ran
+    assert active_gizmo2.ran is True
+    assert custom_empty_gizmo2.ran is False
