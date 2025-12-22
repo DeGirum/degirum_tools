@@ -68,8 +68,10 @@ from enum import Enum
 # Import GStreamer libraries
 try:
     import gi
-    gi.require_version('Gst', '1.0')
+
+    gi.require_version("Gst", "1.0")
     from gi.repository import Gst, GLib
+
     GST_AVAILABLE = True
     Gst.init(None)
 except ImportError:
@@ -78,12 +80,13 @@ except ImportError:
 
 class VideoSourceType(Enum):
     """Enumeration of supported video source types for inference."""
-    AUTO = "auto"           # Automatically detect best backend (OpenCV or GStreamer)
-    GSTREAMER = "gstream"   # Force GStreamer backend
-    OPENCV = "opencv"       # Force OpenCV backend
+
+    AUTO = "auto"  # Automatically detect best backend (OpenCV or GStreamer)
+    GSTREAMER = "gstream"  # Force GStreamer backend
+    OPENCV = "opencv"  # Force OpenCV backend
 
     @classmethod
-    def from_string(cls, value: Union[str, 'VideoSourceType']) -> 'VideoSourceType':
+    def from_string(cls, value: Union[str, "VideoSourceType"]) -> "VideoSourceType":
         """Convert string to enum, maintaining backward compatibility.
         Args:
             value: String value or VideoSourceType enum
@@ -100,12 +103,15 @@ class VideoSourceType(Enum):
                 return cls(value)
             except ValueError:
                 valid_options = [e.value for e in cls]
-                raise ValueError(f"Invalid source_type: '{value}'. Valid options: {valid_options}")
+                raise ValueError(
+                    f"Invalid source_type: '{value}'. Valid options: {valid_options}"
+                )
         raise TypeError(f"Expected str or VideoSourceType, got {type(value)}")
 
 
 class VideoCaptureGst:
     """GStreamer-based video capture class that mimics cv2.VideoCapture interface."""
+
     def __init__(self, pipeline_str):
         """Initialize GStreamer pipeline from string.
 
@@ -142,7 +148,9 @@ class VideoCaptureGst:
         self._frame_channels: Optional[int] = None
         self._conversion_func = None
 
-    def _get_format_info(self, format_str: str, width: int, height: int) -> tuple[int, int]:
+    def _get_format_info(
+        self, format_str: str, width: int, height: int
+    ) -> tuple[int, int]:
         """Get channel count and expected buffer size for a given format.
         Args:
             format_str: GStreamer format string (e.g., 'BGR', 'RGB', 'I420')
@@ -157,24 +165,24 @@ class VideoCaptureGst:
         # Common format mappings
         format_info = {
             # 3-channel formats
-            'BGR': (3, width * height * 3),
-            'RGB': (3, width * height * 3),
-            'BGRx': (4, width * height * 4),
-            'RGBx': (4, width * height * 4),
-            'BGRA': (4, width * height * 4),
-            'RGBA': (4, width * height * 4),
+            "BGR": (3, width * height * 3),
+            "RGB": (3, width * height * 3),
+            "BGRx": (4, width * height * 4),
+            "RGBx": (4, width * height * 4),
+            "BGRA": (4, width * height * 4),
+            "RGBA": (4, width * height * 4),
             # Grayscale
-            'GRAY8': (1, width * height),
-            'GRAY16_LE': (1, width * height * 2),
-            'GRAY16_BE': (1, width * height * 2),
+            "GRAY8": (1, width * height),
+            "GRAY16_LE": (1, width * height * 2),
+            "GRAY16_BE": (1, width * height * 2),
             # YUV formats (planar)
-            'I420': (1, width * height * 3 // 2),  # 4:2:0 planar
-            'YV12': (1, width * height * 3 // 2),  # 4:2:0 planar
-            'NV12': (1, width * height * 3 // 2),  # 4:2:0 semi-planar
-            'NV21': (1, width * height * 3 // 2),  # 4:2:0 semi-planar
+            "I420": (1, width * height * 3 // 2),  # 4:2:0 planar
+            "YV12": (1, width * height * 3 // 2),  # 4:2:0 planar
+            "NV12": (1, width * height * 3 // 2),  # 4:2:0 semi-planar
+            "NV21": (1, width * height * 3 // 2),  # 4:2:0 semi-planar
             # Other common formats
-            'YUY2': (2, width * height * 2),  # 4:2:2 packed
-            'UYVY': (2, width * height * 2),  # 4:2:2 packed
+            "YUY2": (2, width * height * 2),  # 4:2:2 packed
+            "UYVY": (2, width * height * 2),  # 4:2:2 packed
         }
         return format_info.get(format_str, (3, width * height * 3))
 
@@ -184,26 +192,32 @@ class VideoCaptureGst:
         structure = caps.get_structure(0)
         self._frame_width = structure.get_value("width")
         self._frame_height = structure.get_value("height")
-        format_str = structure.get_string("format")[1] if structure.get_string("format")[0] else None
+        format_str = (
+            structure.get_string("format")[1]
+            if structure.get_string("format")[0]
+            else None
+        )
         # Calculate format info once
-        self._frame_channels, _ = self._get_format_info(format_str or "", self._frame_width, self._frame_height)
+        self._frame_channels, _ = self._get_format_info(
+            format_str or "", self._frame_width, self._frame_height
+        )
         # Determine conversion function once
         self._conversion_func = self._get_conversion_function(format_str)
         self._initialized = True
 
     def _get_conversion_function(self, format_str):
         """Get the appropriate conversion function for the format."""
-        if format_str in ['RGB', 'RGBx']:
+        if format_str in ["RGB", "RGBx"]:
             return lambda frame: cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-        elif format_str in ['I420', 'YV12', 'NV12', 'NV21']:
+        elif format_str in ["I420", "YV12", "NV12", "NV21"]:
             return lambda frame: cv2.cvtColor(frame, cv2.COLOR_YUV2BGR_I420)
-        elif format_str in ['RGBA', 'RGBx']:
+        elif format_str in ["RGBA", "RGBx"]:
             return lambda frame: cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
-        elif format_str in ['YUY2']:
+        elif format_str in ["YUY2"]:
             return lambda frame: cv2.cvtColor(frame, cv2.COLOR_YUV2BGR_YUY2)
-        elif format_str in ['UYVY']:
+        elif format_str in ["UYVY"]:
             return lambda frame: cv2.cvtColor(frame, cv2.COLOR_YUV2BGR_UYVY)
-        elif format_str in ['BGRA']:
+        elif format_str in ["BGRA"]:
             return lambda frame: frame[:, :, :3]  # Remove alpha channel
         else:
             # No conversion needed for BGR, BGRx, or unknown formats
@@ -233,7 +247,11 @@ class VideoCaptureGst:
             self._initialize_frame_processing(sample)
 
         # Ensure frame dimensions are properly initialized
-        if self._frame_width is None or self._frame_height is None or self._frame_channels is None:
+        if (
+            self._frame_width is None
+            or self._frame_height is None
+            or self._frame_channels is None
+        ):
             raise RuntimeError("Frame dimensions not properly initialized")
 
         buf = sample.get_buffer()
@@ -247,25 +265,25 @@ class VideoCaptureGst:
                 frame: np.ndarray = np.ndarray(
                     (self._frame_height, self._frame_width),
                     buffer=mapinfo.data,
-                    dtype=np.uint8
+                    dtype=np.uint8,
                 )
             elif self._frame_channels == 3:
                 frame = np.ndarray(
                     (self._frame_height, self._frame_width, 3),
                     buffer=mapinfo.data,
-                    dtype=np.uint8
+                    dtype=np.uint8,
                 )
             elif self._frame_channels == 4:
                 frame = np.ndarray(
                     (self._frame_height, self._frame_width, 4),
                     buffer=mapinfo.data,
-                    dtype=np.uint8
+                    dtype=np.uint8,
                 )
             else:
                 frame = np.ndarray(
                     (self._frame_height, self._frame_width, self._frame_channels),
                     buffer=mapinfo.data,
-                    dtype=np.uint8
+                    dtype=np.uint8,
                 )
             # Apply pre-determined conversion
             frame = self._convert_frame(frame)
@@ -294,7 +312,7 @@ class VideoCaptureGst:
         elif prop == cv2.CAP_PROP_FRAME_HEIGHT:
             return structure.get_value("height")
         elif prop == cv2.CAP_PROP_FPS:
-            framerate = structure.get_fraction('framerate')
+            framerate = structure.get_fraction("framerate")
             if framerate:
                 return framerate.value_numerator / framerate.value_denominator
             return 30.0  # Default fallback
@@ -351,7 +369,7 @@ def create_video_stream(
     video_source: Union[int, str, Path, None, cv2.VideoCapture, VideoCaptureGst] = None,
     *,
     max_yt_quality: int = 0,
-    use_gstreamer: bool = False
+    use_gstreamer: bool = False,
 ) -> Union[cv2.VideoCapture, VideoCaptureGst]:
     """Create a video stream from various sources.
 
@@ -406,14 +424,32 @@ def create_video_stream(
         else:
             # Ignore DASH/HLS YouTube videos
             dash_hls_formats = [
-                91, 92, 93, 94, 95, 96, 132, 151, 133, 134, 135, 136, 137, 138,
-                160, 212, 264, 298, 299, 266,
+                91,
+                92,
+                93,
+                94,
+                95,
+                96,
+                132,
+                151,
+                133,
+                134,
+                135,
+                136,
+                137,
+                138,
+                160,
+                212,
+                264,
+                298,
+                299,
+                266,
             ]
 
             video_qualities = pafy.new(video_source).videostreams
             video_qualities = sorted(
                 video_qualities,
-                key=cmp_to_key(lambda a, b: b.dimensions[1] - a.dimensions[1])  # type: ignore[attr-defined]
+                key=cmp_to_key(lambda a, b: b.dimensions[1] - a.dimensions[1]),  # type: ignore[attr-defined]
             )
 
             for video in video_qualities:
@@ -449,7 +485,7 @@ def open_video_stream(
     video_source: Union[int, str, Path, None, cv2.VideoCapture, VideoCaptureGst] = None,
     *,
     max_yt_quality: int = 0,
-    use_gstreamer: bool = False
+    use_gstreamer: bool = False,
 ) -> Generator[Union[cv2.VideoCapture, VideoCaptureGst], None, None]:
     """Open a video stream from various sources.
 
@@ -468,7 +504,9 @@ def open_video_stream(
     Raises:
         Exception: If the video stream cannot be opened.
     """
-    stream = create_video_stream(video_source, max_yt_quality=max_yt_quality, use_gstreamer=use_gstreamer)
+    stream = create_video_stream(
+        video_source, max_yt_quality=max_yt_quality, use_gstreamer=use_gstreamer
+    )
     try:
         yield stream
     finally:
@@ -636,6 +674,7 @@ class VideoWriter:
     def _create_writer(self) -> Any:
         if self._use_ffmpeg:
             import ffmpegcv
+
             return ffmpegcv.VideoWriter(
                 self._fname, codec=None, fps=self._fps, resize=self._wh
             )
@@ -1154,7 +1193,7 @@ class VideoStreamer:
         *,
         fps: float = 30.0,
         pix_fmt="bgr24",
-        gop_size: int = 50,
+        gop_size: int = 10,
         verbose: bool = False,
     ):
         """Initializes the video streamer.
@@ -1203,9 +1242,8 @@ class VideoStreamer:
                 "vcodec": "libx264",
                 "preset": "ultrafast",
                 "tune": "zerolatency",
-                "rtsp_transport": "tcp",
-                "fflags": "nobuffer",
-                "max_delay": 0,
+                "rtsp_transport": "udp",  # low latency transport
+                "bf": 0,
                 "g": gop_size,
             }
 
