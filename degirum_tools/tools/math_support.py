@@ -862,7 +862,9 @@ def compute_kmeans(embeddings: List[np.ndarray], k: int = 0):
         embeddings (List[np.ndarray]): List of embedding vectors.
         k (int): Number of clusters. If 0, it will be deduced based on the number of embeddings.
     Returns:
-        List[nd.ndarray]: List of embeddings closest to cluster centroid.
+        Tuple[List[np.ndarray], List[int]]: Tuple containing:
+            - List of embeddings closest to cluster centroids
+            - List of their indices in the input embeddings list
     """
     from scipy.cluster.vq import kmeans2
 
@@ -872,12 +874,21 @@ def compute_kmeans(embeddings: List[np.ndarray], k: int = 0):
     embeddings_arr = np.array(embeddings)
     centroids, labels = kmeans2(embeddings_arr, k, minit="++")
 
-    ret = []
+    ret_embeddings = []
+    ret_indices = []
     for i in range(k):
-        cluster_embeddings = embeddings_arr[labels == i]
+        cluster_mask = labels == i
+        cluster_embeddings = embeddings_arr[cluster_mask]
         if len(cluster_embeddings) == 0:
             continue
         distances = np.linalg.norm(cluster_embeddings - centroids[i], axis=1)
-        ret.append(cluster_embeddings[np.argmin(distances)])
+        min_idx_in_cluster = np.argmin(distances)
 
-    return ret
+        # Get the original index in the input embeddings list
+        original_indices = np.where(cluster_mask)[0]
+        original_idx = original_indices[min_idx_in_cluster]
+
+        ret_embeddings.append(cluster_embeddings[min_idx_in_cluster])
+        ret_indices.append(int(original_idx))
+
+    return ret_embeddings, ret_indices
