@@ -495,7 +495,6 @@ class VideoSaverGizmo(Gizmo):
         img = get_img(data)
         w, h = image_size(img)
         with open_video_writer(self._filename, w, h) as writer:
-            self.result_cnt += 1
             writer.write(img)
             for data in self.get_input(0):
                 if self._abort:
