@@ -13,7 +13,6 @@
 #
 
 import threading, queue, copy, time
-from abc import ABC, abstractmethod
 from typing import Optional, Any, List, Dict, Union, Iterator, Tuple
 from ..tools import get_test_mode
 from degirum.exceptions import DegirumException
@@ -363,7 +362,7 @@ class Watchdog:
             return age <= self._time_limit and tps >= self._tps_threshold, tps
 
 
-class Gizmo(ABC):
+class Gizmo:
     """Base class for all gizmos (streaming pipeline processing blocks).
 
     Each gizmo owns zero or more input streams that deliver data for processing (data-generating gizmos have
@@ -596,7 +595,13 @@ class Gizmo(ABC):
             else:
                 out.put(data)
 
-    @abstractmethod
+    @staticmethod
+    def empty(fn):
+        """Decorator to mark an empty run() method."""
+        fn.__empty_run__ = True
+        return fn
+
+    @empty
     def run(self):
         """Run the gizmo's processing loop.
 
@@ -731,9 +736,10 @@ class Composition:
 
         for gizmo in self._gizmos:
             gizmo.abort(False)
-            t = threading.Thread(target=gizmo_run, args=(gizmo,))
-            t.name = t.name + "-" + type(gizmo).__name__
-            self._threads.append(t)
+            if not getattr(gizmo.run, "__empty_run__", False):
+                t = threading.Thread(target=gizmo_run, args=(gizmo,))
+                t.name = t.name + "-" + type(gizmo).__name__
+                self._threads.append(t)
 
         for t in self._threads:
             t.start()
@@ -815,8 +821,6 @@ class Composition:
         Raises:
             Exception: If the composition has not been started, or if any gizmo raised an error during execution (the exception message will contain details).
         """
-        if len(self._threads) == 0:
-            raise Exception("Composition not started")
         # wait for completion of all threads
         for t in self._threads:
             if t.name != threading.current_thread().name:

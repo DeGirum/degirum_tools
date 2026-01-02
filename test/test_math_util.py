@@ -52,9 +52,7 @@ def test_nms():
     def bbox_is_in(res, res_list):
         return any(np.allclose(res["bbox"], r["bbox"]) for r in res_list)
 
-    res = dg.postprocessor.InferenceResults(
-        inference_results=res_list, conversion=None
-    )
+    res = dg.postprocessor.InferenceResults(inference_results=res_list, conversion=None)
 
     # test default case: IoU, no merge
     res_base = deepcopy(res)
@@ -219,3 +217,69 @@ def test_lpf():
 
     filtered_signal = filtered_signal[taps:]
     assert np.allclose(filtered_signal, [[0.5, 1]] * len(filtered_signal))
+
+
+def test_compute_kmeans():
+    """Test k-means clustering function."""
+    from degirum_tools import compute_kmeans
+
+    # Create test embeddings: N clusters with points per cluster
+    np.random.seed(42)
+    L = 10  # embedding dimension
+    N = 10  # number of clusters
+    points = 15  # points per cluster
+
+    # Generate embeddings list directly
+    embeddings_list = []
+    for i in range(N):
+        cluster_center = np.array([i * 100] * L)
+        cluster = np.random.randn(points, L) + cluster_center
+        embeddings_list.extend(cluster)
+
+    # Test with automatic k
+    result_embeddings, result_indices = compute_kmeans(embeddings_list)
+
+    # Verify return types
+    assert isinstance(result_embeddings, list)
+    assert isinstance(result_indices, list)
+    assert len(result_embeddings) == len(result_indices)
+    assert len(result_embeddings) == len(embeddings_list) // 25
+
+    # Verify all returned embeddings are from the original list
+    for emb, idx in zip(result_embeddings, result_indices):
+        assert isinstance(idx, int)
+        assert 0 <= idx < len(embeddings_list)
+        assert np.allclose(emb, embeddings_list[idx])
+
+    # Test with explicit k=3
+    result_embeddings_k3, result_indices_k3 = compute_kmeans(embeddings_list, k=3)
+    assert len(result_embeddings_k3) == 3
+    assert len(result_indices_k3) == 3
+
+    # Verify indices are unique
+    assert len(set(result_indices_k3)) == len(result_indices_k3)
+
+    # Verify all returned embeddings are from the original list
+    for emb, idx in zip(result_embeddings_k3, result_indices_k3):
+        assert np.allclose(emb, embeddings_list[idx])
+
+    # Test with k=1
+    result_embeddings_k1, result_indices_k1 = compute_kmeans(embeddings_list, k=1)
+    assert len(result_embeddings_k1) == 1
+    assert len(result_indices_k1) == 1
+    assert 0 <= result_indices_k1[0] < len(embeddings_list)
+
+    # Test with small dataset
+    small_embeddings = [
+        np.array([1.0, 2.0]),
+        np.array([1.1, 2.1]),
+        np.array([10.0, 20.0]),
+    ]
+    result_emb_small, result_idx_small = compute_kmeans(small_embeddings, k=2)
+    assert len(result_emb_small) == 2
+    assert len(result_idx_small) == 2
+
+    # Verify indices are valid and unique
+    assert len(set(result_idx_small)) == 2
+    for idx in result_idx_small:
+        assert 0 <= idx < len(small_embeddings)
