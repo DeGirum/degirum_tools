@@ -362,6 +362,12 @@ class Watchdog:
             return age <= self._time_limit and tps >= self._tps_threshold, tps
 
 
+def empty_run(fn):
+    """Decorator to mark an empty run() method."""
+    fn.__empty_run__ = True
+    return fn
+
+
 class Gizmo:
     """Base class for all gizmos (streaming pipeline processing blocks).
 
@@ -595,13 +601,7 @@ class Gizmo:
             else:
                 out.put(data)
 
-    @staticmethod
-    def empty(fn):
-        """Decorator to mark an empty run() method."""
-        fn.__empty_run__ = True
-        return fn
-
-    @empty
+    @empty_run
     def run(self):
         """Run the gizmo's processing loop.
 

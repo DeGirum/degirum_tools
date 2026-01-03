@@ -1402,7 +1402,7 @@ def test_streams_empty_run():
             super().__init__()
             self.ran = False
 
-        @streams.Gizmo.empty
+        @streams.empty_run
         def run(self):
             self.ran = True
 
