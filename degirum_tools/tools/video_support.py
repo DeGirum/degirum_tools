@@ -72,9 +72,9 @@ try:
     gi.require_version("Gst", "1.0")
     from gi.repository import Gst, GLib
 
-    GST_AVAILABLE = True
     Gst.init(None)
-except ImportError:
+    GST_AVAILABLE = True
+except Exception:
     GST_AVAILABLE = False
 
 
