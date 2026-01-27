@@ -1,10 +1,10 @@
 #
 # _version.py: degirum_tools package version
 #
-# Copyright DeGirum Corporation 2025
+# Copyright DeGirum Corporation 2026
 # All rights reserved
 #
 
 # >>> increment version here vvv
-__version_info__ = ("0", "26", "2")
+__version_info__ = ("1", "0", "0")
 __version__ = ".".join(__version_info__)

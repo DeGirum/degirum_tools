@@ -57,7 +57,7 @@ setup(
         # testing for CI/CD
         "testing": ["pytest", "coverage"],
         # building for CI/CD
-        "build": ["build"],
+        "build": ["build", "twine"],
         # external notifications
         "notifications": ["apprise", "minio"],
         # annotation tool

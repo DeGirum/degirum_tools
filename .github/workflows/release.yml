@@ -1,41 +1,82 @@
-name: Release
-run-name: Release ${{ github.ref_name }}
-
+name: Release to GitHub/PyPI
 on:
   workflow_dispatch:
+    inputs:
+      to_github:
+        description: "Release to GitHub"
+        type: boolean
+        default: false
+      to_pypi:
+        description: "Release to pypi.org"
+        type: boolean
+        default: false
+      to_pkg_degirum_com:
+        description: "Release to pkg.degirum.com"
+        type: boolean
+        default: false
+
 jobs:
   release:
-    name: Release
+    name: Build wheel
     runs-on: ubuntu-latest
     timeout-minutes: 15
+
     steps:
-      - name: Checkout
+      - name: Check out repository code
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Setup Python
+        uses: actions/setup-python@v6
         with:
-          python-version: 3.9
+          python-version: 3.12
 
-      - name: Install Python build requirements
-        run: pip install -e '.[build]'
+      - name: Install build dependencies
+        run: |
+          git config --global url."https://${{ secrets.PRIVATE_TOKEN }}@github.com/".insteadOf "https://github.com/"
+          pip install -e '.[build]'
 
-      - name: Run build
+      - name: Build package
         run: python3 -m build .
 
       - name: Extract package version and create git tag
-        id: extract_package_version
+        id: create_tag
         run: |
-          wheel_file=$(find ${{ github.workspace }}/dist -name "*.whl" -print -quit)
+          wheel_file=$(find dist -name "*.whl" -print -quit)
           package_version=${{ github.ref_name }}-v$(basename $wheel_file | sed 's/^[^-]*-\([^ -]*\).*/\1/')
           echo "Package version tag: $package_version"
-          git tag $package_version
-          git push origin $package_version
+          if git ls-remote --tags origin | grep -q "refs/tags/$package_version$"; then
+            echo "Tag $package_version already exists. Skipping."
+          else
+            git tag "$package_version"
+            git push origin "$package_version"
+          fi
           echo "package_version=$package_version" >> "$GITHUB_OUTPUT"
 
-      - name: Release python wheel to GitHub
+      - name: Create/Update GitHub Release
+        if: ${{ inputs.to_github }}
         uses: softprops/action-gh-release@v2
         with:
           fail_on_unmatched_files: true
-          files: ${{ github.workspace }}/dist/*.whl
-          tag_name: ${{ steps.extract_package_version.outputs.package_version }}
+          files: dist/*.whl
+          tag_name: ${{ steps.create_tag.outputs.package_version }}
+
+      - name: Upload wheels to PyPI.org
+        if: ${{ inputs.to_pypi }}
+        run: twine upload --verbose -u __token__ -p "${{ secrets.PYPI_PASSWORD }}" --non-interactive --disable-progress-bar dist/*.whl
+
+      - name: Upload wheels to pkg.degirum.com
+        if: ${{ inputs.to_pkg_degirum_com }}
+        run: twine upload --verbose --repository-url https://pkg.degirum.com/__base/prod/ -u __base -p "${{ secrets.PKG_DEGIRUM_COM_PASSWORD }}" --non-interactive --disable-progress-bar dist/*.whl
+
+      - name: Create release summary
+        run: |
+          echo "## 📦 Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Package Version:** \`${{ steps.create_tag.outputs.package_version || 'N/A' }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Triggered by:** @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Release Targets:**" >> $GITHUB_STEP_SUMMARY
+          echo "- GitHub: ${{ inputs.to_github && '✅' || '➖' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- PyPI: ${{ inputs.to_pypi && '✅' || '➖' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- pkg.degirum.com: ${{ inputs.to_pkg_degirum_com && '✅' || '➖' }}" >> $GITHUB_STEP_SUMMARY

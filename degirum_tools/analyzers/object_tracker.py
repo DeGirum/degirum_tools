@@ -727,7 +727,7 @@ class _ByteTrack:
         self._lost_tracks = _ByteTrack._sub_tracks(
             self._lost_tracks, self._removed_tracks
         )
-        self._removed_tracks.extend(removed_stracks)
+        self._removed_tracks = removed_stracks
         self._tracked_tracks, self._lost_tracks = _ByteTrack._remove_duplicate_tracks(
             self._tracked_tracks, self._lost_tracks
         )
@@ -758,10 +758,15 @@ class _ByteTrack:
             Combined list of tracks from track_list_a and track_list_b
                 without duplicate track_id values.
         """
-        seen_track_ids = set()
-        result = []
+        if not track_list_b:
+            return track_list_a
+        if not track_list_a:
+            return track_list_b
 
-        for track in track_list_a + track_list_b:
+        seen_track_ids = {track.track_id for track in track_list_a}
+        result = list(track_list_a)
+
+        for track in track_list_b:
             if track.track_id not in seen_track_ids:
                 seen_track_ids.add(track.track_id)
                 result.append(track)
@@ -781,13 +786,11 @@ class _ByteTrack:
         Returns:
             List of remaining tracks from track_list_a after subtraction.
         """
-        tracks = {track.track_id: track for track in track_list_a}
+        if not track_list_a or not track_list_b:
+            return track_list_a
+
         track_ids_b = {track.track_id for track in track_list_b}
-
-        for track_id in track_ids_b:
-            tracks.pop(track_id, None)
-
-        return list(tracks.values())
+        return [track for track in track_list_a if track.track_id not in track_ids_b]
 
     @staticmethod
     def _remove_duplicate_tracks(tracks_a: List, tracks_b: List) -> Tuple[List, List]:
