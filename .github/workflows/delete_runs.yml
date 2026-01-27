@@ -3,18 +3,18 @@ on:
   workflow_dispatch:
     inputs:
       days:
-        description: 'Number of days.'
+        description: "Number of days."
         required: true
         default: 30
       minimum_runs:
-        description: 'The minimum runs to keep for each workflow.'
+        description: "The minimum runs to keep for each workflow."
         required: true
         default: 6
       delete_workflow_pattern:
-        description: 'The name or filename of the workflow. if not set then it will target all workflows.'
+        description: "The name or filename of the workflow. if not set then it will target all workflows."
         required: false
       delete_workflow_by_state_pattern:
-        description: 'Remove workflow by state: active, deleted, disabled_fork, disabled_inactivity, disabled_manually'
+        description: "Remove workflow by state: active, deleted, disabled_fork, disabled_inactivity, disabled_manually"
         required: true
         default: "All"
         type: choice
@@ -25,7 +25,7 @@ on:
           - disabled_inactivity
           - disabled_manually
       delete_run_by_conclusion_pattern:
-        description: 'Remove workflow by conclusion: action_required, cancelled, failure, skipped, success'
+        description: "Remove workflow by conclusion: action_required, cancelled, failure, skipped, success"
         required: true
         default: "All"
         type: choice
@@ -37,8 +37,9 @@ on:
           - skipped
           - success
       dry_run:
-        description: 'Only log actions, do not perform any delete operations.'
-        required: false
+        description: "Only log actions, do not perform any delete operations."
+        type: boolean
+        default: false
 
 jobs:
   del_runs:
@@ -49,10 +50,9 @@ jobs:
         with:
           token: ${{ github.token }}
           repository: ${{ github.repository }}
-          retain_days: ${{ github.event.inputs.days }}
-          keep_minimum_runs: ${{ github.event.inputs.minimum_runs }}
-          delete_workflow_pattern: ${{ github.event.inputs.delete_workflow_pattern }}
-          delete_workflow_by_state_pattern: ${{ github.event.inputs.delete_workflow_by_state_pattern }}
-          delete_run_by_conclusion_pattern: ${{ github.event.inputs.delete_run_by_conclusion_pattern }}
-          dry_run: ${{ github.event.inputs.dry_run }}
-          
+          retain_days: ${{ inputs.days }}
+          keep_minimum_runs: ${{ inputs.minimum_runs }}
+          delete_workflow_pattern: ${{ inputs.delete_workflow_pattern }}
+          delete_workflow_by_state_pattern: ${{ inputs.delete_workflow_by_state_pattern }}
+          delete_run_by_conclusion_pattern: ${{ inputs.delete_run_by_conclusion_pattern }}
+          dry_run: ${{ inputs.dry_run }}
