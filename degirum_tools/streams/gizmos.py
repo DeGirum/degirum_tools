@@ -219,7 +219,7 @@ class IteratorSourceGizmo(Gizmo):
 
     key_file_path = "file_path"  # key for file path meta if input is a file
 
-    def __init__(self, iterator: Iterator):
+    def __init__(self, iterator: Iterator, *, fps: float = 0.0):
         """Constructor.
 
         Args:
@@ -227,9 +227,11 @@ class IteratorSourceGizmo(Gizmo):
                 - str: path to an image file
                 - numpy.ndarray: image as numpy array
                 - PIL.Image: PIL image object
+            fps: Optional FPS value to include in metadata (default 0.0, meaning not applicable)
         """
         super().__init__()  # No inputs for source gizmo
         self._iterator = iterator
+        self._fps = fps
 
     def get_tags(self) -> List[str]:
         """Get list of tags assigned to this gizmo.
@@ -334,7 +336,7 @@ class IteratorSourceGizmo(Gizmo):
             meta = {
                 VideoSourceGizmo.key_frame_width: width,
                 VideoSourceGizmo.key_frame_height: height,
-                VideoSourceGizmo.key_fps: 0.0,  # No FPS for iterator
+                VideoSourceGizmo.key_fps: self._fps,
                 VideoSourceGizmo.key_frame_count: -1,  # Unknown for iterator
                 VideoSourceGizmo.key_frame_id: self.result_cnt,
                 VideoSourceGizmo.key_timestamp: time.time(),
@@ -563,6 +565,8 @@ class VideoStreamerGizmo(Gizmo):
             video_meta = data0.meta.find_last(tag_video)
             if video_meta:
                 self._fps = video_meta.get(VideoSourceGizmo.key_fps, default_fps)
+                if self._fps <= 0:
+                    self._fps = default_fps
             else:
                 self._fps = default_fps
         frame_interval_s = 1.0 / self._fps
