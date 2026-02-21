@@ -191,6 +191,7 @@ def generate_tracker_test_case(
     # Check if trail tracking is enabled (simulating _Tracer initialization)
     trail_depth = tracker_params.get("trail_depth", 0)
     track_buffer = tracker_params.get("track_buffer", 30)
+    reset_at_scene_cut = tracker_params.get("reset_at_scene_cut", False)
     enable_trailing = trail_depth > 0
 
     # Initialize tracer state if trails are enabled (simulating _Tracer internal state)
@@ -204,6 +205,18 @@ def generate_tracker_test_case(
     for frame_idx, inp_result in enumerate(input_results):
         # Create a deep copy to avoid modifying input
         exp_result = deepcopy(inp_result)
+
+        # Reset trails on scene cuts if enabled (simulating ObjectTracker.analyze behavior)
+        if (
+            enable_trailing
+            and reset_at_scene_cut
+            and hasattr(inp_result, "scene_cut")
+            and inp_result.scene_cut
+        ):
+            # Clear all trail state when scene cut detected
+            active_trails.clear()
+            trail_classes.clear()
+            timeout_counters.clear()
 
         res_idx = 0
         for traj in trajectories:
@@ -616,7 +629,11 @@ _test_cases = [
     generate_tracker_test_case(
         name="reset_at_scene_cut behavior",
         num_frames=20,
-        tracker_params={"reset_at_scene_cut": True},  # Reset tracker at scene cuts
+        tracker_params={
+            "reset_at_scene_cut": True,  # Reset tracker at scene cuts
+            "trail_depth": 5,  # Track trails to verify they also reset at scene cuts
+            "track_buffer": 3,
+        },
         scene_cuts=[10],  # Scene cut occurs at frame 10
         trajectories=[
             # Continuous object trajectory split at scene cut frame
