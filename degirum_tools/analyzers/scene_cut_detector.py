@@ -59,7 +59,7 @@ Key Classes:
 
 import numpy as np
 import cv2
-from typing import Optional, Tuple, List
+from typing import Any, Optional, Tuple, List
 from .result_analyzer_base import ResultAnalyzerBase
 
 
@@ -205,13 +205,12 @@ class SceneCutDetector(ResultAnalyzerBase):
         else:
             result.scene_cut = False
 
-    def _calculate_hsv_diff(self, frame_img: np.ndarray) -> float:
+    def _calculate_hsv_diff(self, frame_img: Any) -> float:
         """
         Calculate the HSV-based difference between current and previous frame.
 
         Args:
-            frame_img (numpy.ndarray): Current frame in RGB format (as provided by
-                inference results).
+            frame_img (Any): Current frame as provided by inference results. Can be a numpy array or a PIL image.
 
         Returns:
             float: Weighted average of differences in hue, saturation, and luma channels,
