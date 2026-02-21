@@ -907,6 +907,14 @@ class _Tracer:
         self._timeout_count_initial = timeout_frames
         self._trace_depth = trail_depth
 
+    def reset(self):
+        """
+        Reset all traces and timeouts.
+        """
+        self._timeout_count_dict.clear()
+        self.active_trails.clear()
+        self.trail_classes.clear()
+
     def update(self, result):
         """
         Update object traces with current frame result.
@@ -1051,6 +1059,8 @@ class ObjectTracker(ResultAnalyzerBase):
             if result.scene_cut:
                 # Scene cut detected - reset all tracks to avoid tracking across scene boundaries
                 self._tracker.reset()
+                if self._tracer is not None:
+                    self._tracer.reset()
 
         self._tracker.update(result)
         if self._tracer is None:

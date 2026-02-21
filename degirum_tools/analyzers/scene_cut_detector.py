@@ -112,9 +112,6 @@ class SceneCutDetector(ResultAnalyzerBase):
                 (brightness), ignoring color information for faster processing. Default False.
             resize_limit (int, optional): Maximum image dimension to apply frame resizing to improve
                 performance. Frames larger than 1.5x this limit will be resized. Default 240.
-
-        Raises:
-            ValueError: If window_width is less than 1.
         """
         super().__init__()
 
