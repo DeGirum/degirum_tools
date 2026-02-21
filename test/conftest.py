@@ -43,7 +43,7 @@ def cloud_token(request):
     if token:
         from degirum._tokens import TokenManager
 
-        TokenManager().token_install(token, True)
+        TokenManager().token_install(token, False)
     return token
 
 
