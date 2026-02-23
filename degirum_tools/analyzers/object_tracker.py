@@ -565,6 +565,14 @@ class _ByteTrack:
         self._removed_tracks: List[STrack] = []
         self._id_counter = _IDCounter()
 
+    def reset(self):
+        """
+        Resets the tracker to its initial state, clearing all existing tracks.
+        """
+        self._tracked_tracks.clear()
+        self._lost_tracks.clear()
+        self._removed_tracks.clear()
+
     def update(self, result):
         """
         Updates the tracker with the provided detections and
@@ -899,6 +907,14 @@ class _Tracer:
         self._timeout_count_initial = timeout_frames
         self._trace_depth = trail_depth
 
+    def reset(self):
+        """
+        Reset all traces and timeouts.
+        """
+        self._timeout_count_dict.clear()
+        self.active_trails.clear()
+        self.trail_classes.clear()
+
     def update(self, result):
         """
         Update object traces with current frame result.
@@ -984,6 +1000,7 @@ class ObjectTracker(ResultAnalyzerBase):
         track_thresh: float = 0.25,
         track_buffer: int = 30,
         match_thresh: float = 0.8,
+        reset_at_scene_cut: bool = False,
         anchor_point: AnchorPoint = AnchorPoint.BOTTOM_CENTER,
         trail_depth: int = 0,
         show_overlay: bool = True,
@@ -997,6 +1014,9 @@ class ObjectTracker(ResultAnalyzerBase):
             track_thresh (float, optional): Detection confidence threshold for initiating a new track.
             track_buffer (int, optional): Number of frames to keep a lost track before removing it.
             match_thresh (float, optional): Intersection-over-union (IoU) threshold for matching detections to existing tracks.
+            reset_at_scene_cut (bool, optional): If True, resets all tracks when a scene cut is detected.
+                Requires the result to have a `scene_cut` attribute (set by SceneCutDetector).
+                Use this to avoid tracking objects across scene transitions in videos with cuts or edits.
             anchor_point (AnchorPoint, optional): Anchor point on the bounding box used for trail visualization.
             trail_depth (int, optional): Number of recent positions to keep for each track's trail. Set 0 to disable trail tracking.
             show_overlay (bool, optional): If True, annotate the image; if False, return the original image.
@@ -1008,6 +1028,8 @@ class ObjectTracker(ResultAnalyzerBase):
         self._show_overlay = show_overlay
         self._annotation_color = annotation_color
         self._show_only_track_ids = show_only_track_ids
+        # Reset tracker on scene cuts when enabled (requires SceneCutDetector in pipeline)
+        self._reset_at_scene_cut = reset_at_scene_cut
         self._tracer: Optional[_Tracer] = (
             _Tracer(track_buffer, trail_depth) if trail_depth > 0 else None
         )
@@ -1027,6 +1049,19 @@ class ObjectTracker(ResultAnalyzerBase):
             result (InferenceResults): Model inference result for the current frame, containing
                 detected object bounding boxes and classes.
         """
+        # Reset tracker on scene cuts if enabled
+        if self._reset_at_scene_cut:
+            if not hasattr(result, "scene_cut"):
+                raise AttributeError(
+                    "reset_at_scene_cut is enabled but result does not have a 'scene_cut' attribute. "
+                    "Please add SceneCutDetector before ObjectTracker in your analyzer pipeline."
+                )
+            if result.scene_cut:
+                # Scene cut detected - reset all tracks to avoid tracking across scene boundaries
+                self._tracker.reset()
+                if self._tracer is not None:
+                    self._tracer.reset()
+
         self._tracker.update(result)
         if self._tracer is None:
             result.trails = {}
