@@ -5,3 +5,4 @@ dist/*
 degirum_tools.egg-info/*
 temp/*
 .cursor/
+.DS_Store

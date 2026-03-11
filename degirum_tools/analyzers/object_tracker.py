@@ -138,6 +138,7 @@ class TrackOutput:
         score: Detection confidence score for the most recent observation.
         tracklet_len: Number of consecutive frames this track has been active.
         confidence: CBMOT temporal confidence score in [0, 1].
+        position_uncertainty: Scale-normalized Kalman position uncertainty.
     """
 
     obj_idx: int
@@ -146,6 +147,19 @@ class TrackOutput:
     score: float
     tracklet_len: int
     confidence: float
+    position_uncertainty: float
+
+
+def _compute_position_uncertainty(
+    covariance: np.ndarray, tlbr: np.ndarray
+) -> float:
+    """Compute scale-normalized Kalman position uncertainty.
+
+    Returns sqrt(P[0,0] + P[1,1]) divided by bounding-box height.
+    """
+    pos_uncertainty = np.sqrt(covariance[0, 0] + covariance[1, 1])
+    bbox_h = max(float(tlbr[3] - tlbr[1]), 1.0)
+    return float(pos_uncertainty / bbox_h)
 
 
 class _TrackerBackend(ABC):
@@ -435,6 +449,7 @@ class STrack:
         self.obj_idx = obj_idx
         self.tracklet_len = 0
         self.confidence = score
+        self.position_uncertainty = 0.0
 
     @property
     def end_frame(self) -> int:
@@ -469,6 +484,9 @@ class STrack:
             for i, (mean, cov) in enumerate(zip(multi_mean, multi_covariance)):
                 stracks[i].mean = mean
                 stracks[i].covariance = cov
+                stracks[i].position_uncertainty = _compute_position_uncertainty(
+                    cov, stracks[i].tlbr
+                )
 
     def activate(self, kalman_filter: _KalmanFilter, frame_id: int):
         """Activates this track with an initial detection.
@@ -484,6 +502,9 @@ class STrack:
         self.track_id = self.next_id()
         self.mean, self.covariance = self.kalman_filter.initiate(
             self.tlwh_to_xyah(self._tlwh)
+        )
+        self.position_uncertainty = _compute_position_uncertainty(
+            self.covariance, self.tlbr
         )
 
         self.tracklet_len = 0
@@ -510,6 +531,9 @@ class STrack:
         assert self.covariance is not None
         self.mean, self.covariance = self.kalman_filter.update(
             self.mean, self.covariance, self.tlwh_to_xyah(new_track.tlwh)
+        )
+        self.position_uncertainty = _compute_position_uncertainty(
+            self.covariance, self.tlbr
         )
         self.tracklet_len = 0
         self.state = _TrackState.Tracked
@@ -544,6 +568,9 @@ class STrack:
         assert self.covariance is not None
         self.mean, self.covariance = self.kalman_filter.update(
             self.mean, self.covariance, self.tlwh_to_xyah(new_tlwh)
+        )
+        self.position_uncertainty = _compute_position_uncertainty(
+            self.covariance, self.tlbr
         )
         self.state = _TrackState.Tracked
         self.is_activated = True
@@ -845,6 +872,7 @@ class _ByteTrackBackend(_TrackerBackend):
                     score=track.score,
                     tracklet_len=track.tracklet_len,
                     confidence=track.confidence,
+                    position_uncertainty=track.position_uncertainty,
                 )
             )
         return outputs
@@ -1176,6 +1204,9 @@ class _OCSortTrack:
         self.obj_idx = obj_idx
         self.tracklet_len = 0
         self.confidence = score
+        self.position_uncertainty = _compute_position_uncertainty(
+            self.covariance, self.tlbr
+        )
 
     def next_id(self) -> int:
         self.id_counter._count += 1
@@ -1183,6 +1214,9 @@ class _OCSortTrack:
 
     def predict(self) -> np.ndarray:
         self.mean, self.covariance = self._kf.predict(self.mean, self.covariance)
+        self.position_uncertainty = _compute_position_uncertainty(
+            self.covariance, self.tlbr
+        )
         self.age += 1
         if self.time_since_update > 0:
             self.hit_streak = 0
@@ -1217,6 +1251,9 @@ class _OCSortTrack:
 
         self.mean, self.covariance = self._kf.update(
             self.mean, self.covariance, _bbox_to_z_ocsort(bbox)
+        )
+        self.position_uncertainty = _compute_position_uncertainty(
+            self.covariance, self.tlbr
         )
 
         # CBMOT Eq. 6: c = 1 - (1 - c_hat) * (1 - s_det)
@@ -1477,6 +1514,7 @@ class _OCSortBackend(_TrackerBackend):
                         score=trk.score,
                         tracklet_len=trk.tracklet_len,
                         confidence=trk.confidence,
+                        position_uncertainty=trk.position_uncertainty,
                     )
                 )
         self._trackers = trackers_to_keep
@@ -1804,6 +1842,7 @@ class ObjectTracker(ResultAnalyzerBase):
             result.results[to.obj_idx]["bbox"] = to.tlbr.tolist()
             result.results[to.obj_idx]["track_id"] = to.track_id
             result.results[to.obj_idx]["track_confidence"] = to.confidence
+            result.results[to.obj_idx]["track_position_uncertainty"] = to.position_uncertainty
 
         # Trail tracking
         if self._tracer is None:

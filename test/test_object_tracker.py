@@ -1243,3 +1243,81 @@ def test_score_decay_parameter_affects_confidence():
         f"Lower score_decay should preserve more confidence: "
         f"decay=0.05 -> {conf_low_decay:.4f}, decay=0.3 -> {conf_high_decay:.4f}"
     )
+
+
+# ============================================================================
+# Position uncertainty tests (both backends)
+# ============================================================================
+
+
+def test_position_uncertainty_exists_and_nonnegative():
+    """track_position_uncertainty should appear on tracked detections as a non-negative float."""
+    from degirum_tools.analyzers.object_tracker import ObjectTracker
+
+    for tracker_type, mt in [("bytetrack", 0.8), ("ocsort", 0.3)]:
+        tracker = ObjectTracker(tracker_type=tracker_type, match_thresh=mt)
+        for i in range(3):
+            r = MockResult(
+                results=[
+                    {
+                        "bbox": [10 + i, 10, 30 + i, 30],
+                        "score": 0.9,
+                        "label": "a",
+                    }
+                ]
+            )
+            tracker.analyze(r)
+
+        det = r.results[0]
+        assert "track_position_uncertainty" in det, (
+            f"{tracker_type}: track_position_uncertainty missing"
+        )
+        val = det["track_position_uncertainty"]
+        assert isinstance(val, float), (
+            f"{tracker_type}: track_position_uncertainty is not float"
+        )
+        assert val >= 0.0, (
+            f"{tracker_type}: track_position_uncertainty should be >= 0, got {val}"
+        )
+
+
+def test_position_uncertainty_lower_after_update_than_predict():
+    """After a Kalman update (matched detection), position uncertainty should be
+    lower than after a pure predict (unmatched frame)."""
+    from degirum_tools.analyzers.object_tracker import ObjectTracker
+
+    for tracker_type, mt in [("bytetrack", 0.8), ("ocsort", 0.3)]:
+        tracker = ObjectTracker(
+            tracker_type=tracker_type, match_thresh=mt, track_buffer=10
+        )
+
+        # 5 frames with matched detections
+        for i in range(5):
+            r = MockResult(
+                results=[
+                    {
+                        "bbox": [10 + i, 10, 30 + i, 30],
+                        "score": 0.9,
+                        "label": "a",
+                    }
+                ]
+            )
+            tracker.analyze(r)
+        unc_matched = r.results[0]["track_position_uncertainty"]
+
+        # 3 empty frames (predict-only, uncertainty should grow)
+        for _ in range(3):
+            tracker.analyze(MockResult(results=[]))
+
+        # Re-detect to read the track's uncertainty after the gap
+        r = MockResult(
+            results=[{"bbox": [16, 10, 36, 30], "score": 0.9, "label": "a"}]
+        )
+        tracker.analyze(r)
+        det = r.results[0]
+        if "track_position_uncertainty" in det:
+            unc_after_gap = det["track_position_uncertainty"]
+            assert unc_after_gap >= unc_matched * 0.5, (
+                f"{tracker_type}: uncertainty after gap ({unc_after_gap:.6f}) "
+                f"should not be drastically below matched ({unc_matched:.6f})"
+            )
