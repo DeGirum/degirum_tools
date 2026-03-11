@@ -35,17 +35,19 @@
 Object Tracker Analyzer Module Overview
 ====================================
 
-Implements multi-object tracking with pluggable backends and per-track certainty scoring.
+Implements multi-object tracking with pluggable backends and per-track confidence scoring.
 
 Supported tracker backends:
     - ``"bytetrack"`` -- `BYTETrack algorithm <https://github.com/ifzhang/ByteTrack>`_ (default)
     - ``"ocsort"`` -- `OC-SORT algorithm <https://github.com/noahcao/OC_SORT>`_ with
       Observation-Centric Re-Update (ORU) and Observation-Centric Momentum (OCM)
 
-Per-track certainty fields added to each tracked detection:
-    - ``track_confidence`` -- composite quality score blending detection score, match IoU, and track age
-    - ``track_uncertainty`` -- motion uncertainty derived from Kalman filter covariance
-    - ``track_occlusion_risk`` -- spatial overlap risk with other active tracks
+Per-track confidence scoring (CBMOT, Benbarka et al. 2021):
+    Each track maintains a temporal confidence score that rises when the track is
+    consistently matched to detections and decays when unmatched. The score update
+    uses Eq. 6 from the `CBMOT paper <https://arxiv.org/abs/2107.04327>`_:
+    ``c = 1 - (1 - c_hat) * (1 - s_det)`` (multiply uncertainty complements).
+    The result is exposed as ``track_confidence`` on each tracked detection.
 
 Key Features:
     - **Persistent Object Identity**: Maintains consistent track IDs across frames
@@ -59,7 +61,7 @@ Key Features:
 Typical Usage:
     1. Create an ``ObjectTracker`` instance with desired tracking parameters
     2. Process each frame's detection results through the tracker
-    3. Access track IDs, certainty scores, and trails from the augmented results
+    3. Access track IDs, confidence scores, and trails from the augmented results
     4. Optionally visualize tracking results using the annotate method
     5. Use track IDs in downstream analyzers for advanced analytics
 
@@ -79,6 +81,7 @@ Configuration Options:
     - ``track_thresh``: Confidence threshold for initiating new tracks
     - ``track_buffer``: Frames to retain tracks after object disappearance
     - ``match_thresh``: IoU threshold for matching detections to existing tracks
+    - ``score_decay``: Per-frame CBMOT confidence decay for unmatched tracks
     - ``trail_depth``: Number of recent positions to keep for trail visualization
     - ``show_overlay``: Enable/disable visual annotations
     - ``annotation_color``: Customize overlay appearance
@@ -89,7 +92,7 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from copy import deepcopy
 from scipy.optimize import linear_sum_assignment
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Tuple, Optional, Dict
 from ..tools import (
     box_iou_batch,
@@ -134,10 +137,7 @@ class TrackOutput:
         tlbr: Smoothed bounding box as [x1, y1, x2, y2].
         score: Detection confidence score for the most recent observation.
         tracklet_len: Number of consecutive frames this track has been active.
-        covariance: Kalman filter covariance matrix (NxN) or None.
-        match_iou: IoU between the track prediction and the matched detection (0 if new).
-        match_step: Association stage that produced the match
-            (1=high-score, 2=low-score, 3=unconfirmed, 0=newly created).
+        confidence: CBMOT temporal confidence score in [0, 1].
     """
 
     obj_idx: int
@@ -145,9 +145,7 @@ class TrackOutput:
     tlbr: np.ndarray
     score: float
     tracklet_len: int
-    covariance: Optional[np.ndarray]
-    match_iou: float
-    match_step: int
+    confidence: float
 
 
 class _TrackerBackend(ABC):
@@ -397,7 +395,10 @@ class STrack:
         tracklet_len (int): Number of frames this track has been in the tracked state.
         score (float): Detection confidence score for the most recent observation of this track.
         obj_idx (int): Index of this object's detection in the frame's results list (used for internal bookkeeping).
+        confidence (float): CBMOT temporal confidence score in [0, 1] (Benbarka et al. 2021, Eq. 6).
     """
+
+    score_decay: float = 0.1
 
     def __init__(
         self, tlwh: np.ndarray, score: float, obj_idx: int, id_counter: _IDCounter
@@ -433,9 +434,7 @@ class STrack:
         self.score = score
         self.obj_idx = obj_idx
         self.tracklet_len = 0
-
-        self.match_iou: float = 0.0
-        self.match_step: int = 0
+        self.confidence = score
 
     @property
     def end_frame(self) -> int:
@@ -461,6 +460,8 @@ class STrack:
                 multi_covariance.append(st.covariance)
                 if st.state != _TrackState.Tracked:
                     multi_mean[i][7] = 0
+                # CBMOT score decay: applied at prediction time for all tracks
+                st.confidence = max(st.confidence - st.score_decay, 0.0)
 
             multi_mean, multi_covariance = shared_kalman.multi_predict(
                 np.asarray(multi_mean), np.asarray(multi_covariance)
@@ -516,6 +517,9 @@ class STrack:
         self.frame_id = frame_id
         if new_id:
             self.track_id = self.next_id()
+        # CBMOT Eq. 6: c = 1 - (1 - c_hat) * (1 - s_det)
+        # c_hat already reflects score_decay applied during multi_predict
+        self.confidence = 1.0 - (1.0 - self.confidence) * (1.0 - new_track.score)
         self.score = new_track.score
         self.obj_idx = new_track.obj_idx
 
@@ -544,6 +548,9 @@ class STrack:
         self.state = _TrackState.Tracked
         self.is_activated = True
 
+        # CBMOT Eq. 6: c = 1 - (1 - c_hat) * (1 - s_det)
+        # c_hat already reflects score_decay applied during multi_predict
+        self.confidence = 1.0 - (1.0 - self.confidence) * (1.0 - new_track.score)
         self.score = new_track.score
         self.obj_idx = new_track.obj_idx
 
@@ -705,8 +712,6 @@ class _ByteTrackBackend(_TrackerBackend):
         tracked_stracks: List[STrack] = []
         for track in self._tracked_tracks:
             track.obj_idx = -1  # clear object index in advance
-            track.match_iou = 0.0
-            track.match_step = 0
             if not track.is_activated:
                 unconfirmed.append(track)
             else:
@@ -719,10 +724,6 @@ class _ByteTrackBackend(_TrackerBackend):
         )
         STrack.multi_predict(strack_pool, self._kalman_filter)
         dists = _ByteTrackBackend._iou_distance(strack_pool, detections)
-
-        # save raw IoU before fuse_score for match_iou recording
-        raw_iou_sim = 1.0 - dists if dists.size > 0 else dists
-
         dists = _ByteTrackBackend._fuse_score(dists, detections)
         matches, u_track, u_detection = _ByteTrackBackend._linear_assignment(
             dists, thresh=self._match_thresh
@@ -731,8 +732,6 @@ class _ByteTrackBackend(_TrackerBackend):
         for itracked, idet in matches:
             track = strack_pool[itracked]
             det = detections[idet]
-            track.match_iou = float(raw_iou_sim[itracked, idet])
-            track.match_step = 1
             if track.state == _TrackState.Tracked:
                 track.update(det, self._frame_id)
                 activated_stracks.append(track)
@@ -757,15 +756,12 @@ class _ByteTrackBackend(_TrackerBackend):
             if strack_pool[i].state == _TrackState.Tracked
         ]
         dists2 = _ByteTrackBackend._iou_distance(r_tracked_stracks, detections_second)
-        raw_iou_sim2 = 1.0 - dists2 if dists2.size > 0 else dists2
         matches, u_track, u_detection_second = _ByteTrackBackend._linear_assignment(
             dists2, thresh=0.5
         )
         for itracked, idet in matches:
             track = r_tracked_stracks[itracked]
             det = detections_second[idet]
-            track.match_iou = float(raw_iou_sim2[itracked, idet])
-            track.match_step = 2
             if track.state == _TrackState.Tracked:
                 track.update(det, self._frame_id)
                 activated_stracks.append(track)
@@ -782,16 +778,12 @@ class _ByteTrackBackend(_TrackerBackend):
         """Deal with unconfirmed tracks, usually tracks with only one beginning frame"""
         detections = [detections[i] for i in u_detection]
         dists3 = _ByteTrackBackend._iou_distance(unconfirmed, detections)
-        raw_iou_sim3 = 1.0 - dists3 if dists3.size > 0 else dists3
-
         dists3 = _ByteTrackBackend._fuse_score(dists3, detections)
         matches, u_unconfirmed, u_detection = _ByteTrackBackend._linear_assignment(
             dists3, thresh=0.7
         )
         for itracked, idet in matches:
             track = unconfirmed[itracked]
-            track.match_iou = float(raw_iou_sim3[itracked, idet])
-            track.match_step = 3
             track.update(detections[idet], self._frame_id)
             activated_stracks.append(track)
         for it in u_unconfirmed:
@@ -852,9 +844,7 @@ class _ByteTrackBackend(_TrackerBackend):
                     tlbr=track.tlbr,
                     score=track.score,
                     tracklet_len=track.tracklet_len,
-                    covariance=track.covariance,
-                    match_iou=track.match_iou,
-                    match_step=track.match_step,
+                    confidence=track.confidence,
                 )
             )
         return outputs
@@ -1151,6 +1141,8 @@ class _OCSortKalmanFilter:
 class _OCSortTrack:
     """Single tracked object for the OC-SORT backend."""
 
+    score_decay: float = 0.1
+
     def __init__(
         self,
         bbox: np.ndarray,
@@ -1183,8 +1175,7 @@ class _OCSortTrack:
         self.score = score
         self.obj_idx = obj_idx
         self.tracklet_len = 0
-        self.match_iou: float = 0.0
-        self.match_step: int = 0
+        self.confidence = score
 
     def next_id(self) -> int:
         self.id_counter._count += 1
@@ -1196,6 +1187,8 @@ class _OCSortTrack:
         if self.time_since_update > 0:
             self.hit_streak = 0
         self.time_since_update += 1
+        # CBMOT score decay: applied at prediction time
+        self.confidence = max(self.confidence - self.score_decay, 0.0)
         return self.tlbr
 
     def update_with_detection(
@@ -1226,6 +1219,9 @@ class _OCSortTrack:
             self.mean, self.covariance, _bbox_to_z_ocsort(bbox)
         )
 
+        # CBMOT Eq. 6: c = 1 - (1 - c_hat) * (1 - s_det)
+        # c_hat already reflects score_decay applied during predict()
+        self.confidence = 1.0 - (1.0 - self.confidence) * (1.0 - score)
         self.score = score
         self.obj_idx = obj_idx
         self.frame_id = frame_id
@@ -1359,9 +1355,6 @@ class _OCSortBackend(_TrackerBackend):
 
         for m in matched:
             det_idx, trk_idx = int(m[0]), int(m[1])
-            iou_val = float(iou_for_match[det_idx, trk_idx]) if iou_for_match.size > 0 else 0.0
-            self._trackers[trk_idx].match_iou = iou_val
-            self._trackers[trk_idx].match_step = 1
             self._trackers[trk_idx].update_with_detection(
                 dets[det_idx, :4],
                 float(dets[det_idx, 4]),
@@ -1386,8 +1379,6 @@ class _OCSortBackend(_TrackerBackend):
                     if iou_left[r, c] < self._match_thresh:
                         continue
                     trk_idx = unmatched_trks[c]
-                    self._trackers[trk_idx].match_iou = float(iou_left[r, c])
-                    self._trackers[trk_idx].match_step = 2
                     self._trackers[trk_idx].update_with_detection(
                         dets_second[r, :4],
                         float(dets_second[r, 4]),
@@ -1427,8 +1418,6 @@ class _OCSortBackend(_TrackerBackend):
                             continue
                         det_i = unmatched_dets[r]
                         trk_i = unmatched_trks[valid_indices[c]]
-                        self._trackers[trk_i].match_iou = float(iou_left[r, c])
-                        self._trackers[trk_i].match_step = 3
                         self._trackers[trk_i].update_with_detection(
                             dets[det_i, :4],
                             float(dets[det_i, 4]),
@@ -1450,8 +1439,6 @@ class _OCSortBackend(_TrackerBackend):
         for t in unmatched_trks:
             self._trackers[t].update_no_detection()
             self._trackers[t].obj_idx = -1
-            self._trackers[t].match_iou = 0.0
-            self._trackers[t].match_step = 0
 
         # create new tracks for unmatched high-score detections
         for i in unmatched_dets:
@@ -1489,9 +1476,7 @@ class _OCSortBackend(_TrackerBackend):
                         tlbr=trk.predicted_tlbr,
                         score=trk.score,
                         tracklet_len=trk.tracklet_len,
-                        covariance=trk.covariance,
-                        match_iou=trk.match_iou,
-                        match_step=trk.match_step,
+                        confidence=trk.confidence,
                     )
                 )
         self._trackers = trackers_to_keep
@@ -1570,64 +1555,6 @@ class _OCSortBackend(_TrackerBackend):
             else list(range(len(trks)))
         )
         return matches, unmatched_dets, unmatched_trks
-
-
-# ============================================================================
-# Certainty scoring
-# ============================================================================
-
-
-class _CertaintyScorer:
-    """Computes per-track certainty fields from TrackOutput data."""
-
-    def __init__(
-        self,
-        confidence_weights: Tuple[float, float, float] = (0.4, 0.4, 0.2),
-        age_saturate: int = 10,
-        iou_risk_cap: float = 0.5,
-    ):
-        self._w_det, self._w_iou, self._w_age = confidence_weights
-        self._age_saturate = float(max(age_saturate, 1))
-        self._iou_risk_cap = max(iou_risk_cap, 1e-6)
-
-    def compute(
-        self, track_outputs: List[TrackOutput]
-    ) -> List[Tuple[float, float, float]]:
-        """Compute (track_confidence, track_uncertainty, track_occlusion_risk) per track."""
-        n = len(track_outputs)
-        if n == 0:
-            return []
-
-        tlbrs = np.array([to.tlbr for to in track_outputs])
-        if n > 1:
-            pairwise = box_iou_batch(tlbrs, tlbrs)
-            np.fill_diagonal(pairwise, 0.0)
-            max_ious = pairwise.max(axis=1)
-        else:
-            max_ious = np.zeros(n)
-
-        results: List[Tuple[float, float, float]] = []
-        for i, to in enumerate(track_outputs):
-            s_det = to.score
-            s_iou = to.match_iou * (0.7 if to.match_step == 2 else 1.0)
-            s_age = min(to.tracklet_len / self._age_saturate, 1.0)
-            conf = float(
-                self._w_det * s_det + self._w_iou * s_iou + self._w_age * s_age
-            )
-
-            if to.covariance is not None:
-                pos_cov = to.covariance[:2, :2]
-                unc_raw = np.sqrt(max(np.trace(pos_cov), 0.0))
-                bbox_h = max(float(to.tlbr[3] - to.tlbr[1]), 1.0)
-                sigma_ref = max(bbox_h * 0.1, 5.0)
-                unc = float(1.0 - np.exp(-unc_raw / sigma_ref))
-            else:
-                unc = 1.0
-
-            occ = float(min(max_ious[i] / self._iou_risk_cap, 1.0))
-            results.append((conf, unc, occ))
-
-        return results
 
 
 # ============================================================================
@@ -1728,9 +1655,8 @@ class ObjectTracker(ResultAnalyzerBase):
 
     After each call to ``analyze()``, the input result's detections are augmented with:
     - ``track_id`` -- persistent identity across frames
-    - ``track_confidence`` -- composite quality score in [0, 1]
-    - ``track_uncertainty`` -- motion uncertainty in [0, 1]
-    - ``track_occlusion_risk`` -- spatial overlap risk in [0, 1]
+    - ``track_confidence`` -- CBMOT temporal confidence score in [0, 1] (Benbarka et al. 2021).
+      Rises when the track is consistently matched; decays by ``score_decay`` per frame when unmatched.
 
     If a trail length is specified (non-zero *trail_depth*), the result will also contain
     ``trails`` and ``trail_classes`` dictionaries: ``trails`` maps each track ID to a list of recent bounding box
@@ -1758,15 +1684,13 @@ class ObjectTracker(ResultAnalyzerBase):
         track_thresh: float = 0.25,
         track_buffer: int = 30,
         match_thresh: float = 0.8,
+        score_decay: float = 0.1,
         reset_at_scene_cut: bool = False,
         anchor_point: AnchorPoint = AnchorPoint.BOTTOM_CENTER,
         trail_depth: int = 0,
         show_overlay: bool = True,
         annotation_color: Optional[tuple] = None,
         show_only_track_ids: bool = False,
-        confidence_weights: Tuple[float, float, float] = (0.4, 0.4, 0.2),
-        age_saturate: int = 10,
-        iou_risk_cap: float = 0.5,
         delta_t: int = 3,
         inertia: float = 0.2,
     ):
@@ -1779,6 +1703,9 @@ class ObjectTracker(ResultAnalyzerBase):
             track_buffer (int, optional): Number of frames to keep a lost track before removing it.
             match_thresh (float, optional): Intersection-over-union (IoU) threshold for matching detections to existing tracks.
                 Defaults to 0.8 for bytetrack, 0.3 is typical for ocsort.
+            score_decay (float, optional): Per-frame confidence decay for unmatched tracks.
+                Implements CBMOT score refinement (Benbarka et al. 2021, https://arxiv.org/abs/2107.04327).
+                Higher values cause faster confidence decay during occlusion/missed detections.
             reset_at_scene_cut (bool, optional): If True, resets all tracks when a scene cut is detected.
                 Requires the result to have a ``scene_cut`` attribute (set by SceneCutDetector).
                 Use this to avoid tracking objects across scene transitions in videos with cuts or edits.
@@ -1787,13 +1714,14 @@ class ObjectTracker(ResultAnalyzerBase):
             show_overlay (bool, optional): If True, annotate the image; if False, return the original image.
             annotation_color (Tuple[int, int, int], optional): RGB tuple to use for annotations. If None, a contrasting color is chosen automatically.
             show_only_track_ids (bool, optional): If True, only track IDs are shown in the annotations. If False, trails and labels are also shown when available.
-            confidence_weights (Tuple[float, float, float], optional): Weights (w_det, w_iou, w_age) for track_confidence computation.
-            age_saturate (int, optional): Frames after which the age component of track_confidence saturates.
-            iou_risk_cap (float, optional): IoU value at which track_occlusion_risk saturates to 1.0.
             delta_t (int, optional): (ocsort only) Observation lookback for velocity estimation.
             inertia (float, optional): (ocsort only) Weight of velocity direction consistency in association.
         """
         tracker_type = tracker_type.lower()
+        # Set CBMOT score_decay on both track classes before backend construction
+        STrack.score_decay = score_decay
+        _OCSortTrack.score_decay = score_decay
+
         if tracker_type == "bytetrack":
             self._backend: _TrackerBackend = _ByteTrackBackend(
                 track_thresh=track_thresh,
@@ -1814,11 +1742,6 @@ class ObjectTracker(ResultAnalyzerBase):
             )
 
         self._class_list = class_list
-        self._certainty = _CertaintyScorer(
-            confidence_weights=confidence_weights,
-            age_saturate=age_saturate,
-            iou_risk_cap=iou_risk_cap,
-        )
         self._anchor_point = anchor_point
         self._show_overlay = show_overlay
         self._annotation_color = annotation_color
@@ -1837,9 +1760,9 @@ class ObjectTracker(ResultAnalyzerBase):
         was set, this method also updates each track's trail of past positions.
 
         The input result is updated in-place. Each detection in result.results receives a "track_id"
-        identifying its track, along with "track_confidence", "track_uncertainty", and
-        "track_occlusion_risk" certainty fields. If trails are enabled, result.trails and
-        result.trail_classes are updated to reflect the current active tracks.
+        identifying its track and a "track_confidence" score (CBMOT temporal confidence, Benbarka
+        et al. 2021). If trails are enabled, result.trails and result.trail_classes are updated
+        to reflect the current active tracks.
 
         Args:
             result (InferenceResults): Model inference result for the current frame, containing
@@ -1880,16 +1803,7 @@ class ObjectTracker(ResultAnalyzerBase):
                 continue
             result.results[to.obj_idx]["bbox"] = to.tlbr.tolist()
             result.results[to.obj_idx]["track_id"] = to.track_id
-
-        # Compute and write certainty scores
-        if track_outputs:
-            certainties = self._certainty.compute(track_outputs)
-            for to, (conf, unc, occ) in zip(track_outputs, certainties):
-                if to.obj_idx < 0:
-                    continue
-                result.results[to.obj_idx]["track_confidence"] = conf
-                result.results[to.obj_idx]["track_uncertainty"] = unc
-                result.results[to.obj_idx]["track_occlusion_risk"] = occ
+            result.results[to.obj_idx]["track_confidence"] = to.confidence
 
         # Trail tracking
         if self._tracer is None:

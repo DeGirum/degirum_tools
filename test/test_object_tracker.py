@@ -951,17 +951,17 @@ def test_object_tracker_ocsort():
 
 
 # ============================================================================
-# Certainty field tests (both backends)
+# CBMOT confidence tests (both backends)
 # ============================================================================
 
 
-def _run_certainty_test(tracker_type: str, match_thresh: float):
-    """Helper: verify certainty fields exist and are bounded for a given backend."""
+def _run_confidence_test(tracker_type: str, match_thresh: float):
+    """Helper: verify track_confidence exists, is bounded, and increases for matched tracks."""
     from degirum_tools.analyzers.object_tracker import ObjectTracker
 
     tracker = ObjectTracker(tracker_type=tracker_type, match_thresh=match_thresh)
 
-    # Build a 5-frame sequence with one object
+    prev_conf = None
     for frame in range(5):
         result = MockResult(
             results=[
@@ -973,74 +973,78 @@ def _run_certainty_test(tracker_type: str, match_thresh: float):
             ]
         )
         tracker.analyze(result)
-
-    # After 5 frames the detection should have certainty fields
-    det = result.results[0]
-    assert "track_id" in det, f"{tracker_type}: track_id missing after 5 frames"
-    for field_name in ("track_confidence", "track_uncertainty", "track_occlusion_risk"):
-        assert field_name in det, f"{tracker_type}: {field_name} missing"
-        val = det[field_name]
-        assert isinstance(val, float), f"{tracker_type}: {field_name} is not float"
-        assert 0.0 <= val <= 2.0, (
-            f"{tracker_type}: {field_name}={val} out of expected range"
+        det = result.results[0]
+        assert "track_confidence" in det, f"{tracker_type}: track_confidence missing"
+        conf = det["track_confidence"]
+        assert isinstance(conf, float), f"{tracker_type}: track_confidence is not float"
+        assert 0.0 <= conf <= 1.0, (
+            f"{tracker_type}: track_confidence={conf} out of [0, 1]"
         )
+        if prev_conf is not None:
+            assert conf >= prev_conf - 0.01, (
+                f"{tracker_type}: confidence should not decrease for consistently "
+                f"matched track: {prev_conf:.4f} -> {conf:.4f}"
+            )
+        prev_conf = conf
 
 
-def test_certainty_fields_bytetrack():
-    """Certainty fields exist and are bounded (ByteTrack)."""
-    _run_certainty_test("bytetrack", 0.8)
+def test_confidence_field_bytetrack():
+    """CBMOT confidence exists, bounded, and non-decreasing for matched tracks (ByteTrack)."""
+    _run_confidence_test("bytetrack", 0.8)
 
 
-def test_certainty_fields_ocsort():
-    """Certainty fields exist and are bounded (OC-SORT)."""
-    _run_certainty_test("ocsort", 0.3)
+def test_confidence_field_ocsort():
+    """CBMOT confidence exists, bounded, and non-decreasing for matched tracks (OC-SORT)."""
+    _run_confidence_test("ocsort", 0.3)
 
 
-def test_occlusion_risk_increases_with_overlap():
-    """track_occlusion_risk should be higher when bboxes overlap."""
+def test_confidence_decays_when_unmatched():
+    """track_confidence should decay when the object disappears (CBMOT score_decay)."""
     from degirum_tools.analyzers.object_tracker import ObjectTracker
 
     for tracker_type, mt in [("bytetrack", 0.8), ("ocsort", 0.3)]:
-        # --- Scenario A: two well-separated objects ---
-        tracker_sep = ObjectTracker(tracker_type=tracker_type, match_thresh=mt)
-        for _ in range(3):
-            r = MockResult(
-                results=[
-                    {"bbox": [10, 10, 30, 30], "score": 0.9, "label": "a"},
-                    {"bbox": [200, 200, 220, 220], "score": 0.9, "label": "a"},
-                ]
-            )
-            tracker_sep.analyze(r)
-        risk_sep = max(
-            obj.get("track_occlusion_risk", 0.0)
-            for obj in r.results
-            if "track_id" in obj
+        tracker = ObjectTracker(
+            tracker_type=tracker_type, match_thresh=mt, score_decay=0.15,
+            track_buffer=10,
         )
 
-        # --- Scenario B: two heavily overlapping objects ---
-        tracker_ovl = ObjectTracker(tracker_type=tracker_type, match_thresh=mt)
-        for _ in range(3):
+        # Build a track over 5 frames
+        for frame in range(5):
             r = MockResult(
                 results=[
-                    {"bbox": [10, 10, 30, 30], "score": 0.9, "label": "a"},
-                    {"bbox": [15, 15, 35, 35], "score": 0.85, "label": "a"},
+                    {
+                        "bbox": [10 + frame, 10, 30 + frame, 30],
+                        "score": 0.9,
+                        "label": "a",
+                    }
                 ]
             )
-            tracker_ovl.analyze(r)
-        risk_ovl = max(
-            obj.get("track_occlusion_risk", 0.0)
-            for obj in r.results
-            if "track_id" in obj
-        )
+            tracker.analyze(r)
+        conf_before = r.results[0]["track_confidence"]
 
-        assert risk_ovl > risk_sep, (
-            f"{tracker_type}: overlapping risk ({risk_ovl:.3f}) should exceed "
-            f"separated risk ({risk_sep:.3f})"
+        # Now send 3 empty frames (object disappears)
+        for _ in range(3):
+            r = MockResult(results=[])
+            tracker.analyze(r)
+
+        # Re-detect the object
+        r = MockResult(
+            results=[
+                {"bbox": [18, 10, 38, 30], "score": 0.9, "label": "a"}
+            ]
         )
+        tracker.analyze(r)
+        det = r.results[0]
+        if "track_confidence" in det:
+            conf_after = det["track_confidence"]
+            assert conf_after < conf_before, (
+                f"{tracker_type}: confidence after gap ({conf_after:.4f}) should be "
+                f"less than before gap ({conf_before:.4f})"
+            )
 
 
 def test_confidence_higher_for_mature_track():
-    """track_confidence should be higher for a well-established track than a brand-new one."""
+    """A mature track (many matches) should have higher confidence than a brand-new one."""
     from degirum_tools.analyzers.object_tracker import ObjectTracker
 
     for tracker_type, mt in [("bytetrack", 0.8), ("ocsort", 0.3)]:
@@ -1075,10 +1079,9 @@ def test_confidence_higher_for_mature_track():
             if "track_id" in obj and obj.get("track_confidence", 1.0) < mature_conf:
                 new_conf = obj["track_confidence"]
 
-        # The mature track should still have a higher confidence than when it was new
-        assert mature_conf > 0.3, (
-            f"{tracker_type}: mature track confidence ({mature_conf:.3f}) should be "
-            f"meaningfully above zero"
+        assert mature_conf > 0.5, (
+            f"{tracker_type}: mature track CBMOT confidence ({mature_conf:.3f}) "
+            f"should be well above 0.5 after 8 matched frames"
         )
 
 
@@ -1203,32 +1206,40 @@ def test_ocsort_recovers_track_after_occlusion_gap():
     )
 
 
-def test_backends_produce_different_uncertainty():
-    """ByteTrack and OC-SORT evolve Kalman covariance differently, so
-    track_uncertainty should differ for the same detection sequence."""
+def test_score_decay_parameter_affects_confidence():
+    """Different score_decay values should produce different confidence trajectories."""
     from degirum_tools.analyzers.object_tracker import ObjectTracker
 
-    def _get_uncertainty(tracker_type, match_thresh):
-        tracker = ObjectTracker(tracker_type=tracker_type, match_thresh=match_thresh)
-        for i in range(6):
+    def _get_conf_after_gap(score_decay):
+        tracker = ObjectTracker(
+            tracker_type="bytetrack", match_thresh=0.8,
+            score_decay=score_decay, track_buffer=10,
+        )
+        for i in range(5):
             r = MockResult(
                 results=[
                     {
-                        "bbox": [10 + i * 2, 10 + i, 30 + i * 2, 30 + i],
+                        "bbox": [10 + i, 10, 30 + i, 30],
                         "score": 0.9,
                         "label": "a",
                     }
                 ]
             )
             tracker.analyze(r)
-        return r.results[0].get("track_uncertainty")
+        # 3 empty frames
+        for _ in range(3):
+            tracker.analyze(MockResult(results=[]))
+        # Re-detect
+        r = MockResult(
+            results=[{"bbox": [16, 10, 36, 30], "score": 0.9, "label": "a"}]
+        )
+        tracker.analyze(r)
+        return r.results[0].get("track_confidence", 0.0)
 
-    bt_unc = _get_uncertainty("bytetrack", 0.8)
-    oc_unc = _get_uncertainty("ocsort", 0.3)
+    conf_low_decay = _get_conf_after_gap(0.05)
+    conf_high_decay = _get_conf_after_gap(0.3)
 
-    assert bt_unc is not None, "ByteTrack should produce track_uncertainty"
-    assert oc_unc is not None, "OC-SORT should produce track_uncertainty"
-    assert bt_unc != oc_unc, (
-        f"Uncertainty should differ between backends: "
-        f"ByteTrack={bt_unc:.6f}, OC-SORT={oc_unc:.6f}"
+    assert conf_low_decay > conf_high_decay, (
+        f"Lower score_decay should preserve more confidence: "
+        f"decay=0.05 -> {conf_low_decay:.4f}, decay=0.3 -> {conf_high_decay:.4f}"
     )
