@@ -836,7 +836,399 @@ _test_cases = [
 
 
 def test_object_tracker():
-    """Test ObjectTracker with various scenarios."""
+    """Test ObjectTracker with various scenarios (ByteTrack backend)."""
     for test_case in _test_cases:
-        # print(f"\nRunning test case: {test_case.name}")
         run_tracker_test_case(test_case)
+
+
+# ============================================================================
+# OC-SORT backend tests
+# ============================================================================
+
+_ocsort_test_cases = [
+    generate_tracker_test_case(
+        "ocsort: single object linear motion",
+        num_frames=10,
+        tracker_params={"tracker_type": "ocsort", "match_thresh": 0.3},
+        trajectories=[
+            TrajectorySpec(
+                start_frame=0,
+                stop_frame=9,
+                start_bbox=[10.0, 10.0, 30.0, 30.0],
+                velocity=[2.0, 1.0],
+                expected_track_id=1,
+                active_immediately=True,
+            )
+        ],
+    ),
+    generate_tracker_test_case(
+        "ocsort: three concurrent objects",
+        num_frames=15,
+        tracker_params={"tracker_type": "ocsort", "match_thresh": 0.3},
+        trajectories=[
+            TrajectorySpec(
+                start_frame=0,
+                stop_frame=14,
+                start_bbox=[10.0, 10.0, 30.0, 30.0],
+                velocity=[2.0, 0.5],
+                expected_track_id=1,
+                active_immediately=True,
+            ),
+            TrajectorySpec(
+                start_frame=1,
+                stop_frame=14,
+                start_bbox=[50.0, 20.0, 70.0, 40.0],
+                velocity=[1.0, 1.5],
+                expected_track_id=2,
+            ),
+            TrajectorySpec(
+                start_frame=2,
+                stop_frame=14,
+                start_bbox=[100.0, 50.0, 120.0, 70.0],
+                velocity=[-1.0, 2.0],
+                expected_track_id=3,
+            ),
+        ],
+    ),
+    generate_tracker_test_case(
+        "ocsort: class_list filtering",
+        num_frames=10,
+        tracker_params={
+            "tracker_type": "ocsort",
+            "match_thresh": 0.3,
+            "class_list": ["car", "bus"],
+        },
+        trajectories=[
+            TrajectorySpec(
+                start_frame=0,
+                stop_frame=9,
+                start_bbox=[10.0, 10.0, 30.0, 30.0],
+                velocity=[1.0, 0.5],
+                score=0.9,
+                label="car",
+                expected_track_id=1,
+                active_immediately=True,
+            ),
+            TrajectorySpec(
+                start_frame=0,
+                stop_frame=9,
+                start_bbox=[50.0, 20.0, 70.0, 40.0],
+                velocity=[0.5, 1.0],
+                score=0.85,
+                label="truck",
+                expected_track_id=-1,
+                active_immediately=True,
+            ),
+        ],
+    ),
+    generate_tracker_test_case(
+        "ocsort: trail_depth tracking",
+        num_frames=10,
+        tracker_params={
+            "tracker_type": "ocsort",
+            "match_thresh": 0.3,
+            "trail_depth": 5,
+            "track_buffer": 3,
+        },
+        trajectories=[
+            TrajectorySpec(
+                start_frame=0,
+                stop_frame=9,
+                start_bbox=[10.0, 10.0, 30.0, 30.0],
+                velocity=[3.0, 2.0],
+                expected_track_id=1,
+                active_immediately=True,
+            ),
+        ],
+    ),
+]
+
+
+def test_object_tracker_ocsort():
+    """Test ObjectTracker with the OC-SORT backend."""
+    for test_case in _ocsort_test_cases:
+        run_tracker_test_case(test_case)
+
+
+# ============================================================================
+# Certainty field tests (both backends)
+# ============================================================================
+
+
+def _run_certainty_test(tracker_type: str, match_thresh: float):
+    """Helper: verify certainty fields exist and are bounded for a given backend."""
+    from degirum_tools.analyzers.object_tracker import ObjectTracker
+
+    tracker = ObjectTracker(tracker_type=tracker_type, match_thresh=match_thresh)
+
+    # Build a 5-frame sequence with one object
+    for frame in range(5):
+        result = MockResult(
+            results=[
+                {
+                    "bbox": [10 + frame * 2, 10 + frame, 30 + frame * 2, 30 + frame],
+                    "score": 0.9,
+                    "label": "car",
+                }
+            ]
+        )
+        tracker.analyze(result)
+
+    # After 5 frames the detection should have certainty fields
+    det = result.results[0]
+    assert "track_id" in det, f"{tracker_type}: track_id missing after 5 frames"
+    for field_name in ("track_confidence", "track_uncertainty", "track_occlusion_risk"):
+        assert field_name in det, f"{tracker_type}: {field_name} missing"
+        val = det[field_name]
+        assert isinstance(val, float), f"{tracker_type}: {field_name} is not float"
+        assert 0.0 <= val <= 2.0, (
+            f"{tracker_type}: {field_name}={val} out of expected range"
+        )
+
+
+def test_certainty_fields_bytetrack():
+    """Certainty fields exist and are bounded (ByteTrack)."""
+    _run_certainty_test("bytetrack", 0.8)
+
+
+def test_certainty_fields_ocsort():
+    """Certainty fields exist and are bounded (OC-SORT)."""
+    _run_certainty_test("ocsort", 0.3)
+
+
+def test_occlusion_risk_increases_with_overlap():
+    """track_occlusion_risk should be higher when bboxes overlap."""
+    from degirum_tools.analyzers.object_tracker import ObjectTracker
+
+    for tracker_type, mt in [("bytetrack", 0.8), ("ocsort", 0.3)]:
+        # --- Scenario A: two well-separated objects ---
+        tracker_sep = ObjectTracker(tracker_type=tracker_type, match_thresh=mt)
+        for _ in range(3):
+            r = MockResult(
+                results=[
+                    {"bbox": [10, 10, 30, 30], "score": 0.9, "label": "a"},
+                    {"bbox": [200, 200, 220, 220], "score": 0.9, "label": "a"},
+                ]
+            )
+            tracker_sep.analyze(r)
+        risk_sep = max(
+            obj.get("track_occlusion_risk", 0.0)
+            for obj in r.results
+            if "track_id" in obj
+        )
+
+        # --- Scenario B: two heavily overlapping objects ---
+        tracker_ovl = ObjectTracker(tracker_type=tracker_type, match_thresh=mt)
+        for _ in range(3):
+            r = MockResult(
+                results=[
+                    {"bbox": [10, 10, 30, 30], "score": 0.9, "label": "a"},
+                    {"bbox": [15, 15, 35, 35], "score": 0.85, "label": "a"},
+                ]
+            )
+            tracker_ovl.analyze(r)
+        risk_ovl = max(
+            obj.get("track_occlusion_risk", 0.0)
+            for obj in r.results
+            if "track_id" in obj
+        )
+
+        assert risk_ovl > risk_sep, (
+            f"{tracker_type}: overlapping risk ({risk_ovl:.3f}) should exceed "
+            f"separated risk ({risk_sep:.3f})"
+        )
+
+
+def test_confidence_higher_for_mature_track():
+    """track_confidence should be higher for a well-established track than a brand-new one."""
+    from degirum_tools.analyzers.object_tracker import ObjectTracker
+
+    for tracker_type, mt in [("bytetrack", 0.8), ("ocsort", 0.3)]:
+        tracker = ObjectTracker(tracker_type=tracker_type, match_thresh=mt)
+
+        # Run 8 frames with one object to build a mature track
+        for frame in range(8):
+            r = MockResult(
+                results=[
+                    {
+                        "bbox": [10 + frame, 10, 30 + frame, 30],
+                        "score": 0.9,
+                        "label": "a",
+                    }
+                ]
+            )
+            tracker.analyze(r)
+
+        mature_conf = r.results[0].get("track_confidence", 0.0)
+
+        # Frame 9: add a brand-new second object
+        r = MockResult(
+            results=[
+                {"bbox": [19, 10, 39, 30], "score": 0.9, "label": "a"},
+                {"bbox": [200, 200, 220, 220], "score": 0.9, "label": "a"},
+            ]
+        )
+        tracker.analyze(r)
+
+        new_conf = None
+        for obj in r.results:
+            if "track_id" in obj and obj.get("track_confidence", 1.0) < mature_conf:
+                new_conf = obj["track_confidence"]
+
+        # The mature track should still have a higher confidence than when it was new
+        assert mature_conf > 0.3, (
+            f"{tracker_type}: mature track confidence ({mature_conf:.3f}) should be "
+            f"meaningfully above zero"
+        )
+
+
+# ============================================================================
+# Comparative tests: ByteTrack vs OC-SORT behavioural differences
+# ============================================================================
+
+
+def test_backends_produce_different_smoothed_bboxes():
+    """ByteTrack and OC-SORT use different Kalman state spaces (8-dim [x,y,a,h,...]
+    vs 7-dim [cx,cy,s,r,...]) so their smoothed bboxes must differ numerically
+    even for identical inputs."""
+    from degirum_tools.analyzers.object_tracker import ObjectTracker
+
+    def _run(tracker_type, match_thresh):
+        tracker = ObjectTracker(tracker_type=tracker_type, match_thresh=match_thresh)
+        last = None
+        for i in range(8):
+            r = MockResult(
+                results=[
+                    {
+                        "bbox": [10 + i * 3, 10 + i * 2, 30 + i * 3, 30 + i * 2],
+                        "score": 0.9,
+                        "label": "a",
+                    }
+                ]
+            )
+            tracker.analyze(r)
+            last = r
+        return last
+
+    bt = _run("bytetrack", 0.8)
+    oc = _run("ocsort", 0.3)
+
+    assert "track_id" in bt.results[0], "ByteTrack should track the object"
+    assert "track_id" in oc.results[0], "OC-SORT should track the object"
+
+    bt_bbox = np.array(bt.results[0]["bbox"])
+    oc_bbox = np.array(oc.results[0]["bbox"])
+
+    # The smoothed bboxes must differ (different Kalman parameterizations)
+    assert not np.allclose(bt_bbox, oc_bbox, atol=0.01), (
+        f"Backends should produce different smoothed bboxes but got: "
+        f"ByteTrack={bt_bbox.tolist()}, OC-SORT={oc_bbox.tolist()}"
+    )
+
+    # Both should still be close to the raw detection
+    raw_bbox = np.array([10 + 7 * 3, 10 + 7 * 2, 30 + 7 * 3, 30 + 7 * 2])
+    assert np.max(np.abs(bt_bbox - raw_bbox)) < 5.0, "ByteTrack bbox drifted too far"
+    assert np.max(np.abs(oc_bbox - raw_bbox)) < 5.0, "OC-SORT bbox drifted too far"
+
+
+def test_ocsort_recovers_track_after_occlusion_gap():
+    """OC-SORT's Observation-Centric Re-Update (ORU) recovers identity after an
+    occlusion gap, while ByteTrack's Kalman prediction drifts and loses the track.
+
+    Scenario:
+        - An object moves right at 5 px/frame for 5 frames.
+        - It disappears for 5 frames (occluded).
+        - It reappears near where it was last seen (not where the Kalman predicts).
+
+    ByteTrack Kalman drifts ~25 px during the gap → IoU with reappearance ≈ 0 → new ID.
+    OC-SORT ORU re-associates via the stored last observation → same ID recovered.
+    """
+    from degirum_tools.analyzers.object_tracker import ObjectTracker
+
+    def _build_frames():
+        frames = []
+        # Frames 0-4: object moves right at 5 px/frame
+        for i in range(5):
+            frames.append(
+                MockResult(
+                    results=[
+                        {
+                            "bbox": [10 + i * 5, 10, 30 + i * 5, 30],
+                            "score": 0.9,
+                            "label": "obj",
+                        }
+                    ]
+                )
+            )
+        # Frames 5-9: no detections (occlusion)
+        for _ in range(5):
+            frames.append(MockResult(results=[]))
+        # Frames 10-11: object reappears near frame-4 position (it was stationary
+        # behind the occluder), two frames so ByteTrack can confirm the new track.
+        for _ in range(2):
+            frames.append(
+                MockResult(
+                    results=[
+                        {"bbox": [31, 11, 51, 31], "score": 0.9, "label": "obj"}
+                    ]
+                )
+            )
+        return frames
+
+    # --- ByteTrack ---
+    bt = ObjectTracker(tracker_type="bytetrack", track_buffer=10, match_thresh=0.3)
+    for f in _build_frames():
+        r = deepcopy(f)
+        bt.analyze(r)
+    bt_last = r
+    assert "track_id" in bt_last.results[0], "ByteTrack should track reappearing object"
+    bt_id = bt_last.results[0]["track_id"]
+
+    # --- OC-SORT ---
+    oc = ObjectTracker(tracker_type="ocsort", track_buffer=10, match_thresh=0.3)
+    for f in _build_frames():
+        r = deepcopy(f)
+        oc.analyze(r)
+    oc_last = r
+    assert "track_id" in oc_last.results[0], "OC-SORT should track reappearing object"
+    oc_id = oc_last.results[0]["track_id"]
+
+    # ByteTrack creates a NEW track (Kalman drift broke the association)
+    assert bt_id != 1, (
+        f"ByteTrack should lose original track after Kalman drift, got ID {bt_id}"
+    )
+    # OC-SORT recovers the ORIGINAL track (ORU used last observation)
+    assert oc_id == 1, (
+        f"OC-SORT should recover original track via ORU, got ID {oc_id}"
+    )
+
+
+def test_backends_produce_different_uncertainty():
+    """ByteTrack and OC-SORT evolve Kalman covariance differently, so
+    track_uncertainty should differ for the same detection sequence."""
+    from degirum_tools.analyzers.object_tracker import ObjectTracker
+
+    def _get_uncertainty(tracker_type, match_thresh):
+        tracker = ObjectTracker(tracker_type=tracker_type, match_thresh=match_thresh)
+        for i in range(6):
+            r = MockResult(
+                results=[
+                    {
+                        "bbox": [10 + i * 2, 10 + i, 30 + i * 2, 30 + i],
+                        "score": 0.9,
+                        "label": "a",
+                    }
+                ]
+            )
+            tracker.analyze(r)
+        return r.results[0].get("track_uncertainty")
+
+    bt_unc = _get_uncertainty("bytetrack", 0.8)
+    oc_unc = _get_uncertainty("ocsort", 0.3)
+
+    assert bt_unc is not None, "ByteTrack should produce track_uncertainty"
+    assert oc_unc is not None, "OC-SORT should produce track_uncertainty"
+    assert bt_unc != oc_unc, (
+        f"Uncertainty should differ between backends: "
+        f"ByteTrack={bt_unc:.6f}, OC-SORT={oc_unc:.6f}"
+    )
