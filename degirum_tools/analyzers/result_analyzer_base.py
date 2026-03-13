@@ -56,6 +56,7 @@ import numpy as np
 import copy
 from abc import ABC, abstractmethod
 from typing import List, Union
+import functools
 
 
 class ResultAnalyzerBase(ABC):
@@ -67,6 +68,30 @@ class ResultAnalyzerBase(ABC):
       - `analyze(result)`: to augment or inspect the inference result.
       - `annotate(result, image)`: to draw additional overlays or text onto the provided image.
     """
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if "analyze" in cls.__dict__:
+            _orig_analyze = cls.__dict__["analyze"]
+
+            @functools.wraps(_orig_analyze)
+            def _analyze_wrapper(self, result):
+                if result is None:
+                    return
+                return _orig_analyze(self, result)
+
+            setattr(cls, "analyze", _analyze_wrapper)
+
+        if "annotate" in cls.__dict__:
+            _orig_annotate = cls.__dict__["annotate"]
+
+            @functools.wraps(_orig_annotate)
+            def _annotate_wrapper(self, result, image):
+                if result is None:
+                    return image
+                return _orig_annotate(self, result, image)
+
+            setattr(cls, "annotate", _annotate_wrapper)
 
     @abstractmethod
     def analyze(self, result):
