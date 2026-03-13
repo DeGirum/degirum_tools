@@ -780,7 +780,7 @@ class Progress:
         speed_units (str): Units to display for speed (e.g., "FPS", "items/s").
     """
 
-    utf8_supported = sys.stdout.encoding.lower() == "utf-8"
+    utf8_supported = False if sys.stdout is None else sys.stdout.encoding.lower() == "utf-8"
 
     def __init__(
         self,
