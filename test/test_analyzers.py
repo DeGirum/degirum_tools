@@ -10,6 +10,45 @@
 import numpy as np
 
 
+def test_analyzer_none_skip():
+    """Test that analyze() and annotate() automatically skip None results"""
+
+    import degirum_tools
+
+    class TestAnalyzer(degirum_tools.ResultAnalyzerBase):
+        def __init__(self):
+            self.analyze_called = False
+            self.annotate_called = False
+
+        def analyze(self, result):
+            self.analyze_called = True
+
+        def annotate(self, result, image: np.ndarray) -> np.ndarray:
+            self.annotate_called = True
+            return image
+
+    analyzer = TestAnalyzer()
+    image = np.zeros((10, 10, 3), dtype=np.uint8)
+
+    # None should be silently skipped - no exception, no side effects
+    analyzer.analyze(None)
+    assert not analyzer.analyze_called
+
+    returned = analyzer.annotate(None, image)
+    assert not analyzer.annotate_called
+    assert returned is image  # original image returned unchanged
+
+    # Non-None should pass through normally
+    class FakeResult:
+        pass
+
+    analyzer.analyze(FakeResult())
+    assert analyzer.analyze_called
+
+    analyzer.annotate(FakeResult(), image)
+    assert analyzer.annotate_called
+
+
 def test_attach_analyzers(zoo_dir):
     """Test for attach_analyzers() function"""
 

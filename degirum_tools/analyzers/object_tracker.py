@@ -1049,6 +1049,7 @@ class ObjectTracker(ResultAnalyzerBase):
             result (InferenceResults): Model inference result for the current frame, containing
                 detected object bounding boxes and classes.
         """
+
         # Reset tracker on scene cuts if enabled
         if self._reset_at_scene_cut:
             if not hasattr(result, "scene_cut"):

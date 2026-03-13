@@ -68,6 +68,28 @@ class ResultAnalyzerBase(ABC):
       - `annotate(result, image)`: to draw additional overlays or text onto the provided image.
     """
 
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if "analyze" in cls.__dict__:
+            _orig_analyze = cls.__dict__["analyze"]
+
+            def _analyze_wrapper(self, result, _orig=_orig_analyze):
+                if result is None:
+                    return
+                return _orig(self, result)
+
+            setattr(cls, "analyze", _analyze_wrapper)
+
+        if "annotate" in cls.__dict__:
+            _orig_annotate = cls.__dict__["annotate"]
+
+            def _annotate_wrapper(self, result, image, _orig=_orig_annotate):
+                if result is None:
+                    return image
+                return _orig(self, result, image)
+
+            setattr(cls, "annotate", _annotate_wrapper)
+
     @abstractmethod
     def analyze(self, result):
         """
