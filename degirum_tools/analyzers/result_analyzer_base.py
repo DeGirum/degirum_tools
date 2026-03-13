@@ -56,6 +56,7 @@ import numpy as np
 import copy
 from abc import ABC, abstractmethod
 from typing import List, Union
+import functools
 
 
 class ResultAnalyzerBase(ABC):
@@ -73,20 +74,22 @@ class ResultAnalyzerBase(ABC):
         if "analyze" in cls.__dict__:
             _orig_analyze = cls.__dict__["analyze"]
 
-            def _analyze_wrapper(self, result, _orig=_orig_analyze):
+            @functools.wraps(_orig_analyze)
+            def _analyze_wrapper(self, result):
                 if result is None:
                     return
-                return _orig(self, result)
+                return _orig_analyze(self, result)
 
             setattr(cls, "analyze", _analyze_wrapper)
 
         if "annotate" in cls.__dict__:
             _orig_annotate = cls.__dict__["annotate"]
 
-            def _annotate_wrapper(self, result, image, _orig=_orig_annotate):
+            @functools.wraps(_orig_annotate)
+            def _annotate_wrapper(self, result, image):
                 if result is None:
                     return image
-                return _orig(self, result, image)
+                return _orig_annotate(self, result, image)
 
             setattr(cls, "annotate", _annotate_wrapper)
 
