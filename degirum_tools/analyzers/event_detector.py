@@ -613,6 +613,7 @@ class EventDetector(ResultAnalyzerBase):
         self._event_history: deque = deque(
             maxlen=int(self._duration) if duration_unit in Unit_Frames else None
         )
+        self._history_is_full = False
 
     comparators = {
         Key_IsEqualTo: lambda a, b: a == b,
@@ -650,24 +651,38 @@ class EventDetector(ResultAnalyzerBase):
         )
 
         # add metric value to the history
-        self._event_history.append((time.time(), condition_met))
+        time_now = time.time()
+        self._event_history.append((time_now, condition_met))
 
         if self._event_history.maxlen is None:
-            # remove old results
-            time_now = time.time()
+            # remove old results; history is full when at least one old entry
+            # was pruned, meaning the window has turned over
             while (
                 self._event_history
                 and self._event_history[0][0] < time_now - self._duration
             ):
                 self._event_history.popleft()
+                self._history_is_full = True
+        else:
+            # frame-based: full when the deque has reached its capacity
+            self._history_is_full = (
+                len(self._event_history) == self._event_history.maxlen
+            )
+
+        # determine the quantity threshold
+        if self._quota_unit == Unit_Percent:
+            # use NaN when history is not yet full so both >= and <= comparisons
+            # return False, preventing premature event detection for either quantifier
+            quantity_thr = (
+                self._quota * len(self._event_history) / 100.0
+                if self._history_is_full
+                else float("nan")
+            )
+        else:
+            quantity_thr = self._quota
 
         # check if the condition is met for the required duration
         true_cnt = sum(x[1] for x in self._event_history)
-        quantity_thr = (
-            self._quota * len(self._event_history) / 100.0
-            if self._quota_unit == Unit_Percent
-            else self._quota
-        )
         event_is_detected = False
         if self._quantifier == Key_ForAtLeast:
             event_is_detected = true_cnt >= quantity_thr
@@ -675,10 +690,13 @@ class EventDetector(ResultAnalyzerBase):
             event_is_detected = true_cnt <= quantity_thr
 
         # add detected event to the result object
-        if not hasattr(result, self.key_events_detected):
+        if not hasattr(result, "events_detected"):
             result.events_detected = set()
         if event_is_detected:
-            result.events_detected.add(self._event_name)
+            if isinstance(result.events_detected, dict):
+                result.events_detected[self._event_name] = True
+            else:
+                result.events_detected.add(self._event_name)
 
     def annotate(self, result, image: np.ndarray) -> np.ndarray:
         """Draws the event label onto the image frame if the event is active for this result.
