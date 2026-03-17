@@ -690,13 +690,15 @@ class EventDetector(ResultAnalyzerBase):
             event_is_detected = true_cnt <= quantity_thr
 
         # add detected event to the result object
-        if not hasattr(result, "events_detected"):
-            result.events_detected = set()
+        evt = getattr(result, self.key_events_detected, None)
+        if evt is None:
+            evt = set()
+            setattr(result, self.key_events_detected, evt)
         if event_is_detected:
-            if isinstance(result.events_detected, dict):
-                result.events_detected[self._event_name] = True
+            if isinstance(evt, dict):
+                evt[self._event_name] = True
             else:
-                result.events_detected.add(self._event_name)
+                evt.add(self._event_name)
 
     def annotate(self, result, image: np.ndarray) -> np.ndarray:
         """Draws the event label onto the image frame if the event is active for this result.
