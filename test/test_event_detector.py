@@ -68,6 +68,41 @@ def test_event_detector():
             ],
             "res": [{"MyEvent"}],
         },
+        {
+            "case": "basic: events_detected pre-populated as dict: event added to dict",
+            "params": """
+                Trigger: MyEvent
+                when: ObjectCount
+                is equal to: 2
+                during: [1, frame]
+            """,
+            "inp": [
+                {
+                    "results": [
+                        {"label": "person", "score": 0.5},
+                        {"label": "person", "score": 0.6},
+                    ],
+                    "events_detected": {"OtherEvent": True},
+                }
+            ],
+            "res": [{"OtherEvent": True, "MyEvent": True}],
+        },
+        {
+            "case": "basic: events_detected pre-populated as dict: condition not met, dict unchanged",
+            "params": """
+                Trigger: MyEvent
+                when: ObjectCount
+                is equal to: 2
+                during: [1, frame]
+            """,
+            "inp": [
+                {
+                    "results": [{"label": "person", "score": 0.5}],
+                    "events_detected": {"OtherEvent": True},
+                }
+            ],
+            "res": [{"OtherEvent": True}],
+        },
         # ----------------------------------------------------------------
         # Tests for conditions (Equal, Greater, etc.)
         # ----------------------------------------------------------------
@@ -228,7 +263,83 @@ def test_event_detector():
                 {"results": [{"label": "person", "score": 0.5}]},
                 {"results": [{"label": "person", "score": 0.5}]},
             ],
-            "res": [{"MyEvent"}, {"MyEvent"}, {"MyEvent"}, set(), set()],
+            "res": [set(), set(), {"MyEvent"}, set(), set()],
+        },
+        # ----------------------------------------------------------------
+        # Tests for percent quantifiers with time-based window:
+        # history is never "full" in a short test (no entries get pruned),
+        # so percent-based thresholds should never fire.
+        # ----------------------------------------------------------------
+        {
+            "case": "quantifiers: time-based for at least 50 percent: no fire (window never full)",
+            "params": """
+                Trigger: MyEvent
+                when: ObjectCount
+                is equal to: 1
+                during: [20, seconds]
+                for at least: [50, percent]
+            """,
+            "inp": [
+                {"results": [{"label": "person", "score": 0.5}]},
+                {"results": [{"label": "person", "score": 0.5}]},
+                {"results": [{"label": "person", "score": 0.5}]},
+            ],
+            "res": [set(), set(), set()],
+        },
+        {
+            "case": "quantifiers: time-based for at most 50 percent: no fire (window never full)",
+            "params": """
+                Trigger: MyEvent
+                when: ObjectCount
+                is equal to: 1
+                during: [20, seconds]
+                for at most: [50, percent]
+            """,
+            "inp": [
+                {"results": []},
+                {"results": []},
+                {"results": []},
+            ],
+            "res": [set(), set(), set()],
+        },
+        # ----------------------------------------------------------------
+        # Tests for absolute-frame quantifiers with time-based window:
+        # absolute frame counts are evaluated regardless of window fullness.
+        # ----------------------------------------------------------------
+        {
+            "case": "quantifiers: time-based for at least 2 frames: fires on count",
+            "params": """
+                Trigger: MyEvent
+                when: ObjectCount
+                is equal to: 1
+                during: [20, seconds]
+                for at least: [2, frames]
+            """,
+            "inp": [
+                {"results": []},
+                {"results": [{"label": "person", "score": 0.5}]},
+                {"results": [{"label": "person", "score": 0.5}]},
+                {"results": [{"label": "person", "score": 0.5}]},
+            ],
+            "res": [set(), set(), {"MyEvent"}, {"MyEvent"}],
+        },
+        {
+            "case": "quantifiers: time-based for at most 2 frames: fires on count",
+            "params": """
+                Trigger: MyEvent
+                when: ObjectCount
+                is equal to: 1
+                during: [20, seconds]
+                for at most: [2, frames]
+            """,
+            "inp": [
+                {"results": []},
+                {"results": []},
+                {"results": [{"label": "person", "score": 0.5}]},
+                {"results": [{"label": "person", "score": 0.5}]},
+                {"results": [{"label": "person", "score": 0.5}]},
+            ],
+            "res": [{"MyEvent"}, {"MyEvent"}, {"MyEvent"}, {"MyEvent"}, set()],
         },
         # ----------------------------------------------------------------
         # Tests for duration (frames, seconds)
@@ -297,19 +408,19 @@ def test_event_detector():
             "res": [set(), set(), set(), set(), set(), set()],
         },
         {
-            "case": "duration: seconds: always satisfied",
+            "case": "duration: seconds: never satisfied because never full duration",
             "params": """
                 Trigger: MyEvent
                 when: ObjectCount
                 is equal to: 1
-                during: [2, seconds]
+                during: [20, seconds]
             """,
             "inp": [
                 {"results": [{"label": "person", "score": 0.5}]},
                 {"results": [{"label": "person", "score": 0.5}]},
                 {"results": [{"label": "person", "score": 0.5}]},
             ],
-            "res": [{"MyEvent"}, {"MyEvent"}, {"MyEvent"}],
+            "res": [set(), set(), set()],
         },
         {
             "case": "duration: seconds: not always satisfied -> no events detected",
