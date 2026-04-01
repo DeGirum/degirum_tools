@@ -184,6 +184,19 @@ def test_ipc_integration(_pythonpath):
     # --- after del, server process is no longer running ---
     assert not psutil.pid_exists(server_pid)
 
+    # --- context manager: __exit__ shuts down the server deterministically ---
+    with ipc.spawn(MultiplyWorker, factor=2) as wcm:
+        assert wcm.multiply(5) == 10
+        cm_pid = wcm._ipc_process.pid
+    assert not psutil.pid_exists(cm_pid)
+
+    # --- __del__ is a no-op after __exit__ (double-shutdown safe) ---
+    wcm2 = ipc.spawn(MultiplyWorker, factor=1)
+    cm_pid2 = wcm2._ipc_process.pid
+    wcm2.__exit__(None, None, None)
+    assert not psutil.pid_exists(cm_pid2)
+    del wcm2  # must not raise
+
     # --- server process that exits mid-call raises RuntimeError ---
     w3 = ipc.spawn(ExitingWorker)
     with pytest.raises(RuntimeError, match="server process exited unexpectedly"):

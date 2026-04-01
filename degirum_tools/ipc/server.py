@@ -12,6 +12,7 @@
 import sys
 import os
 import traceback
+import psutil
 import numpy as np
 import zmq
 import msgpack
@@ -96,7 +97,7 @@ def _run_server_loop(server_class: Any, methods: FrozenSet[str]) -> None:
     parent_pid = os.getppid()
     while True:
         # Orphan guard: exit if the parent process is gone.
-        if os.getppid() != parent_pid:
+        if not psutil.pid_exists(parent_pid):
             break
 
         try:

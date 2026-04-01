@@ -20,7 +20,22 @@ import numpy as np
 import zmq
 from typing import Any, Optional, Set, Type, TypeVar, cast
 
-from .server import _pack, _unpack
+from .server import (
+    _pack,
+    _unpack,
+    _SHUTDOWN_METHOD,
+    _KEY_METHOD,
+    _KEY_ARGS,
+    _KEY_KWARGS,
+    _KEY_RESULT,
+    _KEY_ERROR,
+    _KEY_TYPE,
+    _KEY_MESSAGE,
+    _KEY_TRACEBACK,
+    _KEY_INOUT_ARGS,
+    _KEY_INOUT_KWARGS,
+    _KEY_OUT_ARGS,
+)
 
 __all__ = ["IPCRemoteError", "Out", "InOut", "spawn"]
 
@@ -174,9 +189,6 @@ T = TypeVar("T")
 # triggering the full degirum_tools package __init__.
 _IPC_SERVER_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "server.py")
 
-# Special method name for graceful shutdown.
-_SHUTDOWN_METHOD = "__shutdown__"
-
 # Maximum time (seconds) to wait for the server process to advertise its endpoint.
 _SERVER_STARTUP_TIMEOUT_S = 30
 
@@ -190,19 +202,6 @@ _RPC_SEND_TIMEOUT_MS = 30_000
 # Polling interval (ms) used in spawn() to check whether the server
 # process is still alive while waiting for a response.
 _RPC_POLL_INTERVAL_MS = 500
-
-# Keys used in MsgPack request/response dicts.
-_KEY_METHOD = "method"
-_KEY_ARGS = "args"
-_KEY_KWARGS = "kwargs"
-_KEY_RESULT = "result"
-_KEY_ERROR = "error"
-_KEY_TYPE = "type"
-_KEY_MESSAGE = "message"
-_KEY_TRACEBACK = "traceback"
-_KEY_INOUT_ARGS = "inout_args"
-_KEY_INOUT_KWARGS = "inout_kwargs"
-_KEY_OUT_ARGS = "out_args"
 
 
 # ---------------------------------------------------------------------------
@@ -461,6 +460,7 @@ def _proxy_ipc_shutdown(self: Any) -> None:
     """Gracefully shut down the server process and release all resources."""
     conn = getattr(self, "_ipc_conn", None)
     if conn is not None:
+        object.__setattr__(self, "_ipc_conn", None)
         conn.shutdown()
 
 
@@ -484,6 +484,16 @@ def _proxy_ipc_call(self: Any, method: str, args: tuple, kwargs: dict) -> Any:
         The return value of the remote method call.
     """
     return self._ipc_conn.call(method, args, kwargs)  # type: ignore[attr-defined]
+
+
+def _proxy_ipc_enter(self: Any) -> Any:
+    """Support ``with spawn(...) as worker:`` usage; returns the proxy itself."""
+    return self
+
+
+def _proxy_ipc_exit(self: Any, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+    """Shut down the server process on context manager exit."""
+    _proxy_ipc_shutdown(self)
 
 
 def _install_rpc_wrapper(instance: Any, method_name: str, original_method: Any) -> None:
@@ -526,7 +536,13 @@ def spawn(cls: Type[T], *args: Any, **kwargs: Any) -> T:
     transparently forwarded to the child process via ZeroMQ RPC.
     Constructor arguments *args* / *kwargs* are passed to the child's
     ``__init__`` via stdin (MsgPack-encoded) to avoid shell-escaping issues.
-    The child process is shut down when the proxy stub is garbage-collected.
+    The child process is shut down when the proxy stub is used as a context
+    manager (``__exit__``) or, as a fallback, when it is garbage-collected
+    (``__del__``).  Prefer the context manager form for deterministic cleanup::
+
+        with ipc.spawn(MyWorker, param=3) as worker:
+            result = worker.compute(10)
+        # child process already shut down here
 
     Args:
         cls: The class to instantiate in the child process.
@@ -631,7 +647,7 @@ def spawn(cls: Type[T], *args: Any, **kwargs: Any) -> T:
     conn.connect(endpoint)
 
     # Build a dynamic subclass of cls that adds IPC plumbing (__del__,
-    # _ipc_process, _ipc_call) without running __init__.
+    # __enter__, __exit__, _ipc_process, _ipc_call) without running __init__.
     # Inheriting from cls means the return type is T, so linters see the full
     # original method signatures on the returned object.
     _proxy_cls = type(
@@ -639,6 +655,8 @@ def spawn(cls: Type[T], *args: Any, **kwargs: Any) -> T:
         (cls,),
         {
             "__del__": _proxy_ipc_shutdown,
+            "__enter__": _proxy_ipc_enter,
+            "__exit__": _proxy_ipc_exit,
             "_ipc_process": property(_proxy_ipc_process),
             "_ipc_call": _proxy_ipc_call,
         },

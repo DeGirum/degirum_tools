@@ -73,9 +73,10 @@ class NestingWorker:
         self.factor = factor
 
     def compute(self, x: int) -> int:
+        """Multiply x by factor using a nested MultiplyWorker IPC call."""
+
         from degirum_tools.ipc import spawn
 
-        """Multiply x by factor using a nested MultiplyWorker IPC call."""
         sub = spawn(MultiplyWorker, factor=self.factor)
         try:
             return sub.multiply(x)
