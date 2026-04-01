@@ -18,4 +18,4 @@ from .object_storage_support import *
 from .ui_support import *
 from .video_support import *
 from .expr_substitute import *
-from .ipc import *
+from .ipc_client import *

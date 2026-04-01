@@ -10,7 +10,13 @@ import pytest
 import psutil
 import numpy as np
 
-from degirum_tools import IPCBase, IPCRemoteError, ipc
+from degirum_tools import IPCRemoteError, ipc
+from degirum_tools.tools.ipc_client import (
+    _pack,
+    _unpack,
+    _get_public_methods,
+    _KEY_RESULT,
+)
 
 _test_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -36,24 +42,6 @@ def _pythonpath():
 def test_ipc_unit():
     """Unit tests for ipc.py that do not involve subprocesses."""
 
-    # --- @ipc decorator sets _is_ipc flag and returns the same object ---
-    def my_method(self):
-        pass
-
-    decorated = ipc(my_method)
-    assert decorated._is_ipc is True
-    assert decorated is my_method
-
-    # --- @ipc raises TypeError for lifecycle methods ---
-    for forbidden_name in ("__init__", "__new__", "__del__"):
-
-        def fn(self):
-            pass
-
-        fn.__name__ = forbidden_name
-        with pytest.raises(TypeError, match=forbidden_name):
-            ipc(fn)
-
     # --- IPCRemoteError stores attributes and formats its message ---
     err = IPCRemoteError(
         "ValueError", "bad value", "Traceback (most recent call last):\n  ..."
@@ -76,68 +64,62 @@ def test_ipc_unit():
         True,
         False,
     ]:
-        assert IPCBase._unpack(IPCBase._pack(obj)) == obj
+        assert _unpack(_pack(obj)) == obj
 
     # --- _pack/_unpack round-trips a numpy array ---
     arr = np.array([1.0, 2.0, 3.0], dtype=np.float32)
-    result = IPCBase._unpack(IPCBase._pack(arr))
+    result = _unpack(_pack(arr))
     assert np.array_equal(result, arr)
     assert result.dtype == arr.dtype
 
-    # --- _ipc_methods contains all and only @ipc-decorated methods ---
-    class Worker(IPCBase):
-        @ipc
-        def exported(self):
+    # --- _get_public_methods returns all public instance methods ---
+    class Worker:
+        def public_method(self):
             pass
 
-        def not_exported(self):
+        def _private_method(self):
             pass
 
-    assert "exported" in Worker._ipc_methods
-    assert "not_exported" not in Worker._ipc_methods
+    assert "public_method" in _get_public_methods(Worker)
+    assert "_private_method" not in _get_public_methods(Worker)
 
-    # --- @ipc methods from a base class are inherited by subclasses ---
-    class Base(IPCBase):
-        @ipc
+    # --- public methods from a base class are included for subclasses ---
+    class Base:
         def base_method(self):
             pass
 
     class Child(Base):
-        @ipc
         def child_method(self):
             pass
 
-    assert "base_method" in Child._ipc_methods
-    assert "child_method" in Child._ipc_methods
-    assert "child_method" not in Base._ipc_methods
+    assert "base_method" in _get_public_methods(Child)
+    assert "child_method" in _get_public_methods(Child)
+    assert "child_method" not in _get_public_methods(Base)
 
-    # --- overriding an @ipc method without the decorator un-exports it ---
-    class Base2(IPCBase):
-        @ipc
+    # --- overriding a public method keeps it in the method set ---
+    class Base2:
         def shared(self):
             pass
 
-        @ipc
         def only_base(self):
             pass
 
     class Child2(Base2):
-        def shared(self):  # override without @ipc -> un-exports
+        def shared(self):  # override: still a public method
             pass
 
-    assert "only_base" in Child2._ipc_methods
-    assert "shared" not in Child2._ipc_methods
-    assert "shared" in Base2._ipc_methods  # base class set is unaffected
+    assert "only_base" in _get_public_methods(Child2)
+    assert "shared" in _get_public_methods(Child2)
+    assert "shared" in _get_public_methods(Base2)
 
-    # --- subclass with __module__ == '__main__' raises RuntimeError ---
-    class FakeMainWorker(IPCBase):
-        @ipc
+    # --- class with __module__ == '__main__' raises RuntimeError ---
+    class FakeMainWorker:
         def noop(self):
             pass
 
     FakeMainWorker.__module__ = "__main__"
     with pytest.raises(RuntimeError, match="__main__"):
-        FakeMainWorker()
+        ipc(FakeMainWorker)
 
 
 # ===========================================================================
@@ -156,9 +138,9 @@ def test_ipc_integration(_pythonpath):
     )
 
     # --- basic method call: multiply(x) returns x * factor in child process ---
-    w = MultiplyWorker(factor=3)
+    w = ipc(MultiplyWorker, factor=3)
     try:
-        # --- @ipc method on client instance is a proxy, not the original function ---
+        # --- IPC method on client instance is a proxy, not the original function ---
         assert "multiply" in w.__dict__
         assert w.__dict__["multiply"] is not MultiplyWorker.__dict__["multiply"]
         assert w.__dict__["multiply"].__name__ == "multiply"
@@ -187,7 +169,7 @@ def test_ipc_integration(_pythonpath):
         # --- worker remains usable after a remote exception ---
         assert w.multiply(4) == 12
 
-        # --- non-@ipc method raises IPCRemoteError(AttributeError) ---
+        # --- non-existent method raises IPCRemoteError(AttributeError) ---
         with pytest.raises(IPCRemoteError) as exc_info:
             w._ipc_call("nonexistent_method", (), {})
         assert exc_info.value.remote_type == "AttributeError"
@@ -209,7 +191,7 @@ def test_ipc_integration(_pythonpath):
     assert not psutil.pid_exists(server_pid)
 
     # --- server process that exits mid-call raises RuntimeError ---
-    w3 = ExitingWorker()
+    w3 = ipc(ExitingWorker)
     with pytest.raises(RuntimeError, match="server process exited unexpectedly"):
         w3.exit_now()
 
@@ -217,11 +199,11 @@ def test_ipc_integration(_pythonpath):
     with pytest.raises(
         RuntimeError, match="exited before advertising endpoint"
     ) as exc_info2:
-        BrokenWorker()
+        ipc(BrokenWorker)
     assert "constructor failure" in str(exc_info2.value)
 
     # --- numpy arrays are passed to remote methods and returned correctly ---
-    wa = ArrayWorker()
+    wa = ipc(ArrayWorker)
     try:
         arr_f32 = np.array([1.0, 2.0, 3.0], dtype=np.float32)
         arr_i16 = np.array([10, 20, 30], dtype=np.int16)
@@ -247,16 +229,16 @@ def test_ipc_integration(_pythonpath):
         b = np.array([4.0, 5.0, 6.0], dtype=np.float64)
         assert np.isclose(wa.dot(a, b), np.dot(a, b))
     finally:
-        wa._ipc_shutdown()
+        del wa
 
     # --- server-side method can spawn and call a sub-worker in a third process ---
-    wn = NestingWorker(factor=5)
+    wn = ipc(NestingWorker, factor=5)
     try:
         assert wn.compute(7) == 35
         assert wn.compute(0) == 0
         assert wn.add_via_sub(10, 3) == 13
     finally:
-        wn._ipc_shutdown()
+        del wn
 
 
 def test_ipc_array_throughput(_pythonpath):
@@ -268,7 +250,7 @@ def test_ipc_array_throughput(_pythonpath):
     cases = [(None, 10000), (1_000, 10000), (1_000_000, 1000), (10_000_000, 100)]
     cases = [(10_000_000, 100)]
 
-    w = ArrayWorker()
+    w = ipc(ArrayWorker)
     try:
         print()
         for payload, iterations in cases:
@@ -290,7 +272,7 @@ def test_ipc_array_throughput(_pythonpath):
                 f"QPS={qps:>8.1f}  throughput={mb_per_s:.1f} MB/s"
             )
     finally:
-        w._ipc_shutdown()
+        del w
 
 
 # ===========================================================================
@@ -314,25 +296,25 @@ def test_ipc_pack_unpack_performance():
     print()
     for n, dtype, iterations in cases:
         arr = np.arange(n, dtype=dtype)
-        obj = {IPCBase._KEY_RESULT: arr}
+        obj = {_KEY_RESULT: arr}
 
         # warm-up
-        IPCBase._unpack(IPCBase._pack(obj))
+        _unpack(_pack(obj))
 
         # pack
         t0 = time.perf_counter()
         for _ in range(iterations):
-            packed = IPCBase._pack(obj)
+            packed = _pack(obj)
         pack_elapsed = time.perf_counter() - t0
 
         # unpack
         t0 = time.perf_counter()
         for _ in range(iterations):
-            result = IPCBase._unpack(packed)
+            result = _unpack(packed)
         unpack_elapsed = time.perf_counter() - t0
 
         # verify round-trip correctness
-        np.testing.assert_array_equal(result[IPCBase._KEY_RESULT], arr)
+        np.testing.assert_array_equal(result[_KEY_RESULT], arr)
 
         nbytes = arr.nbytes
         pack_mb_s = (nbytes * iterations) / pack_elapsed / 1e6
@@ -350,14 +332,14 @@ def test_ipc_pack_unpack_performance():
 
 
 def test_ipc_multithreaded(_pythonpath):
-    """Multiple threads calling @ipc methods concurrently must not corrupt results."""
+    """Multiple threads calling IPC methods concurrently must not corrupt results."""
     import threading
     from ipc_test_workers import MultiplyWorker
 
     N_THREADS = 16
     CALLS_PER_THREAD = 50
 
-    w = MultiplyWorker(factor=3)
+    w = ipc(MultiplyWorker, factor=3)
     errors = []
     barrier = threading.Barrier(N_THREADS)
 
