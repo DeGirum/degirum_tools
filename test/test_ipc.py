@@ -16,6 +16,9 @@ from degirum_tools.tools.ipc_client import (
     _unpack,
     _get_public_methods,
     _KEY_RESULT,
+    Out,
+    InOut,
+    _InOutSupport,
 )
 
 _test_dir = os.path.dirname(os.path.abspath(__file__))
@@ -241,7 +244,93 @@ def test_ipc_integration(_pythonpath):
         del wn
 
 
-def test_ipc_array_throughput(_pythonpath):
+def test_ipc_inout(_pythonpath):
+    """Integration tests for Out/InOut writeback argument support."""
+    from ipc_test_workers import InOutWorker
+
+    w = ipc(InOutWorker)
+    try:
+        # --- InOut list: server mutates in-place, original is patched ---
+        ll = [1, 2, 3]
+        w.fill_list(InOut(ll), 99)
+        assert ll == [99, 99, 99]
+
+        # --- InOut list: identity after fill (no mutation) ---
+        ll2 = [0, 0]
+        w.fill_list(InOut(ll2), 7)
+        assert ll2 == [7, 7]
+
+        # --- Out list: empty sentinel sent; server appends, original patched ---
+        out_list = [10, 20, 30]  # existing contents NOT sent
+        w.append_list(Out(out_list), 42)
+        assert out_list == [42]  # only what server appended
+
+        # --- InOut dict: server sets key, original is patched ---
+        d = {"a": 0}
+        w.fill_dict(InOut(d), "a", 55)
+        assert d == {"a": 55}
+
+        # --- Out dict: empty sentinel sent; server sets key, original patched ---
+        d2 = {"stale": 999}
+        w.fill_dict(Out(d2), "x", 7)
+        assert d2 == {"x": 7}
+
+        # --- InOut bytearray: server overwrites bytes, original is patched ---
+        buf = bytearray([0, 0, 0, 0])
+        w.fill_bytes(InOut(buf), 0xFF)
+        assert buf == bytearray([0xFF, 0xFF, 0xFF, 0xFF])
+
+        # --- InOut numpy array: server scales in-place, original is patched ---
+        arr = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+        original_ptr = arr.ctypes.data
+        w.scale_array(InOut(arr), 2.0)
+        assert np.allclose(arr, [2.0, 4.0, 6.0])
+        assert arr.ctypes.data == original_ptr  # same buffer, patched via copyto
+
+        # --- InOut as keyword argument ---
+        kw = ["a", "b", "c"]
+        w.fill_list(data=InOut(kw), value=0)
+        assert kw == [0, 0, 0]
+
+        # --- two InOut args simultaneously: swap ---
+        x = [1, 2]
+        y = [3, 4]
+        w.swap_lists(InOut(x), InOut(y))
+        assert x == [3, 4]
+        assert y == [1, 2]
+
+        # --- non-wrapped args are unaffected by the writeback path ---
+        plain = [5, 6, 7]
+        w.fill_list(plain, 0)  # no InOut wrapper: plain list, no writeback
+        assert plain == [5, 6, 7]  # unchanged on the client side
+
+    finally:
+        del w
+
+    # --- _InOutSupport.check_type raises TypeError for unsupported types ---
+    for bad in (42, "hello", (1, 2), {1, 2}, object()):
+        with pytest.raises(TypeError, match="Out/InOut does not support"):
+            _InOutSupport.check_type(bad)
+
+    # --- Out/InOut constructors reject unsupported types immediately ---
+    with pytest.raises(TypeError):
+        Out(42)
+    with pytest.raises(TypeError):
+        InOut("string")
+
+    # --- _InOutSupport.placeholder returns correct empty sentinels ---
+    assert _InOutSupport.placeholder([1, 2, 3]) == []
+    assert _InOutSupport.placeholder({"a": 1}) == {}
+    assert _InOutSupport.placeholder(bytearray(b"abc")) == bytearray()
+    arr_ph = _InOutSupport.placeholder(np.zeros((3, 2), dtype=np.float32))
+    assert arr_ph.shape == (3, 2)
+    assert arr_ph.dtype == np.float32
+
+    # --- _InOutSupport.patch for numpy raises ValueError on shape mismatch ---
+    a = np.zeros((3,), dtype=np.float32)
+    with pytest.raises(ValueError, match="shape mismatch"):
+        _InOutSupport.patch(a, np.zeros((4,), dtype=np.float32))
+
     """Measure round-trip throughput for numpy arrays of different sizes."""
     import time
     from ipc_test_workers import ArrayWorker

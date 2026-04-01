@@ -92,3 +92,35 @@ class NestingWorker:
             return sub.add(a, b)
         finally:
             del sub  # ensure sub-worker is cleaned up immediately
+
+
+class InOutWorker:
+    """Worker used to test Out/InOut writeback arguments."""
+
+    def fill_list(self, data: list, value: int) -> None:
+        """Replace every element of *data* with *value* in-place."""
+        for i in range(len(data)):
+            data[i] = value
+
+    def append_list(self, data: list, value: int) -> None:
+        """Append *value* to *data* (Out: data arrives empty from client)."""
+        data.append(value)
+
+    def fill_dict(self, data: dict, key: str, value: int) -> None:
+        """Set *data[key] = value* in-place."""
+        data[key] = value
+
+    def fill_bytes(self, data: bytearray, value: int) -> None:
+        """Overwrite every byte of *data* with *value* in-place."""
+        for i in range(len(data)):
+            data[i] = value
+
+    def scale_array(self, arr, factor: float) -> None:
+        """Multiply every element of *arr* by *factor* in-place."""
+        arr *= factor
+
+    def swap_lists(self, a: list, b: list) -> None:
+        """Copy contents: a gets b's elements, b gets a's elements."""
+        tmp = list(a)
+        a[:] = b
+        b[:] = tmp

@@ -27,8 +27,11 @@
 #     or methods starting with '_').
 #   - Method arguments and return values must be serializable by MsgPack
 #     (with msgpack_numpy patch).
-#   - Method arguments are passed by value: modifications on the server side
-#     are not visible to the client.
+#   - Method arguments are passed by value by default: modifications on the
+#     server side are not visible to the client.  Wrap a mutable argument in
+#     InOut(...) (read-write) or Out(...) (write-only) to request writeback;
+#     the original object is patched in-place after the call returns.
+#     Supported types: list, dict, bytearray, numpy.ndarray.
 #
 
 import subprocess
@@ -38,17 +41,129 @@ import queue
 import threading
 import weakref
 import functools
+import numpy as np
 import zmq
 from typing import Any, Optional, Set, Type, TypeVar, cast
 
 from .ipc_server import _pack, _unpack
 
-__all__ = ["IPCRemoteError", "ipc"]
+__all__ = ["IPCRemoteError", "Out", "InOut", "ipc"]
 
 
 # ---------------------------------------------------------------------------
-# Public exception
+# Public classes
 # ---------------------------------------------------------------------------
+
+
+class _InOutSupport:
+    """Namespace for all writeback-related helpers.
+
+    ``_handlers`` maps each supported mutable type to a
+    ``(placeholder_fn, patch_fn)`` pair:
+      - ``placeholder_fn(original)`` returns an empty sentinel of the same type
+        (used by ``Out`` so the server fills it from scratch).
+      - ``patch_fn(original, new_value)`` overwrites *original* in-place.
+    """
+
+    @staticmethod
+    def _np_patch(o: Any, v: Any) -> None:
+        a = np.asarray(v)
+        if o.shape != a.shape:
+            raise ValueError(
+                f"Cannot patch numpy array in-place: "
+                f"shape mismatch ({o.shape} vs {a.shape})"
+            )
+        np.copyto(o, a)
+
+    _handlers: dict = {
+        list: (lambda o: [], lambda o, v: o.__setitem__(slice(None), v)),
+        dict: (lambda o: {}, lambda o, v: (o.clear(), o.update(v))),
+        bytearray: (lambda o: bytearray(), lambda o, v: o.__setitem__(slice(None), v)),
+        np.ndarray: (np.empty_like, _np_patch.__func__),  # type: ignore[attr-defined]
+    }
+
+    # Human-readable list of supported types for error messages.
+    type_names = ", ".join(f"``{t.__name__}``" for t in _handlers)
+
+    @classmethod
+    def get(cls, value: Any):
+        """Return the (placeholder_fn, patch_fn) pair for *value*, or None."""
+        for tp, handler in cls._handlers.items():
+            if isinstance(value, tp):
+                return handler
+        return None
+
+    @classmethod
+    def check_type(cls, value: Any) -> None:
+        """Raise ``TypeError`` if *value* is not a supported writeback type."""
+        if cls.get(value) is None:
+            raise TypeError(
+                f"Out/InOut does not support {type(value).__name__!r}. "
+                f"Supported types: {cls.type_names}."
+            )
+
+    @classmethod
+    def placeholder(cls, original: Any) -> Any:
+        """Return an empty sentinel of the same type as *original* (for ``Out``)."""
+        return cls.get(original)[0](original)  # type: ignore[index]
+
+    @classmethod
+    def patch(cls, original: Any, new_value: Any) -> None:
+        """Overwrite *original* in-place with *new_value*."""
+        cls.get(original)[1](original, new_value)  # type: ignore[index]
+
+
+class InOut:
+    """Wraps a mutable argument for read-write IPC pass-through.
+
+    The current value is sent to the server, the server may read and/or mutate
+    it in-place, and the original object is patched in-place once the call
+    returns — no ``.value`` access needed.
+
+    Example::
+
+        ll = [1, 2, 3]
+        worker.double_all(InOut(ll))   # server doubles each element in-place
+        # ll is now [2, 4, 6]
+
+    Raises:
+        TypeError: If *value* is not one of the supported mutable types
+            (currently: list, dict, bytearray, numpy.ndarray).
+
+    Args:
+        value: The mutable object to forward to the server and patch on return.
+    """
+
+    def __init__(self, value: Any) -> None:
+        _InOutSupport.check_type(value)
+        self._original = value
+
+
+class Out:
+    """Wraps a mutable argument for write-only IPC pass-through.
+
+    An empty container of the same type is sent to the server (the existing
+    contents are **not** transmitted), the server fills it in-place, and the
+    original object is patched in-place once the call returns.
+
+    Example::
+
+        result = []
+        worker.compute_results(Out(result))  # server fills result from scratch
+        # result now contains whatever the server appended
+
+    Raises:
+        TypeError: If *value* is not one of the supported mutable types
+            (currently: list, dict, bytearray, numpy.ndarray).
+
+    Args:
+        value: The mutable object to patch on return (its current contents are
+            not sent to the server).
+    """
+
+    def __init__(self, value: Any) -> None:
+        _InOutSupport.check_type(value)
+        self._original = value
 
 
 class IPCRemoteError(Exception):
@@ -112,6 +227,9 @@ _KEY_ERROR = "error"
 _KEY_TYPE = "type"
 _KEY_MESSAGE = "message"
 _KEY_TRACEBACK = "traceback"
+_KEY_INOUT_ARGS = "inout_args"
+_KEY_INOUT_KWARGS = "inout_kwargs"
+_KEY_OUT_ARGS = "out_args"
 
 
 # ---------------------------------------------------------------------------
@@ -202,11 +320,45 @@ class _IPCConnection:
         assert self._socket is not None
         assert self._poller is not None
 
+        # Detect Out/InOut-wrapped arguments and unwrap them for transmission.
+        inout_args = [(i, a) for i, a in enumerate(args) if isinstance(a, (Out, InOut))]
+        inout_kwargs = [
+            (k, v) for k, v in kwargs.items() if isinstance(v, (Out, InOut))
+        ]
+        inout_arg_indices = [i for i, _ in inout_args]
+        inout_kwarg_keys = [k for k, _ in inout_kwargs]
+        plain_args = [
+            (
+                (
+                    _InOutSupport.placeholder(a._original)
+                    if isinstance(a, Out)
+                    else a._original
+                )
+                if isinstance(a, (Out, InOut))
+                else a
+            )
+            for a in args
+        ]
+        plain_kwargs = {
+            k: (
+                (
+                    _InOutSupport.placeholder(v._original)
+                    if isinstance(v, Out)
+                    else v._original
+                )
+                if isinstance(v, (Out, InOut))
+                else v
+            )
+            for k, v in kwargs.items()
+        }
+
         payload = _pack(
             {
                 _KEY_METHOD: method,
-                _KEY_ARGS: list(args),
-                _KEY_KWARGS: kwargs,
+                _KEY_ARGS: plain_args,
+                _KEY_KWARGS: plain_kwargs,
+                _KEY_INOUT_ARGS: inout_arg_indices,
+                _KEY_INOUT_KWARGS: inout_kwarg_keys,
             }
         )
         with self._lock:
@@ -245,6 +397,14 @@ class _IPCConnection:
                 response.get(_KEY_MESSAGE, ""),
                 response.get(_KEY_TRACEBACK, ""),
             )
+
+        # Patch wrapped arguments in-place from server-returned values.
+        out = response.get(_KEY_OUT_ARGS) or {}
+        for i, wrapper in inout_args:
+            _InOutSupport.patch(wrapper._original, out[str(i)])
+        for k, wrapper in inout_kwargs:
+            _InOutSupport.patch(wrapper._original, out[k])
+
         return response[_KEY_RESULT]
 
     def shutdown(self) -> None:
