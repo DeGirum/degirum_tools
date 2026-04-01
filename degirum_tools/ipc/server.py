@@ -1,5 +1,5 @@
 #
-# ipc_server.py: server-side entry point for ipc() child processes
+# server.py: server-side entry point for ipc() child processes
 #
 # Copyright DeGirum Corporation 2026
 # All rights reserved

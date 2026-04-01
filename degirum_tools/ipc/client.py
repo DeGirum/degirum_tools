@@ -1,37 +1,12 @@
 #
-# ipc_client.py: inter-process communication support via ZeroMQ RPC
+# client.py: inter-process communication support via ZeroMQ RPC
 #
 # Copyright DeGirum Corporation 2026
 # All rights reserved
 #
-# Implements ipc() function to transparently execute class instances in
-# isolated child processes, communicating via MsgPack-encoded RPC over
-# ZeroMQ REQ/REP sockets.  All public instance methods of any class are
-# automatically available as RPC endpoints.
-#
-# Usage:
-#   class MyWorker:
-#       def __init__(self, param):
-#           self.param = param
-#
-#       def compute(self, x):
-#           return x * self.param
-#
-#   worker = ipc(MyWorker, param=3)  # spawns child process transparently
-#   result = worker.compute(10)      # executes in child process, returns 30
-#   del worker                       # shuts down child process cleanly
-#
-# Limitations:
-#   - Only works for classes defined in importable modules (not __main__).
-#   - Only public instance methods are exposed (not classmethods, staticmethods,
-#     or methods starting with '_').
-#   - Method arguments and return values must be serializable by MsgPack
-#     (with msgpack_numpy patch).
-#   - Method arguments are passed by value by default: modifications on the
-#     server side are not visible to the client.  Wrap a mutable argument in
-#     InOut(...) (read-write) or Out(...) (write-only) to request writeback;
-#     the original object is patched in-place after the call returns.
-#     Supported types: list, dict, bytearray, numpy.ndarray.
+# Implements the spawn() function and supporting classes (InOut, Out,
+# IPCRemoteError).  Child processes are managed via ZeroMQ REQ/REP sockets
+# and MsgPack serialization; see __init__.py for full usage documentation.
 #
 
 import subprocess
@@ -45,9 +20,9 @@ import numpy as np
 import zmq
 from typing import Any, Optional, Set, Type, TypeVar, cast
 
-from .ipc_server import _pack, _unpack
+from .server import _pack, _unpack
 
-__all__ = ["IPCRemoteError", "Out", "InOut", "ipc"]
+__all__ = ["IPCRemoteError", "Out", "InOut", "spawn"]
 
 
 # ---------------------------------------------------------------------------
@@ -192,14 +167,12 @@ class IPCRemoteError(Exception):
 # Private constants
 # ---------------------------------------------------------------------------
 
-# Type variable for the return type of ipc(), representing the user class.
+# Type variable for the return type of spawn(), representing the user class.
 T = TypeVar("T")
 
-# Path to ipc_server.py, loaded by file path in child processes to avoid
+# Path to server.py, loaded by file path in child processes to avoid
 # triggering the full degirum_tools package __init__.
-_IPC_SERVER_FILE = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "ipc_server.py"
-)
+_IPC_SERVER_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "server.py")
 
 # Special method name for graceful shutdown.
 _SHUTDOWN_METHOD = "__shutdown__"
@@ -214,7 +187,7 @@ _SERVER_TERMINATE_TIMEOUT_S = 5
 # reused, so any timeout is treated as a fatal server failure.
 _RPC_SEND_TIMEOUT_MS = 30_000
 
-# Polling interval (ms) used in ipc() to check whether the server
+# Polling interval (ms) used in spawn() to check whether the server
 # process is still alive while waiting for a response.
 _RPC_POLL_INTERVAL_MS = 500
 
@@ -546,7 +519,7 @@ def _install_rpc_wrapper(instance: Any, method_name: str, original_method: Any) 
 # ---------------------------------------------------------------------------
 
 
-def ipc(cls: Type[T], *args: Any, **kwargs: Any) -> T:
+def spawn(cls: Type[T], *args: Any, **kwargs: Any) -> T:
     """Spawn *cls* in an isolated child process and return a proxy stub.
 
     The stub exposes the same public methods as *cls*; each call is
@@ -572,7 +545,7 @@ def ipc(cls: Type[T], *args: Any, **kwargs: Any) -> T:
 
     if module_name == "__main__":
         raise RuntimeError(
-            "Classes defined in a __main__ script cannot be used with ipc(). "
+            "Classes defined in a __main__ script cannot be used with spawn(). "
             "Move the class to an importable module."
         )
 
@@ -580,7 +553,7 @@ def ipc(cls: Type[T], *args: Any, **kwargs: Any) -> T:
 
     # -----------------------------------------------------------------
     # Build the -c command for the child process.
-    # ipc_server.py is loaded by file path (via importlib.util) to avoid
+    # server.py is loaded by file path (via importlib.util) to avoid
     # triggering the full degirum_tools package __init__.
     # -----------------------------------------------------------------
     cmd_parts = [

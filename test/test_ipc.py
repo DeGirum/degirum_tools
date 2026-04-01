@@ -10,16 +10,7 @@ import pytest
 import psutil
 import numpy as np
 
-from degirum_tools import IPCRemoteError, ipc
-from degirum_tools.tools.ipc_client import (
-    _pack,
-    _unpack,
-    _get_public_methods,
-    _KEY_RESULT,
-    Out,
-    InOut,
-    _InOutSupport,
-)
+from degirum_tools import ipc
 
 _test_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -46,7 +37,7 @@ def test_ipc_unit():
     """Unit tests for ipc.py that do not involve subprocesses."""
 
     # --- IPCRemoteError stores attributes and formats its message ---
-    err = IPCRemoteError(
+    err = ipc.IPCRemoteError(
         "ValueError", "bad value", "Traceback (most recent call last):\n  ..."
     )
     assert err.remote_type == "ValueError"
@@ -67,11 +58,11 @@ def test_ipc_unit():
         True,
         False,
     ]:
-        assert _unpack(_pack(obj)) == obj
+        assert ipc._unpack(ipc._pack(obj)) == obj
 
     # --- _pack/_unpack round-trips a numpy array ---
     arr = np.array([1.0, 2.0, 3.0], dtype=np.float32)
-    result = _unpack(_pack(arr))
+    result = ipc._unpack(ipc._pack(arr))
     assert np.array_equal(result, arr)
     assert result.dtype == arr.dtype
 
@@ -83,8 +74,8 @@ def test_ipc_unit():
         def _private_method(self):
             pass
 
-    assert "public_method" in _get_public_methods(Worker)
-    assert "_private_method" not in _get_public_methods(Worker)
+    assert "public_method" in ipc._get_public_methods(Worker)
+    assert "_private_method" not in ipc._get_public_methods(Worker)
 
     # --- public methods from a base class are included for subclasses ---
     class Base:
@@ -95,9 +86,9 @@ def test_ipc_unit():
         def child_method(self):
             pass
 
-    assert "base_method" in _get_public_methods(Child)
-    assert "child_method" in _get_public_methods(Child)
-    assert "child_method" not in _get_public_methods(Base)
+    assert "base_method" in ipc._get_public_methods(Child)
+    assert "child_method" in ipc._get_public_methods(Child)
+    assert "child_method" not in ipc._get_public_methods(Base)
 
     # --- overriding a public method keeps it in the method set ---
     class Base2:
@@ -111,9 +102,9 @@ def test_ipc_unit():
         def shared(self):  # override: still a public method
             pass
 
-    assert "only_base" in _get_public_methods(Child2)
-    assert "shared" in _get_public_methods(Child2)
-    assert "shared" in _get_public_methods(Base2)
+    assert "only_base" in ipc._get_public_methods(Child2)
+    assert "shared" in ipc._get_public_methods(Child2)
+    assert "shared" in ipc._get_public_methods(Base2)
 
     # --- class with __module__ == '__main__' raises RuntimeError ---
     class FakeMainWorker:
@@ -122,7 +113,7 @@ def test_ipc_unit():
 
     FakeMainWorker.__module__ = "__main__"
     with pytest.raises(RuntimeError, match="__main__"):
-        ipc(FakeMainWorker)
+        ipc.spawn(FakeMainWorker)
 
 
 # ===========================================================================
@@ -141,7 +132,7 @@ def test_ipc_integration(_pythonpath):
     )
 
     # --- basic method call: multiply(x) returns x * factor in child process ---
-    w = ipc(MultiplyWorker, factor=3)
+    w = ipc.spawn(MultiplyWorker, factor=3)
     try:
         # --- IPC method on client instance is a proxy, not the original function ---
         assert "multiply" in w.__dict__
@@ -162,7 +153,7 @@ def test_ipc_integration(_pythonpath):
         assert [w.multiply(i) for i in range(5)] == [0, 3, 6, 9, 12]
 
         # --- server-side exception is re-raised as IPCRemoteError ---
-        with pytest.raises(IPCRemoteError) as exc_info:
+        with pytest.raises(ipc.IPCRemoteError) as exc_info:
             w.fail()
         err = exc_info.value
         assert err.remote_type == "ValueError"
@@ -173,7 +164,7 @@ def test_ipc_integration(_pythonpath):
         assert w.multiply(4) == 12
 
         # --- non-existent method raises IPCRemoteError(AttributeError) ---
-        with pytest.raises(IPCRemoteError) as exc_info:
+        with pytest.raises(ipc.IPCRemoteError) as exc_info:
             w._ipc_call("nonexistent_method", (), {})
         assert exc_info.value.remote_type == "AttributeError"
 
@@ -194,7 +185,7 @@ def test_ipc_integration(_pythonpath):
     assert not psutil.pid_exists(server_pid)
 
     # --- server process that exits mid-call raises RuntimeError ---
-    w3 = ipc(ExitingWorker)
+    w3 = ipc.spawn(ExitingWorker)
     with pytest.raises(RuntimeError, match="server process exited unexpectedly"):
         w3.exit_now()
 
@@ -202,11 +193,11 @@ def test_ipc_integration(_pythonpath):
     with pytest.raises(
         RuntimeError, match="exited before advertising endpoint"
     ) as exc_info2:
-        ipc(BrokenWorker)
+        ipc.spawn(BrokenWorker)
     assert "constructor failure" in str(exc_info2.value)
 
     # --- numpy arrays are passed to remote methods and returned correctly ---
-    wa = ipc(ArrayWorker)
+    wa = ipc.spawn(ArrayWorker)
     try:
         arr_f32 = np.array([1.0, 2.0, 3.0], dtype=np.float32)
         arr_i16 = np.array([10, 20, 30], dtype=np.int16)
@@ -235,7 +226,7 @@ def test_ipc_integration(_pythonpath):
         del wa
 
     # --- server-side method can spawn and call a sub-worker in a third process ---
-    wn = ipc(NestingWorker, factor=5)
+    wn = ipc.spawn(NestingWorker, factor=5)
     try:
         assert wn.compute(7) == 35
         assert wn.compute(0) == 0
@@ -248,54 +239,54 @@ def test_ipc_inout(_pythonpath):
     """Integration tests for Out/InOut writeback argument support."""
     from ipc_test_workers import InOutWorker
 
-    w = ipc(InOutWorker)
+    w = ipc.spawn(InOutWorker)
     try:
         # --- InOut list: server mutates in-place, original is patched ---
         ll = [1, 2, 3]
-        w.fill_list(InOut(ll), 99)
+        w.fill_list(ipc.InOut(ll), 99)
         assert ll == [99, 99, 99]
 
         # --- InOut list: identity after fill (no mutation) ---
         ll2 = [0, 0]
-        w.fill_list(InOut(ll2), 7)
+        w.fill_list(ipc.InOut(ll2), 7)
         assert ll2 == [7, 7]
 
         # --- Out list: empty sentinel sent; server appends, original patched ---
         out_list = [10, 20, 30]  # existing contents NOT sent
-        w.append_list(Out(out_list), 42)
+        w.append_list(ipc.Out(out_list), 42)
         assert out_list == [42]  # only what server appended
 
         # --- InOut dict: server sets key, original is patched ---
         d = {"a": 0}
-        w.fill_dict(InOut(d), "a", 55)
+        w.fill_dict(ipc.InOut(d), "a", 55)
         assert d == {"a": 55}
 
         # --- Out dict: empty sentinel sent; server sets key, original patched ---
         d2 = {"stale": 999}
-        w.fill_dict(Out(d2), "x", 7)
+        w.fill_dict(ipc.Out(d2), "x", 7)
         assert d2 == {"x": 7}
 
         # --- InOut bytearray: server overwrites bytes, original is patched ---
         buf = bytearray([0, 0, 0, 0])
-        w.fill_bytes(InOut(buf), 0xFF)
+        w.fill_bytes(ipc.InOut(buf), 0xFF)
         assert buf == bytearray([0xFF, 0xFF, 0xFF, 0xFF])
 
         # --- InOut numpy array: server scales in-place, original is patched ---
         arr = np.array([1.0, 2.0, 3.0], dtype=np.float32)
         original_ptr = arr.ctypes.data
-        w.scale_array(InOut(arr), 2.0)
+        w.scale_array(ipc.InOut(arr), 2.0)
         assert np.allclose(arr, [2.0, 4.0, 6.0])
         assert arr.ctypes.data == original_ptr  # same buffer, patched via copyto
 
         # --- InOut as keyword argument ---
         kw = ["a", "b", "c"]
-        w.fill_list(data=InOut(kw), value=0)
+        w.fill_list(data=ipc.InOut(kw), value=0)
         assert kw == [0, 0, 0]
 
         # --- two InOut args simultaneously: swap ---
         x = [1, 2]
         y = [3, 4]
-        w.swap_lists(InOut(x), InOut(y))
+        w.swap_lists(ipc.InOut(x), ipc.InOut(y))
         assert x == [3, 4]
         assert y == [1, 2]
 
@@ -310,26 +301,26 @@ def test_ipc_inout(_pythonpath):
     # --- _InOutSupport.check_type raises TypeError for unsupported types ---
     for bad in (42, "hello", (1, 2), {1, 2}, object()):
         with pytest.raises(TypeError, match="Out/InOut does not support"):
-            _InOutSupport.check_type(bad)
+            ipc._InOutSupport.check_type(bad)
 
     # --- Out/InOut constructors reject unsupported types immediately ---
     with pytest.raises(TypeError):
-        Out(42)
+        ipc.Out(42)
     with pytest.raises(TypeError):
-        InOut("string")
+        ipc.InOut("string")
 
     # --- _InOutSupport.placeholder returns correct empty sentinels ---
-    assert _InOutSupport.placeholder([1, 2, 3]) == []
-    assert _InOutSupport.placeholder({"a": 1}) == {}
-    assert _InOutSupport.placeholder(bytearray(b"abc")) == bytearray()
-    arr_ph = _InOutSupport.placeholder(np.zeros((3, 2), dtype=np.float32))
+    assert ipc._InOutSupport.placeholder([1, 2, 3]) == []
+    assert ipc._InOutSupport.placeholder({"a": 1}) == {}
+    assert ipc._InOutSupport.placeholder(bytearray(b"abc")) == bytearray()
+    arr_ph = ipc._InOutSupport.placeholder(np.zeros((3, 2), dtype=np.float32))
     assert arr_ph.shape == (3, 2)
     assert arr_ph.dtype == np.float32
 
     # --- _InOutSupport.patch for numpy raises ValueError on shape mismatch ---
     a = np.zeros((3,), dtype=np.float32)
     with pytest.raises(ValueError, match="shape mismatch"):
-        _InOutSupport.patch(a, np.zeros((4,), dtype=np.float32))
+        ipc._InOutSupport.patch(a, np.zeros((4,), dtype=np.float32))
 
     """Measure round-trip throughput for numpy arrays of different sizes."""
     import time
@@ -339,21 +330,23 @@ def test_ipc_inout(_pythonpath):
     cases = [(None, 10000), (1_000, 10000), (1_000_000, 1000), (10_000_000, 100)]
     cases = [(10_000_000, 100)]
 
-    w = ipc(ArrayWorker)
+    w = ipc.spawn(ArrayWorker)
     try:
         print()
         for payload, iterations in cases:
-            arr = None if payload is None else np.ones(payload, dtype=np.uint8)
+            data: np.ndarray | None = (
+                None if payload is None else np.ones(payload, dtype=np.uint8)
+            )
             # warm-up
-            w.sink(arr)
+            w.sink(data)
 
             t0 = time.perf_counter()
             for _ in range(iterations):
-                w.sink(arr)
+                w.sink(data)
             elapsed = time.perf_counter() - t0
 
             qps = iterations / elapsed
-            nbytes = 0 if arr is None else arr.nbytes
+            nbytes = 0 if data is None else data.nbytes
             mb_per_s = (nbytes * iterations) / elapsed / 1e6
             size_str = f"{'None':>10}" if payload is None else f"{payload:>10,}"
             print(
@@ -385,25 +378,25 @@ def test_ipc_pack_unpack_performance():
     print()
     for n, dtype, iterations in cases:
         arr = np.arange(n, dtype=dtype)
-        obj = {_KEY_RESULT: arr}
+        obj = {ipc._KEY_RESULT: arr}
 
         # warm-up
-        _unpack(_pack(obj))
+        ipc._unpack(ipc._pack(obj))
 
         # pack
         t0 = time.perf_counter()
         for _ in range(iterations):
-            packed = _pack(obj)
+            packed = ipc._pack(obj)
         pack_elapsed = time.perf_counter() - t0
 
         # unpack
         t0 = time.perf_counter()
         for _ in range(iterations):
-            result = _unpack(packed)
+            result = ipc._unpack(packed)
         unpack_elapsed = time.perf_counter() - t0
 
         # verify round-trip correctness
-        np.testing.assert_array_equal(result[_KEY_RESULT], arr)
+        np.testing.assert_array_equal(result[ipc._KEY_RESULT], arr)
 
         nbytes = arr.nbytes
         pack_mb_s = (nbytes * iterations) / pack_elapsed / 1e6
@@ -428,7 +421,7 @@ def test_ipc_multithreaded(_pythonpath):
     N_THREADS = 16
     CALLS_PER_THREAD = 50
 
-    w = ipc(MultiplyWorker, factor=3)
+    w = ipc.spawn(MultiplyWorker, factor=3)
     errors = []
     barrier = threading.Barrier(N_THREADS)
 
