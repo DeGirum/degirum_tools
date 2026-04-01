@@ -23,6 +23,8 @@ from typing import Any, Optional, Set, Type, TypeVar, cast
 from .server import (
     _pack,
     _unpack,
+    _pack_multipart,
+    _unpack_multipart,
     _SHUTDOWN_METHOD,
     _KEY_METHOD,
     _KEY_ARGS,
@@ -324,7 +326,7 @@ class _IPCConnection:
             for k, v in kwargs.items()
         }
 
-        payload = _pack(
+        frames = _pack_multipart(
             {
                 _KEY_METHOD: method,
                 _KEY_ARGS: plain_args,
@@ -335,7 +337,7 @@ class _IPCConnection:
         )
         with self._lock:
             try:
-                self._socket.send(payload)
+                self._socket.send_multipart(frames, copy=False)
             except zmq.ZMQError as exc:
                 self.cleanup()
                 raise RuntimeError(
@@ -354,14 +356,14 @@ class _IPCConnection:
                     )
 
             try:
-                raw = self._socket.recv()
+                raw_frames = self._socket.recv_multipart(copy=False)
             except zmq.ZMQError as exc:
                 self.cleanup()
                 raise RuntimeError(
                     f"IPC call '{method}' failed due to transport error: {exc}"
                 ) from exc
 
-        response = _unpack(raw)
+        response = _unpack_multipart(raw_frames)
 
         if response.get(_KEY_ERROR):
             raise IPCRemoteError(
@@ -390,16 +392,19 @@ class _IPCConnection:
         with self._lock:
             try:
                 if self._socket is not None:
-                    self._socket.send(
-                        _pack(
-                            {
-                                _KEY_METHOD: _SHUTDOWN_METHOD,
-                                _KEY_ARGS: [],
-                                _KEY_KWARGS: {},
-                            }
-                        )
+                    self._socket.send_multipart(
+                        [
+                            _pack(
+                                {
+                                    _KEY_METHOD: _SHUTDOWN_METHOD,
+                                    _KEY_ARGS: [],
+                                    _KEY_KWARGS: {},
+                                }
+                            )
+                        ],
+                        copy=False,
                     )
-                    self._socket.recv()  # wait for ack
+                    self._socket.recv_multipart(copy=False)  # wait for ack
                     graceful = True
             except Exception:
                 pass

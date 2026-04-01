@@ -335,13 +335,15 @@ def test_ipc_inout(_pythonpath):
     with pytest.raises(ValueError, match="shape mismatch"):
         ipc._InOutSupport.patch(a, np.zeros((4,), dtype=np.float32))
 
+
+def test_ipc_array_performance(_pythonpath):
+    # (payload, iterations): None measures baseline RPC overhead with no data
+    cases = [(None, 10000), (1_000, 10000), (1_000_000, 1000), (10_000_000, 100)]
+    cases = [(None, 10000), (10_000_000, 100)]
+
     """Measure round-trip throughput for numpy arrays of different sizes."""
     import time
     from ipc_test_workers import ArrayWorker
-
-    # (payload, iterations): None measures baseline RPC overhead with no data
-    cases = [(None, 10000), (1_000, 10000), (1_000_000, 1000), (10_000_000, 100)]
-    cases = [(10_000_000, 100)]
 
     w = ipc.spawn(ArrayWorker)
     try:
@@ -388,7 +390,6 @@ def test_ipc_pack_unpack_performance():
         (1_000_000, np.float64, 1_000),
     ]
 
-    print()
     for n, dtype, iterations in cases:
         arr = np.arange(n, dtype=dtype)
         obj = {ipc._KEY_RESULT: arr}

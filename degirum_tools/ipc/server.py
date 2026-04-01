@@ -46,6 +46,10 @@ _KEY_INOUT_ARGS = "inout_args"
 _KEY_INOUT_KWARGS = "inout_kwargs"
 _KEY_OUT_ARGS = "out_args"
 
+# Sentinel key used in the msgpack envelope to mark positions of numpy arrays
+# that are transmitted as separate ZMQ multipart frames.
+_NP_FRAME_SENTINEL = "__np__"
+
 # ---------------------------------------------------------------------------
 # Serialization helpers  (re-exported so ipc.py can import them)
 # ---------------------------------------------------------------------------
@@ -59,6 +63,90 @@ def _pack(obj: Any) -> bytes:
 def _unpack(data: bytes) -> Any:
     """Unpack bytes to a Python object using MsgPack."""
     return msgpack.unpackb(data, raw=False)
+
+
+def _pack_multipart(envelope: dict) -> list:
+    """Pack *envelope* as a multipart ZMQ message, extracting numpy arrays.
+
+    Numpy arrays found one level deep in ``_KEY_ARGS`` (list), ``_KEY_KWARGS``
+    (dict), ``_KEY_RESULT``, and ``_KEY_OUT_ARGS`` (dict) are pulled out and
+    appended as raw buffer frames so ZMQ can transmit them without any
+    Python-layer copy.  Their positions in the envelope are replaced by a
+    sentinel dict carrying shape and dtype.
+
+    Returns:
+        A list ``[envelope_bytes, arr0, arr1, ...]`` suitable for
+        ``socket.send_multipart(..., copy=False)``.
+    """
+    arrays: list = []
+
+    def _extract(val: Any) -> Any:
+        if isinstance(val, np.ndarray):
+            arr = val if val.flags["C_CONTIGUOUS"] else np.ascontiguousarray(val)
+            idx = len(arrays)
+            arrays.append(arr)
+            return {_NP_FRAME_SENTINEL: idx, "d": arr.dtype.str, "s": list(arr.shape)}
+        return val
+
+    new_env = dict(envelope)
+    for key in (_KEY_ARGS, _KEY_KWARGS, _KEY_RESULT, _KEY_OUT_ARGS):
+        if key not in new_env:
+            continue
+        obj = new_env[key]
+        if isinstance(obj, list):
+            new_env[key] = [_extract(v) for v in obj]
+        elif isinstance(obj, dict):
+            new_env[key] = {k: _extract(v) for k, v in obj.items()}
+        else:
+            new_env[key] = _extract(obj)
+
+    return [_pack(new_env)] + arrays
+
+
+def _unpack_multipart(frames: list) -> dict:
+    """Unpack a multipart ZMQ message produced by ``_pack_multipart``.
+
+    ``frames[0]`` is the msgpack envelope; ``frames[1:]`` are raw numpy array
+    buffers.  Sentinel dicts in the envelope are replaced with zero-copy
+    ``numpy.frombuffer`` views backed by the ZMQ frame buffers.
+
+    Args:
+        frames: List of ``zmq.Frame`` objects (or bytes) returned by
+            ``socket.recv_multipart(copy=False)``.
+
+    Returns:
+        The decoded envelope dict with numpy arrays restored.
+    """
+    envelope = _unpack(bytes(frames[0]))
+    if len(frames) == 1:
+        return envelope
+
+    array_frames = frames[1:]
+
+    def _restore(val: Any) -> Any:
+        if isinstance(val, dict) and _NP_FRAME_SENTINEL in val:
+            idx = val[_NP_FRAME_SENTINEL]
+            dtype = np.dtype(val["d"])
+            shape = tuple(val["s"])
+            return np.frombuffer(memoryview(array_frames[idx]), dtype=dtype).reshape(
+                shape
+            )
+        return val
+
+    for key in (_KEY_ARGS, _KEY_KWARGS, _KEY_RESULT, _KEY_OUT_ARGS):
+        if key not in envelope:
+            continue
+        obj = envelope[key]
+        if isinstance(obj, list):
+            envelope[key] = [_restore(v) for v in obj]
+        elif isinstance(obj, dict) and _NP_FRAME_SENTINEL not in obj:
+            # Plain dict (kwargs / out_args container): restore values inside it.
+            envelope[key] = {k: _restore(v) for k, v in obj.items()}
+        else:
+            # Scalar value or sentinel dict (top-level numpy result): restore directly.
+            envelope[key] = _restore(obj)
+
+    return envelope
 
 
 # ---------------------------------------------------------------------------
@@ -101,14 +189,14 @@ def _run_server_loop(server_class: Any, methods: FrozenSet[str]) -> None:
             break
 
         try:
-            raw = sock.recv()
+            frames = sock.recv_multipart(copy=False)
         except zmq.Again:
             continue  # timeout: re-check orphan guard
         except zmq.ZMQError:
             break
 
         # parse the request
-        request = _unpack(raw)
+        request = _unpack_multipart(frames)
         method = request.get(_KEY_METHOD, "")
         req_args = request.get(_KEY_ARGS, [])
         req_kwargs = request.get(_KEY_KWARGS, {})
@@ -138,19 +226,22 @@ def _run_server_loop(server_class: Any, methods: FrozenSet[str]) -> None:
                 req_kwargs[k] = req_kwargs[k].copy()
 
         if method == _SHUTDOWN_METHOD:
-            sock.send(_pack({_KEY_RESULT: "bye"}))
+            sock.send_multipart([_pack({_KEY_RESULT: "bye"})], copy=False)
             break
 
         if method not in methods:
-            sock.send(
-                _pack(
-                    {
-                        _KEY_ERROR: True,
-                        _KEY_TYPE: "AttributeError",
-                        _KEY_MESSAGE: f"Method '{method}' is not an IPC method",
-                        _KEY_TRACEBACK: "",
-                    }
-                )
+            sock.send_multipart(
+                [
+                    _pack(
+                        {
+                            _KEY_ERROR: True,
+                            _KEY_TYPE: "AttributeError",
+                            _KEY_MESSAGE: f"Method '{method}' is not an IPC method",
+                            _KEY_TRACEBACK: "",
+                        }
+                    )
+                ],
+                copy=False,
             )
             continue
 
@@ -161,17 +252,23 @@ def _run_server_loop(server_class: Any, methods: FrozenSet[str]) -> None:
                 out_args[str(i)] = req_args[i]
             for k in inout_kwarg_keys:
                 out_args[k] = req_kwargs[k]
-            sock.send(_pack({_KEY_RESULT: result, _KEY_OUT_ARGS: out_args}))
+            sock.send_multipart(
+                _pack_multipart({_KEY_RESULT: result, _KEY_OUT_ARGS: out_args}),
+                copy=False,
+            )
         except Exception as exc:
-            sock.send(
-                _pack(
-                    {
-                        _KEY_ERROR: True,
-                        _KEY_TYPE: type(exc).__name__,
-                        _KEY_MESSAGE: str(exc),
-                        _KEY_TRACEBACK: traceback.format_exc(),
-                    }
-                )
+            sock.send_multipart(
+                [
+                    _pack(
+                        {
+                            _KEY_ERROR: True,
+                            _KEY_TYPE: type(exc).__name__,
+                            _KEY_MESSAGE: str(exc),
+                            _KEY_TRACEBACK: traceback.format_exc(),
+                        }
+                    )
+                ],
+                copy=False,
             )
 
     sock.close(linger=0)
