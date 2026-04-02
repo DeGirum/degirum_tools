@@ -30,7 +30,7 @@ Usage::
         def compute(self, x):
             return x * self.param
 
-    worker = ipc.spawn(MyWorker, param=3)  # spawns child process transparently
+    worker = ipc.spawn(MyWorker, param=3)   # spawns child process transparently
     result = worker.compute(10)             # executes in child process, returns 30
     del worker                              # shuts down child process cleanly
 
