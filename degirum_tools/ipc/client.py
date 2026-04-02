@@ -22,7 +22,6 @@ from typing import Any, Optional, Set, Type, TypeVar, cast
 
 from .server import (
     _pack,
-    _unpack,
     _pack_multipart,
     _unpack_multipart,
     _SHUTDOWN_METHOD,
