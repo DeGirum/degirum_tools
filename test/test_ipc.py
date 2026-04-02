@@ -495,7 +495,6 @@ def test_ipc_multithreaded(_pythonpath):
 
 def test_ipc_array_performance(_pythonpath):
     # (payload, iterations): None measures baseline RPC overhead with no data
-    cases = [(None, 10000), (1_000, 10000), (1_000_000, 1000), (10_000_000, 100)]
     cases = [(None, 10000), (10_000_000, 100)]
 
     """Measure round-trip throughput for numpy arrays of different sizes."""
@@ -538,10 +537,11 @@ def test_ipc_pack_unpack_performance():
         (1_000, np.uint8, 10_000),
         (1_000_000, np.uint8, 1_000),
         (10_000_000, np.uint8, 100),
-        (1_000_000, np.float32, 1_000),
-        (1_000_000, np.float64, 1_000),
+        (1_000_000, np.float32, 250),
+        (1_000_000, np.float64, 125),
     ]
 
+    print()
     for n, dtype, iterations in cases:
         arr = np.arange(n, dtype=dtype)
         obj = {ipc._KEY_RESULT: arr}
@@ -568,7 +568,7 @@ def test_ipc_pack_unpack_performance():
         pack_mb_s = (nbytes * iterations) / pack_elapsed / 1e6
         unpack_mb_s = (nbytes * iterations) / unpack_elapsed / 1e6
         print(
-            f"  dtype={np.dtype(dtype)}  len={n:>10,}  ({nbytes / 1e6:>6.1f} MB)"
+            f"  dtype={str(np.dtype(dtype)):>8}  len={n:>11,}  ({nbytes / 1e6:>6.1f} MB)"
             f"  pack={pack_mb_s:>7.0f} MB/s"
             f"  unpack={unpack_mb_s:>7.0f} MB/s"
         )
