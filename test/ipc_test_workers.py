@@ -125,3 +125,42 @@ class InOutWorker:
         tmp = list(a)
         a[:] = b
         b[:] = tmp
+
+
+class NestedArrayWorker:
+    """Worker that passes numpy arrays nested inside lists, dicts, and tuples."""
+
+    def list_result(self, arr):
+        """Return a list containing arr and arr*2."""
+        return [arr, arr * 2]
+
+    def dict_result(self, arr):
+        """Return a dict mapping 'a'->arr and 'b'->arr*2."""
+        return {"a": arr, "b": arr * 2}
+
+    def tuple_result(self, arr):
+        """Return a tuple (arr, arr*2)."""
+        return (arr, arr * 2)
+
+    def deep_result(self, arr):
+        """Return a deeply nested structure: {"outer": [arr, {"inner": arr*2}]}."""
+        return {"outer": [arr, {"inner": arr * 2}]}
+
+    def accept_list(self, arrays):
+        """Accept a list of arrays and return their element-wise sum."""
+        result = arrays[0].copy()
+        for a in arrays[1:]:
+            result = result + a
+        return result
+
+    def accept_dict(self, arrays):
+        """Accept a dict of arrays and return the element-wise sum of all values."""
+        values = list(arrays.values())
+        result = values[0].copy()
+        for a in values[1:]:
+            result = result + a
+        return result
+
+    def accept_tuple(self, t):
+        """Accept a tuple/list of two arrays and return their element-wise sum."""
+        return t[0] + t[1]

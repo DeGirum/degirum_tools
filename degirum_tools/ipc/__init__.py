@@ -59,7 +59,10 @@ from .client import (
     # for unit tests:
     _pack,
     _unpack,
+    _pack_multipart,
+    _unpack_multipart,
     _get_public_methods,
+    _KEY_ARGS,
     _KEY_RESULT,
     _InOutSupport,
 )

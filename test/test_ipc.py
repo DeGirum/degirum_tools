@@ -66,6 +66,64 @@ def test_ipc_unit():
     assert np.array_equal(result, arr)
     assert result.dtype == arr.dtype
 
+    # --- _pack_multipart/_unpack_multipart: list of arrays in result ---
+    arr1 = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+    arr2 = np.array([4, 5, 6], dtype=np.int16)
+    arr_2d = np.arange(6, dtype=np.float64).reshape(2, 3)
+
+    def _roundtrip(envelope):
+        return ipc._unpack_multipart(ipc._pack_multipart(envelope))
+
+    out = _roundtrip({ipc._KEY_RESULT: [arr1, arr2]})
+    assert np.array_equal(out[ipc._KEY_RESULT][0], arr1)
+    assert out[ipc._KEY_RESULT][0].dtype == arr1.dtype
+    assert np.array_equal(out[ipc._KEY_RESULT][1], arr2)
+    assert out[ipc._KEY_RESULT][1].dtype == arr2.dtype
+
+    # --- _pack_multipart/_unpack_multipart: dict of arrays in result ---
+    out = _roundtrip({ipc._KEY_RESULT: {"a": arr1, "b": arr2}})
+    assert np.array_equal(out[ipc._KEY_RESULT]["a"], arr1)
+    assert np.array_equal(out[ipc._KEY_RESULT]["b"], arr2)
+
+    # --- _pack_multipart/_unpack_multipart: tuple of arrays (decoded as list) ---
+    out = _roundtrip({ipc._KEY_RESULT: (arr1, arr2)})
+    assert np.array_equal(out[ipc._KEY_RESULT][0], arr1)
+    assert np.array_equal(out[ipc._KEY_RESULT][1], arr2)
+
+    # --- _pack_multipart/_unpack_multipart: plain scalar tuple (no arrays, decoded as list) ---
+    out = _roundtrip({ipc._KEY_RESULT: (1, "hello", True)})
+    assert out[ipc._KEY_RESULT] == [1, "hello", True]
+
+    # --- _pack_multipart/_unpack_multipart: tuple as a direct arg value ---
+    out = _roundtrip({ipc._KEY_ARGS: [(arr1, 99)]})
+    assert np.array_equal(out[ipc._KEY_ARGS][0][0], arr1)
+    assert out[ipc._KEY_ARGS][0][1] == 99
+
+    # --- _pack_multipart/_unpack_multipart: 2-D array inside a list ---
+    out = _roundtrip({ipc._KEY_RESULT: [arr_2d, arr1]})
+    assert out[ipc._KEY_RESULT][0].shape == arr_2d.shape
+    assert np.array_equal(out[ipc._KEY_RESULT][0], arr_2d)
+
+    # --- _pack_multipart/_unpack_multipart: deeply nested dict -> list -> dict ---
+    out = _roundtrip({ipc._KEY_RESULT: {"outer": [arr1, {"inner": arr2}]}})
+    assert np.array_equal(out[ipc._KEY_RESULT]["outer"][0], arr1)
+    assert np.array_equal(out[ipc._KEY_RESULT]["outer"][1]["inner"], arr2)
+
+    # --- _pack_multipart/_unpack_multipart: list of arrays in args ---
+    out = _roundtrip({ipc._KEY_ARGS: [arr1, arr2]})
+    assert np.array_equal(out[ipc._KEY_ARGS][0], arr1)
+    assert np.array_equal(out[ipc._KEY_ARGS][1], arr2)
+
+    # --- _pack_multipart/_unpack_multipart: tuple nested inside list in args ---
+    out = _roundtrip({ipc._KEY_ARGS: [(arr1, arr2), 42]})
+    assert np.array_equal(out[ipc._KEY_ARGS][0][0], arr1)
+    assert np.array_equal(out[ipc._KEY_ARGS][0][1], arr2)
+    assert out[ipc._KEY_ARGS][1] == 42
+
+    # --- _pack_multipart/_unpack_multipart: no arrays passes through unchanged ---
+    out = _roundtrip({ipc._KEY_RESULT: {"x": [1, 2, 3], "y": "hello"}})
+    assert out[ipc._KEY_RESULT] == {"x": [1, 2, 3], "y": "hello"}
+
     # --- _get_public_methods returns all public instance methods ---
     class Worker:
         def public_method(self):
@@ -129,6 +187,7 @@ def test_ipc_integration(_pythonpath):
         ExitingWorker,
         ArrayWorker,
         NestingWorker,
+        NestedArrayWorker,
     )
 
     # --- basic method call: multiply(x) returns x * factor in child process ---
@@ -237,6 +296,50 @@ def test_ipc_integration(_pythonpath):
         assert np.isclose(wa.dot(a, b), np.dot(a, b))
     finally:
         del wa
+
+    # --- nested arrays: list/dict/tuple/deep structures survive IPC round-trip ---
+    wna = ipc.spawn(NestedArrayWorker)
+    try:
+        arr_n = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+        arr_n2 = np.array([10.0, 20.0, 30.0], dtype=np.float32)
+        arr_2d_n = np.arange(6, dtype=np.float64).reshape(2, 3)
+
+        # list result: [arr, arr*2]
+        res = wna.list_result(arr_n)
+        assert np.array_equal(res[0], arr_n) and res[0].dtype == arr_n.dtype
+        assert np.array_equal(res[1], arr_n * 2)
+
+        # 2-D array in a list result
+        res = wna.list_result(arr_2d_n)
+        assert res[0].shape == arr_2d_n.shape and np.array_equal(res[0], arr_2d_n)
+        assert np.array_equal(res[1], arr_2d_n * 2)
+
+        # dict result: {"a": arr, "b": arr*2}
+        res = wna.dict_result(arr_n)
+        assert np.array_equal(res["a"], arr_n) and np.array_equal(res["b"], arr_n * 2)
+
+        # tuple result: comes back as list (msgpack encodes tuples as arrays)
+        res = wna.tuple_result(arr_n)
+        assert np.array_equal(res[0], arr_n) and np.array_equal(res[1], arr_n * 2)
+
+        # tuple as argument: (arr, arr2) passed as a tuple, server sums elements
+        res = wna.accept_tuple((arr_n, arr_n2))
+        assert np.array_equal(res, arr_n + arr_n2)
+
+        # deeply nested result: {"outer": [arr, {"inner": arr*2}]}
+        res = wna.deep_result(arr_n)
+        assert np.array_equal(res["outer"][0], arr_n)
+        assert np.array_equal(res["outer"][1]["inner"], arr_n * 2)
+
+        # list of arrays as argument
+        res = wna.accept_list([arr_n, arr_n2])
+        assert np.array_equal(res, arr_n + arr_n2)
+
+        # dict of arrays as argument
+        res = wna.accept_dict({"x": arr_n, "y": arr_n2})
+        assert np.array_equal(res, arr_n + arr_n2)
+    finally:
+        del wna
 
     # --- server-side method can spawn and call a sub-worker in a third process ---
     wn = ipc.spawn(NestingWorker, factor=5)

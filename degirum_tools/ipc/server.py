@@ -86,19 +86,19 @@ def _pack_multipart(envelope: dict) -> list:
             idx = len(arrays)
             arrays.append(arr)
             return {_NP_FRAME_SENTINEL: idx, "d": arr.dtype.str, "s": list(arr.shape)}
+        elif isinstance(val, tuple):
+            return tuple(_extract(v) for v in val)
+        elif isinstance(val, list):
+            return [_extract(v) for v in val]
+        elif isinstance(val, dict):
+            return {k: _extract(v) for k, v in val.items()}
         return val
 
     new_env = dict(envelope)
     for key in (_KEY_ARGS, _KEY_KWARGS, _KEY_RESULT, _KEY_OUT_ARGS):
         if key not in new_env:
             continue
-        obj = new_env[key]
-        if isinstance(obj, list):
-            new_env[key] = [_extract(v) for v in obj]
-        elif isinstance(obj, dict):
-            new_env[key] = {k: _extract(v) for k, v in obj.items()}
-        else:
-            new_env[key] = _extract(obj)
+        new_env[key] = _extract(new_env[key])
 
     return [_pack(new_env)] + arrays
 
@@ -131,20 +131,18 @@ def _unpack_multipart(frames: list) -> dict:
             return np.frombuffer(memoryview(array_frames[idx]), dtype=dtype).reshape(
                 shape
             )
+        elif isinstance(val, tuple):
+            return tuple(_restore(v) for v in val)
+        elif isinstance(val, list):
+            return [_restore(v) for v in val]
+        elif isinstance(val, dict):
+            return {k: _restore(v) for k, v in val.items()}
         return val
 
     for key in (_KEY_ARGS, _KEY_KWARGS, _KEY_RESULT, _KEY_OUT_ARGS):
         if key not in envelope:
             continue
-        obj = envelope[key]
-        if isinstance(obj, list):
-            envelope[key] = [_restore(v) for v in obj]
-        elif isinstance(obj, dict) and _NP_FRAME_SENTINEL not in obj:
-            # Plain dict (kwargs / out_args container): restore values inside it.
-            envelope[key] = {k: _restore(v) for k, v in obj.items()}
-        else:
-            # Scalar value or sentinel dict (top-level numpy result): restore directly.
-            envelope[key] = _restore(obj)
+        envelope[key] = _restore(envelope[key])
 
     return envelope
 
