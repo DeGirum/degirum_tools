@@ -52,9 +52,6 @@ if defined GITHUB_PATH (
 )
 
 :: Make mediamtx available in the current shell session too
-set PATH=%PATH%;%INSTALL_DIR%
-
 echo MediaMTX %MTX_VERSION% installed to %INSTALL_DIR%
-mediamtx --version
-
 endlocal & set PATH=%PATH%;%INSTALL_DIR%
+mediamtx --version
