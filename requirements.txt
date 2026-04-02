@@ -22,3 +22,6 @@ ffmpeg-python
 typing-extensions
 jsonschema
 apprise
+pyzmq
+msgpack
+msgpack-numpy

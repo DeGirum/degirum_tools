@@ -6,6 +6,7 @@
 #
 
 import os
+from typing import Optional
 import pytest
 import psutil
 import numpy as np
@@ -452,7 +453,7 @@ def test_ipc_array_performance(_pythonpath):
     try:
         print()
         for payload, iterations in cases:
-            data: np.ndarray | None = (
+            data: Optional[np.ndarray] = (
                 None if payload is None else np.ones(payload, dtype=np.uint8)
             )
             # warm-up

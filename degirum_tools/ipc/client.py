@@ -38,6 +38,9 @@ from .server import (
     _KEY_OUT_ARGS,
 )
 
+from .server import _unpack  # flake8: noqa
+
+
 __all__ = ["IPCRemoteError", "Out", "InOut", "spawn"]
 
 

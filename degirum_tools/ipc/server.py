@@ -68,10 +68,11 @@ def _unpack(data: bytes) -> Any:
 def _pack_multipart(envelope: dict) -> list:
     """Pack *envelope* as a multipart ZMQ message, extracting numpy arrays.
 
-    Numpy arrays found one level deep in ``_KEY_ARGS`` (list), ``_KEY_KWARGS``
-    (dict), ``_KEY_RESULT``, and ``_KEY_OUT_ARGS`` (dict) are pulled out and
-    appended as raw buffer frames so ZMQ can transmit them without any
-    Python-layer copy.  Their positions in the envelope are replaced by a
+    Numpy arrays found under ``_KEY_ARGS``, ``_KEY_KWARGS``, ``_KEY_RESULT``,
+    and ``_KEY_OUT_ARGS`` are pulled out and appended as raw buffer frames so
+    ZMQ can transmit them without any Python-layer copy. Extraction is
+    recursive within tuples, lists, and dicts reachable from those top-level
+    envelope fields. Their positions in the envelope are replaced by a
     sentinel dict carrying shape and dtype.
 
     Returns:
