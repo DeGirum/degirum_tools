@@ -352,6 +352,11 @@ def test_ipc_integration(_pythonpath):
         del wn
 
 
+# ===========================================================================
+# Tests for Out/InOut argument support in ipc.py
+# ===========================================================================
+
+
 def test_ipc_inout(_pythonpath):
     """Integration tests for Out/InOut writeback argument support."""
     from ipc_test_workers import InOutWorker
@@ -440,6 +445,54 @@ def test_ipc_inout(_pythonpath):
         ipc._InOutSupport.patch(a, np.zeros((4,), dtype=np.float32))
 
 
+# ===========================================================================
+# Thread-safety test
+# ===========================================================================
+
+
+def test_ipc_multithreaded(_pythonpath):
+    """Multiple threads calling IPC methods concurrently must not corrupt results."""
+    import threading
+    from ipc_test_workers import MultiplyWorker
+
+    N_THREADS = 16
+    CALLS_PER_THREAD = 50
+
+    w = ipc.spawn(MultiplyWorker, factor=3)
+    errors = []
+    barrier = threading.Barrier(N_THREADS)
+
+    def worker_thread(thread_id, _w=w):
+        barrier.wait()  # all threads start their first call simultaneously
+        for i in range(CALLS_PER_THREAD):
+            a = thread_id * 1000 + i
+            expected = a + a  # add(a, a) == 2*a, independent of factor
+            try:
+                result = _w.add(a, a)
+                if result != expected:
+                    errors.append(
+                        f"thread {thread_id} call {i}: got {result}, want {expected}"
+                    )
+            except Exception as exc:
+                errors.append(f"thread {thread_id} call {i}: {exc}")
+
+    threads = [
+        threading.Thread(target=worker_thread, args=(t,)) for t in range(N_THREADS)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    del w
+    assert not errors, "\n".join(errors)
+
+
+# ===========================================================================
+# Benchmarks
+# ===========================================================================
+
+
 def test_ipc_array_performance(_pythonpath):
     # (payload, iterations): None measures baseline RPC overhead with no data
     cases = [(None, 10000), (1_000, 10000), (1_000_000, 1000), (10_000_000, 100)]
@@ -474,11 +527,6 @@ def test_ipc_array_performance(_pythonpath):
             )
     finally:
         del w
-
-
-# ===========================================================================
-# Serialization micro-benchmark — no subprocess
-# ===========================================================================
 
 
 def test_ipc_pack_unpack_performance():
@@ -524,46 +572,3 @@ def test_ipc_pack_unpack_performance():
             f"  pack={pack_mb_s:>7.0f} MB/s"
             f"  unpack={unpack_mb_s:>7.0f} MB/s"
         )
-
-
-# ===========================================================================
-# Thread-safety test
-# ===========================================================================
-
-
-def test_ipc_multithreaded(_pythonpath):
-    """Multiple threads calling IPC methods concurrently must not corrupt results."""
-    import threading
-    from ipc_test_workers import MultiplyWorker
-
-    N_THREADS = 16
-    CALLS_PER_THREAD = 50
-
-    w = ipc.spawn(MultiplyWorker, factor=3)
-    errors = []
-    barrier = threading.Barrier(N_THREADS)
-
-    def worker_thread(thread_id, _w=w):
-        barrier.wait()  # all threads start their first call simultaneously
-        for i in range(CALLS_PER_THREAD):
-            a = thread_id * 1000 + i
-            expected = a + a  # add(a, a) == 2*a, independent of factor
-            try:
-                result = _w.add(a, a)
-                if result != expected:
-                    errors.append(
-                        f"thread {thread_id} call {i}: got {result}, want {expected}"
-                    )
-            except Exception as exc:
-                errors.append(f"thread {thread_id} call {i}: {exc}")
-
-    threads = [
-        threading.Thread(target=worker_thread, args=(t,)) for t in range(N_THREADS)
-    ]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-
-    del w
-    assert not errors, "\n".join(errors)
