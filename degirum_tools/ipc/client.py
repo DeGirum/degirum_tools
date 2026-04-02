@@ -20,8 +20,9 @@ import numpy as np
 import zmq
 from typing import Any, Optional, Set, Type, TypeVar, cast
 
-from .server import (
+from .server import (  # noqa
     _pack,
+    _unpack,
     _pack_multipart,
     _unpack_multipart,
     _SHUTDOWN_METHOD,
@@ -37,9 +38,6 @@ from .server import (
     _KEY_INOUT_KWARGS,
     _KEY_OUT_ARGS,
 )
-
-from .server import _unpack  # flake8: noqa
-
 
 __all__ = ["IPCRemoteError", "Out", "InOut", "spawn"]
 
