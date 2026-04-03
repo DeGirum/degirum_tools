@@ -26,14 +26,36 @@ def pytest_addoption(parser):
     parser.addoption(
         "--token", action="store", default="", help="cloud server token value to use"
     )
+    parser.addoption(
+        "--run-slow",
+        action="store_true",
+        default=False,
+        help="Run tests marked as slow (benchmarks, large-payload tests)",
+    )
 
 
 def pytest_configure(config):
     """Configure pytest with custom options"""
 
+    config.addinivalue_line(
+        "markers",
+        "slow: marks tests as slow benchmarks (skipped by default; use --run-slow to enable)",
+    )
+
     loglevel = config.getoption("--loglevel")
     if loglevel:
         dg.enable_default_logger(getattr(logging, loglevel.upper(), logging.ERROR))
+
+
+def pytest_collection_modifyitems(config, items):
+    """Skip slow tests unless --run-slow is passed."""
+    if not config.getoption("--run-slow"):
+        skip_slow = pytest.mark.skip(
+            reason="slow benchmark — run with --run-slow to enable"
+        )
+        for item in items:
+            if item.get_closest_marker("slow"):
+                item.add_marker(skip_slow)
 
 
 @pytest.fixture(scope="session", autouse=True)

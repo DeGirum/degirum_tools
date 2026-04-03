@@ -681,7 +681,7 @@ class VideoWriter:
         else:
             return cv2.VideoWriter(
                 self._fname,
-                int.from_bytes("H264".encode(), byteorder="little"),
+                cv2.VideoWriter_fourcc(*"mp4v"),  # type: ignore[attr-defined]
                 self._fps,
                 self._wh,
             )
