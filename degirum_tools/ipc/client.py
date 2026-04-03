@@ -472,7 +472,10 @@ def _proxy_ipc_shutdown(self: Any) -> None:
 
 def _proxy_ipc_process(self: Any) -> Optional[subprocess.Popen]:
     """The child ``subprocess.Popen`` instance.  Exposed for testing and monitoring."""
-    return self._ipc_conn._process  # type: ignore[attr-defined]
+    conn = getattr(self, "_ipc_conn")
+    if conn is None:
+        return None
+    return conn._process  # type: ignore[attr-defined]
 
 
 def _proxy_ipc_call(self: Any, method: str, args: tuple, kwargs: dict) -> Any:

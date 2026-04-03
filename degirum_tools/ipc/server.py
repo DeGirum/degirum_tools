@@ -229,11 +229,15 @@ def _run_server_loop(server_class: Any, methods: FrozenSet[str]) -> None:
 
     while True:
         # Orphan guard: exit if the parent process is gone.
-        if (
-            parent_proc is None
-            or not parent_proc.is_running()
-            or parent_proc.status() == psutil.STATUS_ZOMBIE
-        ):
+        try:
+            orphaned = (
+                parent_proc is None
+                or not parent_proc.is_running()
+                or parent_proc.status() == psutil.STATUS_ZOMBIE
+            )
+        except (psutil.NoSuchProcess, psutil.ZombieProcess):
+            orphaned = True
+        if orphaned:
             break
 
         try:

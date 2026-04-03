@@ -578,7 +578,13 @@ def test_ipc_orphan_guard(_pythonpath):
     # _RPC_RECV_TIMEOUT_MS is 1 s, so allow a few polling cycles.
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
-        if not server_proc.is_running() or server_proc.status() == psutil.STATUS_ZOMBIE:
+        try:
+            if (
+                not server_proc.is_running()
+                or server_proc.status() == psutil.STATUS_ZOMBIE
+            ):
+                break
+        except psutil.NoSuchProcess:
             break
         time.sleep(0.2)
     else:
