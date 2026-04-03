@@ -120,6 +120,10 @@ class InOutWorker:
         """Multiply every element of *arr* by *factor* in-place."""
         arr *= factor
 
+    def fill_array(self, arr, value: float) -> None:
+        """Overwrite every element of *arr* with *value* in-place."""
+        arr[:] = value
+
     def swap_lists(self, a: list, b: list) -> None:
         """Copy contents: a gets b's elements, b gets a's elements."""
         tmp = list(a)

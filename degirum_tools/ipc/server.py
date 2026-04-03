@@ -48,7 +48,27 @@ _KEY_OUT_ARGS = "out_args"
 
 # Sentinel key used in the msgpack envelope to mark positions of numpy arrays
 # that are transmitted as separate ZMQ multipart frames.
-_NP_FRAME_SENTINEL = "__np__"
+_NDARRAY_INOUT_SENTINEL = "__ndarray_inout__"
+
+# Sentinel key for Out(ndarray) placeholders: carries shape/dtype only, no buffer.
+_NDARRAY_OUT_SENTINEL = "__ndarray_out__"
+
+
+class _OutNdArrayMeta:
+    """Lightweight placeholder for Out(ndarray): carries shape/dtype, no data.
+
+    Used by the client instead of a full ndarray buffer so that Out-wrapped
+    arrays are never transmitted across the wire.  The server reconstructs an
+    appropriately shaped/typed array with ``numpy.empty`` before calling the
+    method.
+    """
+
+    __slots__ = ("dtype", "shape")
+
+    def __init__(self, dtype, shape) -> None:
+        self.dtype = dtype
+        self.shape = shape
+
 
 # ---------------------------------------------------------------------------
 # Serialization helpers  (re-exported so ipc.py can import them)
@@ -82,11 +102,29 @@ def _pack_multipart(envelope: dict) -> list:
     arrays: list = []
 
     def _extract(val: Any) -> Any:
-        if isinstance(val, np.ndarray):
+        if isinstance(val, _OutNdArrayMeta):
+            # Out(ndarray): send only shape/dtype — no buffer frame.
+            return {
+                _NDARRAY_OUT_SENTINEL: True,
+                "d": val.dtype.str,
+                "s": list(val.shape),
+            }
+        elif isinstance(val, np.ndarray):
             arr = val if val.flags["C_CONTIGUOUS"] else np.ascontiguousarray(val)
+            if arr.size == 0:
+                # Empty array: send metadata only, no buffer frame.
+                return {
+                    _NDARRAY_INOUT_SENTINEL: None,
+                    "d": arr.dtype.str,
+                    "s": list(arr.shape),
+                }
             idx = len(arrays)
             arrays.append(arr)
-            return {_NP_FRAME_SENTINEL: idx, "d": arr.dtype.str, "s": list(arr.shape)}
+            return {
+                _NDARRAY_INOUT_SENTINEL: idx,
+                "d": arr.dtype.str,
+                "s": list(arr.shape),
+            }
         elif isinstance(val, tuple):
             return tuple(_extract(v) for v in val)
         elif isinstance(val, list):
@@ -119,16 +157,19 @@ def _unpack_multipart(frames: list) -> dict:
         The decoded envelope dict with numpy arrays restored.
     """
     envelope = _unpack(bytes(frames[0]))
-    if len(frames) == 1:
-        return envelope
-
     array_frames = frames[1:]
 
     def _restore(val: Any) -> Any:
-        if isinstance(val, dict) and _NP_FRAME_SENTINEL in val:
-            idx = val[_NP_FRAME_SENTINEL]
+        if isinstance(val, dict) and _NDARRAY_OUT_SENTINEL in val:
+            # Out(ndarray) placeholder: reconstruct an empty array from metadata.
+            return np.empty(tuple(val["s"]), dtype=np.dtype(val["d"]))
+        elif isinstance(val, dict) and _NDARRAY_INOUT_SENTINEL in val:
+            idx = val[_NDARRAY_INOUT_SENTINEL]
             dtype = np.dtype(val["d"])
             shape = tuple(val["s"])
+            if idx is None:
+                # Empty array: reconstructed from metadata, no frame.
+                return np.empty(shape, dtype=dtype)
             return np.frombuffer(memoryview(array_frames[idx]), dtype=dtype).reshape(
                 shape
             )

@@ -25,6 +25,7 @@ from .server import (  # noqa
     _unpack,
     _pack_multipart,
     _unpack_multipart,
+    _OutNdArrayMeta,
     _SHUTDOWN_METHOD,
     _KEY_METHOD,
     _KEY_ARGS,
@@ -71,7 +72,7 @@ class _InOutSupport:
         list: (lambda o: [], lambda o, v: o.__setitem__(slice(None), v)),
         dict: (lambda o: {}, lambda o, v: (o.clear(), o.update(v))),
         bytearray: (lambda o: bytearray(), lambda o, v: o.__setitem__(slice(None), v)),
-        np.ndarray: (np.empty_like, _np_patch.__func__),  # type: ignore[attr-defined]
+        np.ndarray: (lambda o: _OutNdArrayMeta(o.dtype, o.shape), _np_patch.__func__),  # type: ignore[attr-defined]
     }
 
     # Human-readable list of supported types for error messages.

@@ -125,6 +125,33 @@ def test_ipc_unit():
     out = _roundtrip({ipc._KEY_RESULT: {"x": [1, 2, 3], "y": "hello"}})
     assert out[ipc._KEY_RESULT] == {"x": [1, 2, 3], "y": "hello"}
 
+    # --- empty array: no extra frame is transmitted (only the envelope frame) ---
+    empty_1d = np.empty(0, dtype=np.float32)
+    frames = ipc._pack_multipart({ipc._KEY_RESULT: empty_1d})
+    assert len(frames) == 1, "empty ndarray must not produce an extra ZMQ frame"
+    out = ipc._unpack_multipart(frames)
+    assert out[ipc._KEY_RESULT].shape == (0,)
+    assert out[ipc._KEY_RESULT].dtype == np.float32
+
+    # --- empty 2-D array: shape and dtype preserved, still no extra frame ---
+    empty_2d = np.empty((0, 3), dtype=np.int16)
+    frames = ipc._pack_multipart({ipc._KEY_RESULT: empty_2d})
+    assert len(frames) == 1, "empty 2-D ndarray must not produce an extra ZMQ frame"
+    out = ipc._unpack_multipart(frames)
+    assert out[ipc._KEY_RESULT].shape == (0, 3)
+    assert out[ipc._KEY_RESULT].dtype == np.int16
+
+    # --- mix of empty and non-empty arrays: only non-empty produce frames ---
+    non_empty = np.array([1.0, 2.0], dtype=np.float64)
+    frames = ipc._pack_multipart({ipc._KEY_ARGS: [empty_1d, non_empty, empty_2d]})
+    assert len(frames) == 2, "only the one non-empty ndarray should produce a frame"
+    out = ipc._unpack_multipart(frames)
+    assert out[ipc._KEY_ARGS][0].shape == (0,)
+    assert out[ipc._KEY_ARGS][0].dtype == np.float32
+    assert np.array_equal(out[ipc._KEY_ARGS][1], non_empty)
+    assert out[ipc._KEY_ARGS][2].shape == (0, 3)
+    assert out[ipc._KEY_ARGS][2].dtype == np.int16
+
     # --- _get_public_methods returns all public instance methods ---
     class Worker:
         def public_method(self):
@@ -399,6 +426,15 @@ def test_ipc_inout(_pythonpath):
         w.scale_array(ipc.InOut(arr), 2.0)
         assert np.allclose(arr, [2.0, 4.0, 6.0])
         assert arr.ctypes.data == original_ptr  # same buffer, patched via copyto
+
+        # --- Out numpy array: stale contents not sent; server fills, original patched ---
+        stale = np.full(
+            (3,), 999.0, dtype=np.float64
+        )  # stale contents must NOT reach server
+        original_ptr = stale.ctypes.data
+        w.fill_array(ipc.Out(stale), 7.0)
+        assert np.allclose(stale, [7.0, 7.0, 7.0])
+        assert stale.ctypes.data == original_ptr  # same buffer, patched via copyto
 
         # --- InOut as keyword argument ---
         kw = ["a", "b", "c"]
