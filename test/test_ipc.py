@@ -10,6 +10,7 @@ from typing import Optional
 import pytest
 import psutil
 import numpy as np
+import time
 
 from degirum_tools import ipc
 
@@ -19,11 +20,12 @@ _test_dir = os.path.dirname(os.path.abspath(__file__))
 @pytest.fixture
 def _pythonpath():
     """Prepend the test directory to PYTHONPATH for spawned child processes."""
+    had_pythonpath = "PYTHONPATH" in os.environ
     existing = os.environ.get("PYTHONPATH", "")
     new_path = (_test_dir + os.pathsep + existing) if existing else _test_dir
     os.environ["PYTHONPATH"] = new_path
     yield
-    if existing:
+    if had_pythonpath:
         os.environ["PYTHONPATH"] = existing
     else:
         del os.environ["PYTHONPATH"]
@@ -525,16 +527,77 @@ def test_ipc_multithreaded(_pythonpath):
 
 
 # ===========================================================================
+# Orphan guard test
+# ===========================================================================
+
+
+def test_ipc_orphan_guard(_pythonpath):
+    """Server must self-exit when its parent (client) process is killed.
+
+    Spawns an intermediate 'client' subprocess that itself calls ipc.spawn()
+    and prints the server PID to stdout.  We then kill the intermediate
+    process and verify that the server process exits within a few seconds,
+    proving the orphan guard works correctly.
+    """
+    import subprocess
+    import sys
+
+    # Script run in the intermediate process: spawn a worker, print the
+    # server PID, then sleep forever so we have time to kill it.
+    client_script = "\n".join(
+        [
+            "import sys, os, time",
+            f"sys.path.insert(0, {repr(_test_dir)})",
+            f"sys.path.insert(0, {repr(os.path.dirname(_test_dir))})",
+            "from degirum_tools import ipc",
+            "from ipc_test_workers import MultiplyWorker",
+            "w = ipc.spawn(MultiplyWorker, factor=1)",
+            "print(w._ipc_process.pid, flush=True)",
+            "time.sleep(60)",
+        ]
+    )
+
+    client = subprocess.Popen(
+        [sys.executable, "-c", client_script],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        assert client.stdout is not None
+        server_pid_line = client.stdout.readline()
+        assert server_pid_line, "intermediate process did not print server PID"
+        server_pid = int(server_pid_line.strip())
+
+        assert psutil.pid_exists(server_pid), "server process should be running"
+        server_proc = psutil.Process(server_pid)
+    finally:
+        client.kill()
+        client.wait(timeout=5)
+
+    # Server should self-exit once it detects its parent is gone.
+    # _RPC_RECV_TIMEOUT_MS is 1 s, so allow a few polling cycles.
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        if not server_proc.is_running() or server_proc.status() == psutil.STATUS_ZOMBIE:
+            break
+        time.sleep(0.2)
+    else:
+        server_proc.kill()
+        pytest.fail(f"Server process {server_pid} did not exit after parent was killed")
+
+
+# ===========================================================================
 # Benchmarks
 # ===========================================================================
 
 
+@pytest.mark.slow
 def test_ipc_array_performance(_pythonpath):
+    """Measure round-trip throughput for numpy arrays of different sizes."""
+
     # (payload, iterations): None measures baseline RPC overhead with no data
     cases = [(None, 10000), (10_000_000, 100)]
 
-    """Measure round-trip throughput for numpy arrays of different sizes."""
-    import time
     from ipc_test_workers import ArrayWorker
 
     w = ipc.spawn(ArrayWorker)
@@ -564,9 +627,9 @@ def test_ipc_array_performance(_pythonpath):
         del w
 
 
+@pytest.mark.slow
 def test_ipc_pack_unpack_performance():
     """Measure _pack / _unpack throughput for numpy arrays of varying sizes."""
-    import time
 
     # (n_elements, dtype, iterations)
     cases = [

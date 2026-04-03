@@ -19,9 +19,6 @@ import msgpack
 import msgpack_numpy
 from typing import Any, FrozenSet
 
-# Patch msgpack to transparently encode/decode numpy arrays.
-msgpack_numpy.patch()
-
 # ---------------------------------------------------------------------------
 # RPC protocol constants
 # ---------------------------------------------------------------------------
@@ -77,12 +74,12 @@ class _OutNdArrayMeta:
 
 def _pack(obj: Any) -> bytes:
     """Pack a Python object to bytes using MsgPack."""
-    return msgpack.packb(obj, use_bin_type=True)
+    return msgpack.packb(obj, default=msgpack_numpy.encode, use_bin_type=True)
 
 
 def _unpack(data: bytes) -> Any:
     """Unpack bytes to a Python object using MsgPack."""
-    return msgpack.unpackb(data, raw=False)
+    return msgpack.unpackb(data, object_hook=msgpack_numpy.decode, raw=False)
 
 
 def _pack_multipart(envelope: dict) -> list:
@@ -222,10 +219,21 @@ def _run_server_loop(server_class: Any, methods: FrozenSet[str]) -> None:
     sys.stdout.flush()
 
     # IPC dispatch loop
-    parent_pid = os.getppid()
+    # Capture the parent Process object now; psutil binds creation time at
+    # construction, so is_running() returns False if the PID is reused by a
+    # different process after the original parent exits.
+    try:
+        parent_proc = psutil.Process(os.getppid())
+    except psutil.NoSuchProcess:
+        parent_proc = None
+
     while True:
         # Orphan guard: exit if the parent process is gone.
-        if not psutil.pid_exists(parent_pid):
+        if (
+            parent_proc is None
+            or not parent_proc.is_running()
+            or parent_proc.status() == psutil.STATUS_ZOMBIE
+        ):
             break
 
         try:

@@ -579,10 +579,10 @@ def spawn(cls: Type[T], *args: Any, **kwargs: Any) -> T:
     # triggering the full degirum_tools package __init__.
     # -----------------------------------------------------------------
     cmd_parts = [
-        "import importlib.util;",
+        "import importlib, importlib.util;",
         f"_spec = importlib.util.spec_from_file_location('_ipc_server', {repr(_IPC_SERVER_FILE)});",
         "_ipc_server = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(_ipc_server);",
-        f"import {module_name} as _user_module;",
+        f"_user_module = importlib.import_module({repr(module_name)});",
         f"_ipc_server._run_server_loop(getattr(_user_module, {repr(class_name)}), frozenset({repr(list(methods))}))",
     ]
     cmd = "".join(cmd_parts)
