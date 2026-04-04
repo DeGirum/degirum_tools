@@ -114,6 +114,7 @@ from typing import Tuple, Optional, Dict, List, Union
 from dataclasses import dataclass
 from ..tools import (
     put_text,
+    image_size,
     color_complement,
     deduce_text_color,
     rgb_to_bgr,
@@ -463,6 +464,7 @@ class ZoneCounter(ResultAnalyzerBase):
         self,
         zones: Union[Dict[str, np.ndarray], List[np.ndarray], np.ndarray, None] = None,
         *,
+        frame_size: Optional[Tuple[int, int]] = None,
         count_polygons: Union[
             List[np.ndarray], np.ndarray, None
         ] = None,  # Old API alias
@@ -486,6 +488,7 @@ class ZoneCounter(ResultAnalyzerBase):
 
         Args:
             zones: Dict mapping zone names to polygons (new style) OR list of polygons (old style backward compat)
+            frame_size: Optional frame size (width, height); required when inference results don't have .image attribute
             class_list: List of class labels to count (None = all classes)
             per_class_display: Show per-class counts separately
             triggering_position: Anchor point(s) or None for IoPA
@@ -594,7 +597,7 @@ class ZoneCounter(ResultAnalyzerBase):
         # Internal state (lazy initialized)
         self._geometries: Optional[List[_ZoneGeometry]] = None
         self._states: Optional[List[_ZoneState]] = None
-        self._frame_wh: Optional[Tuple[int, int]] = None
+        self._frame_wh: Optional[Tuple[int, int]] = frame_size
 
     def analyze(self, result):
         """Analyze inference result and update zone counts and events.
@@ -664,7 +667,12 @@ class ZoneCounter(ResultAnalyzerBase):
     def _lazy_init(self, result):
         """Initialize geometry and state components on first call."""
         if self._geometries is None:
-            self._frame_wh = (result.image.shape[1], result.image.shape[0])
+            if hasattr(result, "image") and result.image is not None:
+                self._frame_wh = image_size(result.image)
+            elif self._frame_wh is None:
+                raise ValueError(
+                    "Frame size must be provided via frame_size parameter if result does not have .image"
+                )
 
             # Create geometry components
             self._geometries = [
@@ -679,9 +687,7 @@ class ZoneCounter(ResultAnalyzerBase):
             ]
 
             # Create state components
-            self._states = [
-                _ZoneState(self._timeout_frames) for _ in self._zone_names
-            ]
+            self._states = [_ZoneState(self._timeout_frames) for _ in self._zone_names]
 
             # Install mouse callback for interactive editing if window_name specified
             if not self._mouse_callback_installed and self._win_name is not None:
@@ -931,7 +937,14 @@ class ZoneCounter(ResultAnalyzerBase):
 
         if obj_state is not None:
             still_valid = self._update_zone_state_for_absence(
-                result, zone_index, zone_name, tid, obj_state, state, zone_counts, timestamp
+                result,
+                zone_index,
+                zone_name,
+                tid,
+                obj_state,
+                state,
+                zone_counts,
+                timestamp,
             )
 
             # Only set per-object fields if still valid AND established
@@ -960,7 +973,14 @@ class ZoneCounter(ResultAnalyzerBase):
                 continue
 
             self._update_zone_state_for_absence(
-                result, zone_index, zone_name, tid, obj_state, state, zone_counts, timestamp
+                result,
+                zone_index,
+                zone_name,
+                tid,
+                obj_state,
+                state,
+                zone_counts,
+                timestamp,
             )
 
     def _generate_occupancy_events(
