@@ -75,7 +75,7 @@ Configuration Options:
 
 import cv2, numpy as np, scipy.linalg
 from enum import Enum
-from copy import deepcopy
+import copy
 from scipy.optimize import linear_sum_assignment
 from dataclasses import dataclass
 from typing import List, Tuple, Optional, Dict
@@ -113,7 +113,6 @@ class _KalmanFilter:
         self._motion_mat = np.eye(2 * ndim, 2 * ndim)
         for i in range(ndim):
             self._motion_mat[i, ndim + i] = dt
-        self._update_mat = np.eye(ndim, 2 * ndim)
         self._std_weight_position = 1.0 / 20
         self._std_weight_velocity = 1.0 / 160
 
@@ -200,19 +199,19 @@ class _KalmanFilter:
             Tuple[ndarray, ndarray]: Returns the projected mean and
                 covariance matrix of the given state estimate.
         """
-        std = [
-            self._std_weight_position * mean[3],
-            self._std_weight_position * mean[3],
-            1e-1,
-            self._std_weight_position * mean[3],
-        ]
-        innovation_cov = np.diag(np.square(std))
 
-        mean = np.dot(self._update_mat, mean)
-        covariance = np.linalg.multi_dot(
-            (self._update_mat, covariance, self._update_mat.T)
-        )
-        return mean, covariance + innovation_cov
+        dim = 4
+        h = mean[3]
+        s2 = (self._std_weight_position * h) ** 2
+
+        projected_mean = mean[:dim]
+        projected_cov = covariance[:dim, :dim].copy()
+        projected_cov[0, 0] += s2
+        projected_cov[1, 1] += s2
+        projected_cov[2, 2] += 1e-2
+        projected_cov[3, 3] += s2
+
+        return projected_mean, projected_cov
 
     def multi_predict(
         self, mean: np.ndarray, covariance: np.ndarray
@@ -231,23 +230,15 @@ class _KalmanFilter:
                 covariance matrix of the predicted state.
                 Unobserved velocities are initialized to 0 mean.
         """
-        std_pos = [
-            self._std_weight_position * mean[:, 3],
-            self._std_weight_position * mean[:, 3],
-            1e-2 * np.ones_like(mean[:, 3]),
-            self._std_weight_position * mean[:, 3],
-        ]
-        std_vel = [
-            self._std_weight_velocity * mean[:, 3],
-            self._std_weight_velocity * mean[:, 3],
-            1e-5 * np.ones_like(mean[:, 3]),
-            self._std_weight_velocity * mean[:, 3],
-        ]
+        h = mean[:, 3]
+        wp = self._std_weight_position * h
+        wv = self._std_weight_velocity * h
+        ones = np.ones_like(h)
+        std_pos = [wp, wp, 1e-2 * ones, wp]
+        std_vel = [wv, wv, 1e-5 * ones, wv]
         sqr = np.square(np.r_[std_pos, std_vel]).T
 
-        motion_cov = []
-        for i in range(len(mean)):
-            motion_cov.append(np.diag(sqr[i]))
+        motion_cov = [np.diag(row) for row in sqr]
 
         mean = np.dot(mean, self._motion_mat.T)
         left = np.dot(self._motion_mat, covariance).transpose((1, 0, 2))
@@ -274,20 +265,21 @@ class _KalmanFilter:
         """
         projected_mean, projected_cov = self.project(mean, covariance)
 
+        HtP = covariance[:4, :]  # H @ P = (P @ H^T)^T, shape (4, 8)
+
         chol_factor, lower = scipy.linalg.cho_factor(
             projected_cov, lower=True, check_finite=False
         )
         kalman_gain = scipy.linalg.cho_solve(
             (chol_factor, lower),
-            np.dot(covariance, self._update_mat.T).T,
+            HtP,  # shape (4, 8)
             check_finite=False,
-        ).T
+        ).T  # shape (8, 4)
+
         innovation = measurement - projected_mean
 
-        new_mean = mean + np.dot(innovation, kalman_gain.T)
-        new_covariance = covariance - np.linalg.multi_dot(
-            (kalman_gain, projected_cov, kalman_gain.T)
-        )
+        new_mean = mean + kalman_gain @ innovation
+        new_covariance = covariance - kalman_gain @ HtP
         return new_mean, new_covariance
 
 
@@ -381,20 +373,19 @@ class STrack:
     @staticmethod
     def multi_predict(stracks, shared_kalman):
         if len(stracks) > 0:
-            multi_mean = []
-            multi_covariance = []
-            for i, st in enumerate(stracks):
-                multi_mean.append(st.mean.copy())
-                multi_covariance.append(st.covariance)
-                if st.state != _TrackState.Tracked:
-                    multi_mean[i][7] = 0
+            multi_mean = np.array([st.mean for st in stracks])
+            multi_covariance = np.array([st.covariance for st in stracks])
+
+            not_tracked = [st.state != _TrackState.Tracked for st in stracks]
+            if any(not_tracked):
+                multi_mean[not_tracked, 7] = 0
 
             multi_mean, multi_covariance = shared_kalman.multi_predict(
-                np.asarray(multi_mean), np.asarray(multi_covariance)
+                multi_mean, multi_covariance
             )
-            for i, (mean, cov) in enumerate(zip(multi_mean, multi_covariance)):
-                stracks[i].mean = mean
-                stracks[i].covariance = cov
+            for st, mean, cov in zip(stracks, multi_mean, multi_covariance):
+                st.mean = mean
+                st.covariance = cov
 
     def activate(self, kalman_filter: _KalmanFilter, frame_id: int):
         """Activates this track with an initial detection.
@@ -495,9 +486,13 @@ class STrack:
         Returns:
             np.ndarray: Bounding box in (x_min, y_min, x_max, y_max) format.
         """
-        ret = self.tlwh
-        ret[2:] += ret[:2]
-        return ret
+        if self.mean is None:
+            ret = self._tlwh.copy()
+            ret[2:] += ret[:2]
+            return ret
+        cx, cy, a, h = self.mean[:4]
+        hw, hh = a * h * 0.5, h * 0.5
+        return np.array([cx - hw, cy - hh, cx + hw, cy + hh])
 
     @staticmethod
     def tlwh_to_xyah(tlwh: np.ndarray) -> np.ndarray:
@@ -614,10 +609,10 @@ class _ByteTrack:
         obj_indexes_second = obj_indexes[inds_second]
 
         if len(dets) > 0:
-            """Detections"""
+            dets[:, 2:] -= dets[:, :2]  # tlbr -> tlwh in-place
             detections = [
-                STrack(STrack.tlbr_to_tlwh(tlbr), s, i, self._id_counter)
-                for (tlbr, s, i) in zip(dets, scores_keep, obj_indexes_keep)
+                STrack(tlwh, s, i, self._id_counter)
+                for tlwh, s, i in zip(dets, scores_keep, obj_indexes_keep)
             ]
         else:
             detections = []
@@ -656,10 +651,10 @@ class _ByteTrack:
         """ Step 3: Second association, with low score detection boxes"""
         # association the untrack to the low score detections
         if len(dets_second) > 0:
-            """Detections"""
+            dets_second[:, 2:] -= dets_second[:, :2]  # tlbr -> tlwh in-place
             detections_second = [
-                STrack(STrack.tlbr_to_tlwh(tlbr), s, i, self._id_counter)
-                for (tlbr, s, i) in zip(dets_second, scores_second, obj_indexes_second)
+                STrack(tlwh, s, i, self._id_counter)
+                for tlwh, s, i in zip(dets_second, scores_second, obj_indexes_second)
             ]
         else:
             detections_second = []
@@ -867,12 +862,12 @@ class _ByteTrack:
             atlbrs = [track.tlbr for track in atracks]
             btlbrs = [track.tlbr for track in btracks]
 
-        _ious = np.zeros((len(atlbrs), len(btlbrs)), dtype=np.float32)
-        if _ious.size != 0:
-            _ious = box_iou_batch(np.asarray(atlbrs), np.asarray(btlbrs))
-        cost_matrix = 1 - _ious
+        if len(atlbrs) == 0 or len(btlbrs) == 0:
+            return np.zeros((len(atlbrs), len(btlbrs)), dtype=np.float32)
 
-        return cost_matrix
+        _ious = box_iou_batch(np.asarray(atlbrs), np.asarray(btlbrs))
+        np.subtract(1.0, _ious, out=_ious)
+        return _ious
 
     @staticmethod
     def _fuse_score(cost_matrix: np.ndarray, detections: List) -> np.ndarray:
@@ -943,7 +938,7 @@ class _Tracer:
                     trail = []
                     self.active_trails[tid] = trail
                     self.trail_classes[tid] = result.results[idx]["label"]
-                trail.append(bbox)
+                trail.append(tuple(bbox))
                 if len(trail) > self._trace_depth:
                     trail.pop(0)
 
@@ -1068,8 +1063,8 @@ class ObjectTracker(ResultAnalyzerBase):
             result.trails = {}
         else:
             self._tracer.update(result)
-            result.trails = deepcopy(self._tracer.active_trails)
-            result.trail_classes = deepcopy(self._tracer.trail_classes)
+            result.trails = {k: list(v) for k, v in self._tracer.active_trails.items()}
+            result.trail_classes = copy.copy(self._tracer.trail_classes)
 
     def annotate(self, result, image: np.ndarray) -> np.ndarray:
         """Draws tracking annotations on an image.

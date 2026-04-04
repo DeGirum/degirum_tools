@@ -763,7 +763,10 @@ def test_zone_counter():
                             "bbox": box_1_zone_1_shifted,
                             "label": "label1",
                             "track_id": 0,
-                            "in_zone": [False, False],  # Outside zone, immediately removed with timeout_frames=0
+                            "in_zone": [
+                                False,
+                                False,
+                            ],  # Outside zone, immediately removed with timeout_frames=0
                             "frames_in_zone": [0, 0],
                         },
                         {
@@ -789,7 +792,10 @@ def test_zone_counter():
                             "bbox": box_1_zone_1,
                             "label": "label1",
                             "track_id": 0,
-                            "in_zone": [True, False],  # Re-entered, new track starts fresh
+                            "in_zone": [
+                                True,
+                                False,
+                            ],  # Re-entered, new track starts fresh
                             "frames_in_zone": [1, 0],
                         },
                         {
@@ -958,7 +964,10 @@ def test_zone_counter():
                             "bbox": box_1_zone_1_shifted,
                             "label": "label1",
                             "track_id": 0,
-                            "in_zone": [False, False],  # Outside zone, immediately removed with timeout_frames=0
+                            "in_zone": [
+                                False,
+                                False,
+                            ],  # Outside zone, immediately removed with timeout_frames=0
                             "frames_in_zone": [0, 0],
                         },
                         {
@@ -1569,6 +1578,42 @@ def test_zone_counter_new_features():
                 use_tracking=False,
             )
 
+    def test_zone_counter_frame_size():
+        """Test ZoneCounter lazy init with and without frame_size when result has no image."""
+
+        zone = np.array([[10, 10], [90, 10], [90, 90], [10, 90]])
+
+        class NoImageResult:
+            """Mock result with no .image attribute."""
+
+            def __init__(self):
+                self.results = []
+                self.image_overlay = np.zeros((100, 200, 3), dtype=np.uint8)
+                self.zone_counts = {}
+                self.zone_events = []
+                self.overlay_color = (255, 0, 0)
+                self.overlay_line_width = 2
+                self.overlay_font_scale = 0.5
+
+        # Success path: frame_size provided, result has no .image
+        zc = ZoneCounter(
+            count_polygons=[zone],
+            frame_size=(200, 100),
+            use_tracking=False,
+        )
+        zc.analyze(NoImageResult())  # should not raise
+
+        # Failure path: no frame_size, result has no .image
+        zc2 = ZoneCounter(
+            count_polygons=[zone],
+            use_tracking=False,
+        )
+        with pytest.raises(
+            ValueError,
+            match="Frame size must be provided via frame_size parameter",
+        ):
+            zc2.analyze(NoImageResult())
+
     # Run all test cases
     test_timeout_frames_hysteresis()
     test_multi_zone_tracking()
@@ -1579,3 +1624,4 @@ def test_zone_counter_new_features():
     test_hysteresis_counter_saturation()
     test_immediate_mode_timeout_zero()
     test_parameter_validation()
+    test_zone_counter_frame_size()
