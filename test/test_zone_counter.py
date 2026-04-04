@@ -763,7 +763,10 @@ def test_zone_counter():
                             "bbox": box_1_zone_1_shifted,
                             "label": "label1",
                             "track_id": 0,
-                            "in_zone": [False, False],  # Outside zone, immediately removed with timeout_frames=0
+                            "in_zone": [
+                                False,
+                                False,
+                            ],  # Outside zone, immediately removed with timeout_frames=0
                             "frames_in_zone": [0, 0],
                         },
                         {
@@ -789,7 +792,10 @@ def test_zone_counter():
                             "bbox": box_1_zone_1,
                             "label": "label1",
                             "track_id": 0,
-                            "in_zone": [True, False],  # Re-entered, new track starts fresh
+                            "in_zone": [
+                                True,
+                                False,
+                            ],  # Re-entered, new track starts fresh
                             "frames_in_zone": [1, 0],
                         },
                         {
@@ -958,7 +964,10 @@ def test_zone_counter():
                             "bbox": box_1_zone_1_shifted,
                             "label": "label1",
                             "track_id": 0,
-                            "in_zone": [False, False],  # Outside zone, immediately removed with timeout_frames=0
+                            "in_zone": [
+                                False,
+                                False,
+                            ],  # Outside zone, immediately removed with timeout_frames=0
                             "frames_in_zone": [0, 0],
                         },
                         {
@@ -1572,7 +1581,7 @@ def test_zone_counter_new_features():
     def test_zone_counter_frame_size():
         """Test ZoneCounter lazy init with and without frame_size when result has no image."""
 
-        zone = [[10, 10], [90, 10], [90, 90], [10, 90]]
+        zone = np.array([[10, 10], [90, 10], [90, 90], [10, 90]])
 
         class NoImageResult:
             """Mock result with no .image attribute."""
