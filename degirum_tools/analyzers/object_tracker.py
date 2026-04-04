@@ -938,7 +938,7 @@ class _Tracer:
                     trail = []
                     self.active_trails[tid] = trail
                     self.trail_classes[tid] = result.results[idx]["label"]
-                trail.append(bbox)
+                trail.append(tuple(bbox))
                 if len(trail) > self._trace_depth:
                     trail.pop(0)
 
