@@ -194,11 +194,14 @@ def build_gst_pipeline(source):
     # 3. if source is str and starts with rtsp
     elif isinstance(source, str) and source.lower().startswith("rtsp://"):
         logger_get().info(f"Building RTSP pipeline for: {source}")
-        # Use decodebin for automatic format handling
+        # application/x-rtp,media=video selects only the video RTP pad from rtspsrc,
+        # preventing decodebin from receiving the audio stream and emitting an
+        # unlinked audio pad that would propagate a not-linked error upstream.
         return (
             f'rtspsrc location="{source}" latency=0 protocols=tcp ! '
+            f'application/x-rtp,media=video ! '
             f'decodebin ! videoconvert ! videoscale ! '
-            f'appsink name=sink'
+            f'video/x-raw,format={format} ! appsink name=sink'
         )
 
     # ==================== FILE SOURCE ====================
