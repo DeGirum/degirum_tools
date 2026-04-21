@@ -91,11 +91,11 @@ except Exception:
 class VideoCaptureProtocol(Protocol):
     """Structural protocol for video capture objects (cv2.VideoCapture-like)."""
 
-    def read(self) -> tuple[bool, np.ndarray]: ...
-    def get(self, prop: int) -> float: ...
-    def set(self, prop: int, value: float) -> bool: ...
-    def release(self) -> None: ...
-    def isOpened(self) -> bool: ...
+    def read(self) -> tuple[bool, np.ndarray]: ...  # noqa: E704
+    def get(self, prop: int) -> float: ...  # noqa: E704
+    def set(self, prop: int, value: float) -> bool: ...  # noqa: E704
+    def release(self) -> None: ...  # noqa: E704
+    def isOpened(self) -> bool: ...  # noqa: E704
 
 
 def _is_video_capture(obj: object) -> TypeGuard[VideoCaptureProtocol]:
