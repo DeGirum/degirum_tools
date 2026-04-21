@@ -61,7 +61,17 @@ from pathlib import Path
 from . import environment as env
 from .ui_support import Progress
 from .image_tools import ImageType, image_size, resize_image, to_opencv
-from typing import Union, Generator, Optional, Callable, Any, List, Tuple
+from typing import (
+    Union,
+    Generator,
+    Optional,
+    Callable,
+    Any,
+    List,
+    Tuple,
+    Protocol,
+    TypeGuard,
+)
 from .gst_support import build_gst_pipeline
 from enum import Enum
 
@@ -76,6 +86,21 @@ try:
     GST_AVAILABLE = True
 except Exception:
     GST_AVAILABLE = False
+
+
+class VideoCaptureProtocol(Protocol):
+    """Structural protocol for video capture objects (cv2.VideoCapture-like)."""
+
+    def read(self) -> tuple[bool, np.ndarray]: ...
+    def get(self, prop: int) -> float: ...
+    def set(self, prop: int, value: float) -> bool: ...
+    def release(self) -> None: ...
+    def isOpened(self) -> bool: ...
+
+
+def _is_video_capture(obj: object) -> TypeGuard[VideoCaptureProtocol]:
+    """Return True if obj duck-types as a video capture (has read and get methods)."""
+    return all(hasattr(obj, m) for m in ("read", "get"))
 
 
 class VideoSourceType(Enum):
@@ -366,11 +391,11 @@ class VideoCaptureGst:
 
 
 def create_video_stream(
-    video_source: Union[int, str, Path, None, cv2.VideoCapture, VideoCaptureGst] = None,
+    video_source: Union[int, str, Path, None, VideoCaptureProtocol] = None,
     *,
     max_yt_quality: int = 0,
     use_gstreamer: bool = False,
-) -> Union[cv2.VideoCapture, VideoCaptureGst]:
+) -> VideoCaptureProtocol:
     """Create a video stream from various sources.
 
     This function creates and returns video stream object working from different
@@ -398,7 +423,7 @@ def create_video_stream(
     """
 
     # Pass through if already a capture object
-    if isinstance(video_source, (cv2.VideoCapture, VideoCaptureGst)):
+    if _is_video_capture(video_source):
         return video_source
 
     if env.get_test_mode() or video_source is None:
@@ -474,7 +499,7 @@ def create_video_stream(
             raise Exception(f"GStreamer failed: {e}")
 
     # Default to OpenCV
-    opencv_stream: Union[cv2.VideoCapture, VideoCaptureGst] = cv2.VideoCapture(video_source)  # type: ignore[arg-type]
+    opencv_stream: VideoCaptureProtocol = cv2.VideoCapture(video_source)  # type: ignore[arg-type]
     if not opencv_stream.isOpened():
         raise Exception(f"Error opening '{video_source}' video stream")
     return opencv_stream
@@ -482,11 +507,11 @@ def create_video_stream(
 
 @contextmanager
 def open_video_stream(
-    video_source: Union[int, str, Path, None, cv2.VideoCapture, VideoCaptureGst] = None,
+    video_source: Union[int, str, Path, None, VideoCaptureProtocol] = None,
     *,
     max_yt_quality: int = 0,
     use_gstreamer: bool = False,
-) -> Generator[Union[cv2.VideoCapture, VideoCaptureGst], None, None]:
+) -> Generator[VideoCaptureProtocol, None, None]:
     """Open a video stream from various sources.
 
     This function provides a context manager for opening video streams from different
@@ -514,7 +539,7 @@ def open_video_stream(
 
 
 def get_video_stream_properties(
-    video_source: Union[int, str, Path, None, cv2.VideoCapture, VideoCaptureGst],
+    video_source: Union[int, str, Path, None, VideoCaptureProtocol],
 ) -> tuple:
     """Return the dimensions and frame rate of a video source.
 
@@ -525,14 +550,14 @@ def get_video_stream_properties(
         (width, height, fps) describing the video stream.
     """
 
-    def get_props(stream: Union[cv2.VideoCapture, VideoCaptureGst]) -> tuple:
+    def get_props(stream: VideoCaptureProtocol) -> tuple:
         return (
             int(stream.get(cv2.CAP_PROP_FRAME_WIDTH)),
             int(stream.get(cv2.CAP_PROP_FRAME_HEIGHT)),
             stream.get(cv2.CAP_PROP_FPS),
         )
 
-    if isinstance(video_source, (cv2.VideoCapture, VideoCaptureGst)):
+    if _is_video_capture(video_source):
         return get_props(video_source)
     else:
         with open_video_stream(video_source) as stream:
@@ -540,7 +565,7 @@ def get_video_stream_properties(
 
 
 def video_source(
-    stream: Union[cv2.VideoCapture, VideoCaptureGst],
+    stream: VideoCaptureProtocol,
     fps: Optional[float] = None,
     include_metadata: bool = False,
 ) -> Generator[Union[np.ndarray, Tuple[np.ndarray, dict]], None, None]:
@@ -1242,7 +1267,7 @@ class VideoStreamer:
                 "vcodec": "libx264",
                 "preset": "ultrafast",
                 "tune": "zerolatency",
-                "rtsp_transport": "udp",  # low latency transport
+                "rtsp_transport": "tcp",  # low latency transport
                 "bf": 0,
                 "g": gop_size,
             }
