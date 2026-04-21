@@ -110,7 +110,7 @@ import numpy as np
 import degirum as dg  # import DeGirum PySDK
 from contextlib import ExitStack
 from pathlib import Path
-from typing import Union, List, Optional, Iterator, Final
+from typing import Union, List, Optional, Iterator, Final, cast
 from dataclasses import dataclass
 from .compound_models import CompoundModelBase
 from .analyzers import ResultAnalyzerBase, subclass_result_with_analyzers
@@ -119,9 +119,10 @@ from .tools import (
     get_video_stream_properties,
     video_source,
     open_video_writer,
-    VideoCaptureGst,
     VideoSourceType,
+    VideoCaptureProtocol,
 )
+from .tools.video_support import _is_video_capture
 from .tools.ui_support import Progress, Display, Timer
 from .tools import environment as env
 
@@ -311,7 +312,7 @@ def predict_stream(
 
     # Convert source_type to enum and determine backend
     source_type_enum = VideoSourceType.from_string(source_type)
-    use_gstreamer = (source_type_enum == VideoSourceType.GSTREAMER)
+    use_gstreamer = source_type_enum == VideoSourceType.GSTREAMER
 
     with open_video_stream(video_source_id, use_gstreamer=use_gstreamer) as stream:
         for res in model.predict_batch(video_source(stream, fps=fps)):
@@ -400,12 +401,14 @@ def annotate_video(
 
         # Convert source_type to enum and determine backend
         source_type_enum = VideoSourceType.from_string(source_type)
-        use_gstreamer = (source_type_enum == VideoSourceType.GSTREAMER)
+        use_gstreamer = source_type_enum == VideoSourceType.GSTREAMER
 
-        if isinstance(video_source_id, cv2.VideoCapture):
-            stream: Union[cv2.VideoCapture, VideoCaptureGst] = video_source_id
+        if _is_video_capture(video_source_id):
+            stream: VideoCaptureProtocol = cast(VideoCaptureProtocol, video_source_id)
         else:
-            stream = stack.enter_context(open_video_stream(video_source_id, use_gstreamer=use_gstreamer))
+            stream = stack.enter_context(
+                open_video_stream(video_source_id, use_gstreamer=use_gstreamer)
+            )
 
         w, h, video_fps = get_video_stream_properties(stream)
 

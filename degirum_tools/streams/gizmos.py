@@ -37,7 +37,7 @@ from ..tools import (
     get_video_stream_properties,
     open_video_writer,
     VideoStreamer,
-    VideoCaptureGst,
+    VideoCaptureProtocol,
 )
 from ..inference_support import VideoSourceType
 
@@ -111,7 +111,7 @@ class VideoSourceGizmo(Gizmo):
         self._retry_on_error = retry_on_error
         self._fps_override = fps_override
         self._resolution_override = resolution_override
-        self._stream: Optional[Union[cv2.VideoCapture, VideoCaptureGst]] = None
+        self._stream: Optional[VideoCaptureProtocol] = None
 
     def get_video_properties(self) -> tuple:
         self._open_video_source()
