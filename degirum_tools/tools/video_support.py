@@ -70,8 +70,9 @@ from typing import (
     List,
     Tuple,
     Protocol,
-    TypeGuard,
 )
+
+from typing_extensions import TypeGuard
 from .gst_support import build_gst_pipeline
 from enum import Enum
 

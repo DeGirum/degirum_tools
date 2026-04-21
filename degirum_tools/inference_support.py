@@ -110,7 +110,7 @@ import numpy as np
 import degirum as dg  # import DeGirum PySDK
 from contextlib import ExitStack
 from pathlib import Path
-from typing import Union, List, Optional, Iterator, Final
+from typing import Union, List, Optional, Iterator, Final, cast
 from dataclasses import dataclass
 from .compound_models import CompoundModelBase
 from .analyzers import ResultAnalyzerBase, subclass_result_with_analyzers
@@ -404,7 +404,7 @@ def annotate_video(
         use_gstreamer = source_type_enum == VideoSourceType.GSTREAMER
 
         if _is_video_capture(video_source_id):
-            stream: VideoCaptureProtocol = video_source_id
+            stream: VideoCaptureProtocol = cast(VideoCaptureProtocol, video_source_id)
         else:
             stream = stack.enter_context(
                 open_video_stream(video_source_id, use_gstreamer=use_gstreamer)
