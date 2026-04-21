@@ -158,10 +158,15 @@ class VideoCaptureGst:
             raise Exception(f"Invalid GStreamer pipeline (no appsink): {pipeline_str}")
 
         self._appsink.set_property("emit-signals", True)
+        # Live sources (RTSP/cameras) need sync=False to avoid blocking the
+        # PAUSED→PLAYING transition while waiting for a clock reference.
+        self._appsink.set_property("sync", False)
+        self._appsink.set_property("drop", True)
+        self._appsink.set_property("max-buffers", 5)
         self._pipeline.set_state(Gst.State.PLAYING)
 
-        # Check if the pipeline transitions to the PLAYING state
-        state_change_result = self._pipeline.get_state(5 * Gst.SECOND)
+        # RTSP connections need more time to negotiate and start streaming.
+        state_change_result = self._pipeline.get_state(15 * Gst.SECOND)
         if state_change_result[1] != Gst.State.PLAYING:
             raise Exception(f"GStreamer pipeline failed to start: {pipeline_str}")
 
