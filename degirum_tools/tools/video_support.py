@@ -1251,7 +1251,7 @@ class VideoStreamer:
         input_stream = ffmpeg.input(
             "pipe:0",
             format="rawvideo",
-            pix_fmt="bgr24",
+            pix_fmt=pix_fmt,
             s=f"{width}x{height}",
             framerate=fps,
         )
