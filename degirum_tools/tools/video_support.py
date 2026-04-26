@@ -401,6 +401,7 @@ def create_video_stream(
     *,
     max_yt_quality: int = 0,
     use_gstreamer: bool = False,
+    **kwargs,
 ) -> VideoCaptureProtocol:
     """Create a video stream from various sources.
 
@@ -420,6 +421,8 @@ def create_video_stream(
             If 0, use best quality. Defaults to 0.
         use_gstreamer: If True, use GStreamer backend for video files.
             Only applies to .mp4 files. Defaults to False.
+        **kwargs: Additional keyword arguments passed to cv2.VideoCapture constructor
+            (e.g., apiPreference=cv2.CAP_V4L2, params=[cv2.CAP_PROP_FRAME_WIDTH, 1280]).
 
     Returns:
         cv2.VideoCapture or VideoCaptureGst: Video capture object.
@@ -505,7 +508,7 @@ def create_video_stream(
             raise Exception(f"GStreamer failed: {e}")
 
     # Default to OpenCV
-    opencv_stream: VideoCaptureProtocol = cv2.VideoCapture(video_source)  # type: ignore[arg-type]
+    opencv_stream: VideoCaptureProtocol = cv2.VideoCapture(video_source, **kwargs)  # type: ignore[arg-type]
     if not opencv_stream.isOpened():
         raise Exception(f"Error opening '{video_source}' video stream")
     return opencv_stream
@@ -517,6 +520,7 @@ def open_video_stream(
     *,
     max_yt_quality: int = 0,
     use_gstreamer: bool = False,
+    **kwargs,
 ) -> Generator[VideoCaptureProtocol, None, None]:
     """Open a video stream from various sources.
 
@@ -536,7 +540,10 @@ def open_video_stream(
         Exception: If the video stream cannot be opened.
     """
     stream = create_video_stream(
-        video_source, max_yt_quality=max_yt_quality, use_gstreamer=use_gstreamer
+        video_source,
+        max_yt_quality=max_yt_quality,
+        use_gstreamer=use_gstreamer,
+        **kwargs,
     )
     try:
         yield stream

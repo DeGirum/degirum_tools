@@ -39,6 +39,7 @@ from ..tools import (
     VideoStreamer,
     VideoCaptureProtocol,
 )
+from ..tools.video_support import _is_video_capture
 from ..inference_support import VideoSourceType
 
 from ..analyzers.event_detector import EventDetector
@@ -82,19 +83,22 @@ class VideoSourceGizmo(Gizmo):
 
     def __init__(
         self,
-        video_source=None,
+        video_source: Union[int, str, None, VideoCaptureProtocol] = None,
         *,
         source_type: Union[str, VideoSourceType] = VideoSourceType.AUTO,
         stop_composition_on_end: bool = False,
         retry_on_error: bool = False,
         fps_override: Optional[float] = None,
         resolution_override: Optional[Tuple[int, int]] = None,
+        **kwargs,
     ):
         """Constructor.
 
         Args:
-            video_source (int or str, optional): A cv2.VideoCapture-compatible video source
-                (device index as int, or file path/URL as str). Defaults to None.
+            video_source (int, str, VideoCaptureProtocol, or None, optional): Video source.
+                Can be a device index (int), file path or URL (str), or an already-created
+                video capture object (e.g., cv2.VideoCapture or VideoCaptureGst).
+                Defaults to None.
             source_type (Union[str, VideoSourceType]): Video backend to use. Options:
                 - VideoSourceType.AUTO or "auto": Automatically choose best backend
                 - VideoSourceType.GSTREAMER or "gstream": Force GStreamer backend
@@ -103,6 +107,8 @@ class VideoSourceGizmo(Gizmo):
             retry_on_error (bool): If True, retry opening the video source on error after some time. Defaults to False.
             fps_override (float, optional): If provided, overrides the FPS value reported by source (some IP cameras report 100FPS). Defaults to None.
             resolution_override (Tuple[int, int], optional): If provided, overrides the resolution (width, height) reported by source. Defaults to None.
+            **kwargs: Additional keyword arguments passed to cv2.VideoCapture constructor
+                (e.g., apiPreference=cv2.CAP_V4L2, params=[cv2.CAP_PROP_FRAME_WIDTH, 1280]).
         """
         super().__init__()
         self._video_source = video_source
@@ -111,6 +117,7 @@ class VideoSourceGizmo(Gizmo):
         self._retry_on_error = retry_on_error
         self._fps_override = fps_override
         self._resolution_override = resolution_override
+        self._cv_kwargs = kwargs
         self._stream: Optional[VideoCaptureProtocol] = None
 
     def get_video_properties(self) -> tuple:
@@ -120,12 +127,15 @@ class VideoSourceGizmo(Gizmo):
     def _open_video_source(self):
         """Open the video source if it is not opened."""
         if self._stream is None:
-            # Convert source_type to enum and determine backend
-            source_type_enum = VideoSourceType.from_string(self._source_type)
-            use_gstreamer = source_type_enum == VideoSourceType.GSTREAMER
-            self._stream = create_video_stream(
-                self._video_source, use_gstreamer=use_gstreamer
-            )
+            if _is_video_capture(self._video_source):
+                self._stream = self._video_source
+            else:
+                # Convert source_type to enum and determine backend
+                source_type_enum = VideoSourceType.from_string(self._source_type)
+                use_gstreamer = source_type_enum == VideoSourceType.GSTREAMER
+                self._stream = create_video_stream(
+                    self._video_source, use_gstreamer=use_gstreamer, **self._cv_kwargs
+                )
             if self._fps_override is not None:
                 # set FPS if override is provided
                 self._stream.set(cv2.CAP_PROP_FPS, self._fps_override)

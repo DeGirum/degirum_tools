@@ -119,6 +119,45 @@ def test_streams_video_source(short_video):
         assert video_meta[source.key_frame_count] == frame_count
         assert video_meta[source.key_frame_id] == i
 
+    # Test with pre-created VideoCaptureProtocol object
+    capture = cv2.VideoCapture(short_video)
+    try:
+        source2 = streams.VideoSourceGizmo(capture)
+        sink2 = VideoSink()
+        streams.Composition(source2 >> sink2).start()
+
+        assert sink2.frames_cnt == frame_count
+        for i, frame in enumerate(sink2.frames):
+            assert frame.data.shape == (frame_height, frame_width, 3)
+            video_meta = frame.meta.find_last(streams.tag_video)
+            assert video_meta is not None
+            assert video_meta[source2.key_frame_width] == frame_width
+            assert video_meta[source2.key_frame_height] == frame_height
+            assert video_meta[source2.key_fps] == fps
+            assert video_meta[source2.key_frame_count] == frame_count
+            assert video_meta[source2.key_frame_id] == i
+    finally:
+        capture.release()
+
+    # Test with **kwargs passed through to cv2.VideoCapture
+    source3 = streams.VideoSourceGizmo(
+        short_video,
+        apiPreference=cv2.CAP_ANY,
+        params=[
+            cv2.CAP_PROP_HW_ACCELERATION,
+            cv2.VIDEO_ACCELERATION_ANY,
+        ],
+    )
+    sink3 = VideoSink()
+    streams.Composition(source3 >> sink3).start()
+
+    assert sink3.frames_cnt == frame_count
+    for i, frame in enumerate(sink3.frames):
+        assert frame.data.shape == (frame_height, frame_width, 3)
+        video_meta = frame.meta.find_last(streams.tag_video)
+        assert video_meta is not None
+        assert video_meta[source3.key_frame_id] == i
+
 
 def test_streams_iterator_source():
     """Test for IteratorSourceGizmo with numpy arrays, file paths, URL images, PIL images, mixed formats, error handling, and empty iterators"""
