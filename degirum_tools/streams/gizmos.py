@@ -538,9 +538,9 @@ class VideoStreamerGizmo(Gizmo):
         self._show_ai_overlay = show_ai_overlay
 
     def run(self):
-        """Run the video saving loop.
+        """Run the video streaming loop.
 
-        Reads frames from the input stream and writes them to the output file until the stream is exhausted or aborted.
+        Reads frames from the input stream and streams them via RTSP/RTMP until the stream is exhausted or aborted.
         """
 
         def get_img(data: StreamData) -> ImageType:
@@ -549,19 +549,20 @@ class VideoStreamerGizmo(Gizmo):
                 inference_meta = data.meta.find_last(tag_inference)
                 if inference_meta:
                     frame = inference_meta.image_overlay
-            self.send_result(data)
             return frame
 
         input_q = self.get_input(0)
         data0 = input_q.get()
         if data0 == Stream._poison:
             return
+
         last_data = data0
+        self.send_result(data0)
         img = get_img(data0)
         w, h = image_size(img)
 
         if self._fps <= 0:  # deduce FPS
-            default_fps = 30.0  # default FPS if not specified
+            default_fps = 30.0
             video_meta = data0.meta.find_last(tag_video)
             if video_meta:
                 self._fps = video_meta.get(VideoSourceGizmo.key_fps, default_fps)
@@ -569,11 +570,11 @@ class VideoStreamerGizmo(Gizmo):
                     self._fps = default_fps
             else:
                 self._fps = default_fps
+
         frame_interval_s = 1.0 / self._fps
         read_timeout_s = 0.5 * frame_interval_s
-        fps_threshold = 0.8 * self._fps
-        alpha = 0.05  # IIR smoothing factor
-        avg_duration_s = 1.0 / self._fps  # initialize with target FPS
+        alpha = 0.05
+        avg_send_duration_s = frame_interval_s  # smoothed duration of send_frame()
 
         with VideoStreamer(
             self._stream_url,
@@ -583,40 +584,67 @@ class VideoStreamerGizmo(Gizmo):
             pix_fmt="bgr24" if isinstance(img, np.ndarray) else "rgb24",
         ) as streamer:
 
-            self.result_cnt += 1
-            streamer.write(img)
-            prev_time_s = time.time()
-
             def send_frame(data: StreamData):
-                nonlocal avg_duration_s, prev_time_s, last_data
+                nonlocal avg_send_duration_s, last_data
 
+                t0 = time.monotonic()
                 streamer.write(get_img(data))
-                self.result_cnt += 1
+                t1 = time.monotonic()
+
+                self.send_result(data)
                 last_data = data
-                now = time.time()
-                avg_duration_s = (
-                    alpha * (now - prev_time_s) + (1 - alpha) * avg_duration_s
+
+                send_duration_s = t1 - t0
+                avg_send_duration_s = (
+                    alpha * send_duration_s + (1.0 - alpha) * avg_send_duration_s
                 )
-                prev_time_s = now
+
+            # Send first frame
+            streamer.write(img)
+
+            now_s = time.monotonic()
+            next_frame_due_s = now_s + frame_interval_s
 
             while not self._abort:
-                # try to read a real frame from the input queue
+                got_real_frame = False
+
                 try:
                     data = input_q.get(timeout=read_timeout_s)
                     if data == Stream._poison:
                         break
-                    send_frame(data)
-                except queue.Empty:
-                    pass  # no new frame, possibly starvation
 
-                # if FPS is too low, send fake frames to catch up
-                fps_est = 1.0 / (
-                    alpha * (time.time() - prev_time_s) + (1 - alpha) * avg_duration_s
-                )
-                if fps_est < fps_threshold:
+                    send_frame(data)
+                    got_real_frame = True
+
+                    # Advance schedule by one frame slot.
+                    # If we are badly behind, resync to current time instead of trying to "catch up" forever.
+                    now_s = time.monotonic()
+                    next_frame_due_s = max(
+                        next_frame_due_s + frame_interval_s, now_s + frame_interval_s
+                    )
+
+                except queue.Empty:
+                    pass  # source starvation
+
+                if got_real_frame:
+                    continue
+
+                now_s = time.monotonic()
+
+                # No real frame available. Emit duplicate frames only for overdue slots.
+                # But if encoder/write path is slower than target frame interval,
+                # do not try to catch up in a loop: it is impossible and would spin forever.
+                if avg_send_duration_s >= frame_interval_s:
+                    continue
+
+                while not self._abort and now_s >= next_frame_due_s:
                     send_frame(last_data)
-                    while 1.0 / avg_duration_s < fps_threshold:
-                        send_frame(last_data)
+                    next_frame_due_s += frame_interval_s
+                    now_s = time.monotonic()
+
+                    # Safety: if sending became too slow while duplicating, stop immediately.
+                    if avg_send_duration_s >= frame_interval_s:
+                        break
 
 
 class ResizingGizmo(Gizmo):
