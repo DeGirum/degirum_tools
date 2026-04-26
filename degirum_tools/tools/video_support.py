@@ -1224,6 +1224,7 @@ class VideoStreamer:
         *,
         fps: float = 30.0,
         pix_fmt="bgr24",
+        vcodec: str = "",
         gop_size: int = 10,
         verbose: bool = False,
     ):
@@ -1237,11 +1238,14 @@ class VideoStreamer:
             height (int): Height of the video frames in pixels.
             fps (float, optional): Frames per second for the stream. Defaults to 30.
             pix_fmt (str, optional): Pixel format for the input frames. Defaults to 'bgr24'. Can be 'rgb24'.
+            vcodec (str, optional): Video codec for the stream. Defaults to "" which uses "libx264".
             gop_size (int, optional): GOP size for the video stream. Defaults to 50.
             verbose (bool, optional): If True, shows FFmpeg output in the console. Defaults to False.
         """
         self._width = width
         self._height = height
+
+        effective_vcodec = vcodec if vcodec else "libx264"
 
         # Common FFmpeg input arguments
         input_stream = ffmpeg.input(
@@ -1257,7 +1261,7 @@ class VideoStreamer:
         if stream_url.startswith("rtmp://"):
             output_args = {
                 "pix_fmt": "yuv420p",
-                "vcodec": "libx264",
+                "vcodec": effective_vcodec,
                 "preset": "ultrafast",
                 "tune": "zerolatency",
                 "fflags": "nobuffer",
@@ -1270,7 +1274,7 @@ class VideoStreamer:
             output_args = {
                 "format": "rtsp",
                 "pix_fmt": "yuv420p",
-                "vcodec": "libx264",
+                "vcodec": effective_vcodec,
                 "preset": "ultrafast",
                 "tune": "zerolatency",
                 "rtsp_transport": "tcp",  # low latency transport

@@ -517,6 +517,7 @@ class VideoStreamerGizmo(Gizmo):
         stream_url: str,
         *,
         fps: float = 0,
+        vcodec: str = "",
         show_ai_overlay: bool = False,
         stream_depth: int = 10,
         allow_drop: bool = False,
@@ -528,6 +529,7 @@ class VideoStreamerGizmo(Gizmo):
                             Typically you use `MediaServer` class to start media server and
                             then use its RTMP/RTSP URL like `rtsp://localhost:8554/mystream`
             fps (float, optional): Frames per second for the stream. Defaults to 0, meaning to deduce from upstream video source.
+            vcodec (str, optional): Video codec for the stream. Defaults to "" which uses "libx264".
             show_ai_overlay (bool, optional): If True, overlay AI inference results on frames before saving (when available). Defaults to False.
             stream_depth (int, optional): Depth of the input frame queue. Defaults to 10.
             allow_drop (bool, optional): If True, allow dropping frames if the input queue is full. Defaults to False.
@@ -535,6 +537,7 @@ class VideoStreamerGizmo(Gizmo):
         super().__init__([(stream_depth, allow_drop)])
         self._stream_url = stream_url
         self._fps = fps
+        self._vcodec = vcodec
         self._show_ai_overlay = show_ai_overlay
 
     def run(self):
@@ -582,6 +585,7 @@ class VideoStreamerGizmo(Gizmo):
             h,
             fps=self._fps,
             pix_fmt="bgr24" if isinstance(img, np.ndarray) else "rgb24",
+            vcodec=self._vcodec,
         ) as streamer:
 
             def send_frame(data: StreamData):
