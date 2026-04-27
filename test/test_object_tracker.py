@@ -280,8 +280,9 @@ def generate_tracker_test_case(
             # Add predicted bboxes and handle timeouts for inactive tracks
             for track_id in list(inactive_track_ids):
                 # Append predicted bbox from trajectory extrapolation
-                traj = track_id_to_last_traj.get(track_id)
-                if traj is not None and track_id in active_trails:
+                last_traj = track_id_to_last_traj.get(track_id)
+                if last_traj is not None and track_id in active_trails:
+                    traj = last_traj
                     frames_after_end = frame_idx - traj.stop_frame
                     if frames_after_end > 0:
                         last_bbox = traj.get_bbox_at_frame(traj.stop_frame)
