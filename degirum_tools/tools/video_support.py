@@ -223,11 +223,8 @@ class VideoCaptureGst:
         structure = caps.get_structure(0)
         self._frame_width = structure.get_value("width")
         self._frame_height = structure.get_value("height")
-        format_str = (
-            structure.get_string("format")[1]
-            if structure.get_string("format")[0]
-            else None
-        )
+        format_str = structure.get_string("format")
+        self._frame_format = format_str
         # Calculate format info once
         self._frame_channels, _ = self._get_format_info(
             format_str or "", self._frame_width, self._frame_height
@@ -240,8 +237,12 @@ class VideoCaptureGst:
         """Get the appropriate conversion function for the format."""
         if format_str in ["RGB", "RGBx"]:
             return lambda frame: cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-        elif format_str in ["I420", "YV12", "NV12", "NV21"]:
+        elif format_str in ["I420", "YV12"]:
             return lambda frame: cv2.cvtColor(frame, cv2.COLOR_YUV2BGR_I420)
+        elif format_str == "NV12":
+            return lambda frame: cv2.cvtColor(frame, cv2.COLOR_YUV2BGR_NV12)
+        elif format_str == "NV21":
+            return lambda frame: cv2.cvtColor(frame, cv2.COLOR_YUV2BGR_NV21)
         elif format_str in ["RGBA", "RGBx"]:
             return lambda frame: cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
         elif format_str in ["YUY2"]:
@@ -292,8 +293,15 @@ class VideoCaptureGst:
 
         try:
             # Use cached format info - much faster!
-            if self._frame_channels == 1:
+            if self._frame_format in ("NV12", "NV21", "I420", "YV12"):
+                # YUV planar/semi-planar: buffer is H*W*1.5 bytes
                 frame: np.ndarray = np.ndarray(
+                    (self._frame_height * 3 // 2, self._frame_width),
+                    buffer=mapinfo.data,
+                    dtype=np.uint8,
+                )
+            elif self._frame_channels == 1:
+                frame = np.ndarray(
                     (self._frame_height, self._frame_width),
                     buffer=mapinfo.data,
                     dtype=np.uint8,
