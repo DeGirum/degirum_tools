@@ -199,6 +199,7 @@ def generate_tracker_test_case(
         active_trails: Dict[int, List[List[float]]] = {}
         trail_classes: Dict[int, int] = {}
         timeout_counters: Dict[int, int] = {}
+        track_id_to_last_traj: Dict[int, TrajectorySpec] = {}
 
     expected_results = []
 
@@ -217,6 +218,7 @@ def generate_tracker_test_case(
             active_trails.clear()
             trail_classes.clear()
             timeout_counters.clear()
+            track_id_to_last_traj.clear()
 
         res_idx = 0
         for traj in trajectories:
@@ -260,14 +262,40 @@ def generate_tracker_test_case(
                     # Reset timeout
                     timeout_counters[track_id] = track_buffer
 
+                    # Track which trajectory is associated with this track_id
+                    for traj in trajectories:
+                        if (
+                            traj.expected_track_id == track_id
+                            and traj.start_frame <= frame_idx <= traj.stop_frame
+                        ):
+                            track_id_to_last_traj[track_id] = traj
+                            break
+
                 # Handle inactive tracks
                 inactive_track_ids = set(timeout_counters.keys()) - active_track_ids
             else:
                 # No tracked objects this frame, all are inactive
                 inactive_track_ids = set(timeout_counters.keys())
 
-            # Decrement timeouts for inactive tracks and remove expired ones
-            for track_id in inactive_track_ids:
+            # Add predicted bboxes and handle timeouts for inactive tracks
+            for track_id in list(inactive_track_ids):
+                # Append predicted bbox from trajectory extrapolation
+                traj = track_id_to_last_traj.get(track_id)
+                if traj is not None and track_id in active_trails:
+                    frames_after_end = frame_idx - traj.stop_frame
+                    if frames_after_end > 0:
+                        last_bbox = traj.get_bbox_at_frame(traj.stop_frame)
+                        if last_bbox is not None:
+                            predicted_bbox = [
+                                last_bbox[0] + traj.velocity[0] * frames_after_end,
+                                last_bbox[1] + traj.velocity[1] * frames_after_end,
+                                last_bbox[2] + traj.velocity[0] * frames_after_end,
+                                last_bbox[3] + traj.velocity[1] * frames_after_end,
+                            ]
+                            active_trails[track_id].append(predicted_bbox)
+                            if len(active_trails[track_id]) > trail_depth:
+                                active_trails[track_id].pop(0)
+
                 timeout_counters[track_id] -= 1
                 if timeout_counters[track_id] == 0:
                     del active_trails[track_id]
