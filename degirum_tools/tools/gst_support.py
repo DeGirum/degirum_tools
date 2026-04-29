@@ -14,6 +14,7 @@ Focus: Compatibility over optimization
 
 import os
 import sys
+import inspect
 import subprocess
 from pathlib import Path
 import threading
@@ -21,26 +22,27 @@ from typing import Tuple
 
 import concurrent
 from .. import logger_get
-from ..tools import Watchdog
+from .time_tools import Watchdog
 
 
 def setup_gst_environment(*plugin_dirs):
     """Set GST_PLUGIN_PATH before gi package is imported. Then import gi and return it for convenience.
+    Also initializes GStreamer.
 
     GStreamer scans the plugin registry when the library first loads,
     so the env var must be in place before any gi import.
 
     Args:
         plugin_dirs: iterable of directory paths to prepend to GST_PLUGIN_PATH.
-                     Relative paths are resolved relative to this file.
+                     Relative paths are resolved relative to the calling file.
 
     Returns:        The imported gi module (for convenience).
     """
 
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+    caller_dir = os.path.dirname(os.path.abspath(inspect.stack()[1].filename))
 
     abs_dirs = [
-        os.path.join(script_dir, d) if not os.path.isabs(d) else d for d in plugin_dirs
+        os.path.join(caller_dir, d) if not os.path.isabs(d) else d for d in plugin_dirs
     ]
 
     existing = os.environ.get("GST_PLUGIN_PATH", "")
@@ -51,6 +53,11 @@ def setup_gst_environment(*plugin_dirs):
     import gi
 
     gi.require_version("Gst", "1.0")
+
+    from gi.repository import Gst
+
+    Gst.init(None)
+
     return gi
 
 

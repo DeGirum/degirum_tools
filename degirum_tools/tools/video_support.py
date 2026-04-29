@@ -73,7 +73,7 @@ from typing import (
 )
 
 from typing_extensions import TypeGuard
-from .gst_support import build_gst_pipeline
+from .gst_support import build_gst_pipeline, setup_gst_environment
 from enum import Enum
 
 
@@ -138,12 +138,7 @@ class VideoCaptureGst:
         if VideoCaptureGst._gst_initialized:
             return
         try:
-            import gi
-
-            gi.require_version("Gst", "1.0")
-            from gi.repository import Gst
-
-            Gst.init(None)
+            setup_gst_environment()
             VideoCaptureGst._gst_initialized = True
         except Exception as e:
             raise ImportError("GStreamer Python bindings (gi) not available") from e
@@ -159,8 +154,10 @@ class VideoCaptureGst:
 
         from gi.repository import Gst, GLib
 
+        self._Gst = Gst
+
         try:
-            self._pipeline = Gst.parse_launch(pipeline_str)
+            self._pipeline = self._Gst.parse_launch(pipeline_str)
         except GLib.Error as e:
             raise Exception(f"Invalid GStreamer pipeline: {pipeline_str}") from e
 
@@ -174,11 +171,11 @@ class VideoCaptureGst:
         self._appsink.set_property("sync", False)
         self._appsink.set_property("drop", True)
         self._appsink.set_property("max-buffers", 5)
-        self._pipeline.set_state(Gst.State.PLAYING)
+        self._pipeline.set_state(self._Gst.State.PLAYING)
 
         # RTSP connections need more time to negotiate and start streaming.
-        state_change_result = self._pipeline.get_state(15 * Gst.SECOND)
-        if state_change_result[1] != Gst.State.PLAYING:
+        state_change_result = self._pipeline.get_state(15 * self._Gst.SECOND)
+        if state_change_result[1] != self._Gst.State.PLAYING:
             raise Exception(f"GStreamer pipeline failed to start: {pipeline_str}")
 
         self._running = True
@@ -298,9 +295,8 @@ class VideoCaptureGst:
             raise RuntimeError("Frame dimensions not properly initialized")
 
         buf = sample.get_buffer()
-        from gi.repository import Gst
 
-        success, mapinfo = buf.map(Gst.MapFlags.READ)
+        success, mapinfo = buf.map(self._Gst.MapFlags.READ)
         if not success:
             return False, None
 
@@ -370,12 +366,11 @@ class VideoCaptureGst:
             return 30.0  # Default fallback
         elif prop == cv2.CAP_PROP_FRAME_COUNT:
             # For files, try to get duration
-            from gi.repository import Gst
 
-            duration = self._pipeline.query_duration(Gst.Format.TIME)
+            duration = self._pipeline.query_duration(self._Gst.Format.TIME)
             if duration[0]:
                 fps = self.get(cv2.CAP_PROP_FPS)
-                return int((duration[1] / Gst.SECOND) * fps)
+                return int((duration[1] / self._Gst.SECOND) * fps)
             return 0
         return None
 
@@ -415,9 +410,7 @@ class VideoCaptureGst:
     def release(self):
         """Release the GStreamer pipeline."""
         if self._running:
-            from gi.repository import Gst
-
-            self._pipeline.set_state(Gst.State.NULL)
+            self._pipeline.set_state(self._Gst.State.NULL)
             self._running = False
 
 
