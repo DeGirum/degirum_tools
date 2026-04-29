@@ -76,18 +76,6 @@ from typing_extensions import TypeGuard
 from .gst_support import build_gst_pipeline
 from enum import Enum
 
-# Import GStreamer libraries
-try:
-    import gi
-
-    gi.require_version("Gst", "1.0")
-    from gi.repository import Gst, GLib
-
-    Gst.init(None)
-    GST_AVAILABLE = True
-except Exception:
-    GST_AVAILABLE = False
-
 
 class VideoCaptureProtocol(Protocol):
     """Structural protocol for video capture objects (cv2.VideoCapture-like)."""
@@ -138,6 +126,28 @@ class VideoSourceType(Enum):
 class VideoCaptureGst:
     """GStreamer-based video capture class that mimics cv2.VideoCapture interface."""
 
+    _gst_initialized = False
+
+    @staticmethod
+    def _ensure_gst():
+        """Import and initialize GStreamer if not already done.
+
+        Raises:
+            ImportError: If GStreamer Python bindings are not available.
+        """
+        if VideoCaptureGst._gst_initialized:
+            return
+        try:
+            import gi
+
+            gi.require_version("Gst", "1.0")
+            from gi.repository import Gst
+
+            Gst.init(None)
+            VideoCaptureGst._gst_initialized = True
+        except Exception as e:
+            raise ImportError("GStreamer Python bindings (gi) not available") from e
+
     def __init__(self, pipeline_str):
         """Initialize GStreamer pipeline from string.
 
@@ -145,8 +155,9 @@ class VideoCaptureGst:
             pipeline_str: GStreamer pipeline string
         """
         print(f"Initializing VideoCaptureGst with pipeline: {pipeline_str}")
-        if not GST_AVAILABLE:
-            raise ImportError("GStreamer Python bindings (gi) not available")
+        self._ensure_gst()
+
+        from gi.repository import Gst, GLib
 
         try:
             self._pipeline = Gst.parse_launch(pipeline_str)
@@ -287,6 +298,8 @@ class VideoCaptureGst:
             raise RuntimeError("Frame dimensions not properly initialized")
 
         buf = sample.get_buffer()
+        from gi.repository import Gst
+
         success, mapinfo = buf.map(Gst.MapFlags.READ)
         if not success:
             return False, None
@@ -357,6 +370,8 @@ class VideoCaptureGst:
             return 30.0  # Default fallback
         elif prop == cv2.CAP_PROP_FRAME_COUNT:
             # For files, try to get duration
+            from gi.repository import Gst
+
             duration = self._pipeline.query_duration(Gst.Format.TIME)
             if duration[0]:
                 fps = self.get(cv2.CAP_PROP_FPS)
@@ -400,6 +415,8 @@ class VideoCaptureGst:
     def release(self):
         """Release the GStreamer pipeline."""
         if self._running:
+            from gi.repository import Gst
+
             self._pipeline.set_state(Gst.State.NULL)
             self._running = False
 
@@ -502,8 +519,8 @@ def create_video_stream(
             else:
                 video_source = pafy.new(video_source).getbest(preftype="mp4").url
 
-    # Use GStreamer if requested and available
-    if use_gstreamer and GST_AVAILABLE:
+    # Use GStreamer if requested
+    if use_gstreamer:
         try:
             pipeline_str = build_gst_pipeline(video_source)
             stream = VideoCaptureGst(pipeline_str)
