@@ -41,7 +41,6 @@ Key Classes:
     - `Display`: Main class for showing images and videos
     - `Progress`: Progress bar with speed and percentage display
     - `FPSMeter`: Frames per second measurement
-    - `Timer`: Simple timing utility
     - `stdoutRedirector`: Context manager for redirecting stdout
 
 Configuration Options:
@@ -749,22 +748,6 @@ class Display:
                 PIL image, or model result object.
         """
         self.show(img, 0)
-
-
-class Timer:
-    """Simple timer class."""
-
-    def __init__(self):
-        """Constructor. Records start time."""
-        self._start_time = time.time_ns()
-
-    def __call__(self) -> float:
-        """Get elapsed time since timer creation.
-
-        Returns:
-            Time elapsed in seconds since object construction.
-        """
-        return (time.time_ns() - self._start_time) * 1e-9
 
 
 class Progress:

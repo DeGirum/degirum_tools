@@ -14,7 +14,7 @@
 
 import threading, queue, copy, time
 from typing import Optional, Any, List, Dict, Union, Iterator, Tuple
-from ..tools import get_test_mode
+from ..tools import get_test_mode, Watchdog
 from degirum.exceptions import DegirumException
 
 
@@ -298,68 +298,6 @@ class Stream(queue.Queue):
     def close(self):
         """Close the stream by inserting a poison pill."""
         self.put(self._poison)
-
-
-class Watchdog:
-    """Monitors activity rate and timing using tick events and a filtered TPS estimate.
-
-    Tracks the frequency of `tick()` calls and the time since the last one. The `check()` method
-    evaluates whether the activity is recent enough and meets a minimum TPS (ticks per second) threshold,
-    using a single-pole low-pass filter to smooth TPS estimation.
-    """
-
-    def __init__(self, time_limit: float, tps_threshold: float, smoothing: float = 0.9):
-        """Initializes the Watchdog.
-
-        Args:
-            time_limit (float): Maximum allowed time (in seconds) since the last tick.
-            tps_threshold (float): Minimum required filtered ticks per second.
-            smoothing (float): Smoothing factor for the low-pass filter (0 < smoothing < 1).
-        """
-
-        self._time_limit = time_limit
-        self._tps_threshold = tps_threshold
-        self._smoothing = smoothing
-        self._last_tick: Optional[float] = None
-        self._average_tick = -1.0
-        self._lock = threading.Lock()
-
-    def tick(self):
-        """Records the current timestamp and updates the filtered TPS estimate.
-
-        Should be called regularly to track system activity. Uses the time between ticks to calculate
-        instantaneous TPS and applies a low-pass filter to smooth the estimate.
-        """
-
-        with self._lock:
-            now = time.time()
-            if self._last_tick is not None:
-                dt = now - self._last_tick
-                self._average_tick = (
-                    dt
-                    if self._average_tick < 0
-                    else (
-                        self._smoothing * self._average_tick
-                        + (1 - self._smoothing) * dt
-                    )
-                )
-            self._last_tick = now
-
-    def check(self) -> Tuple[bool, float]:
-        """Checks whether the watchdog is within the allowed timing and TPS threshold.
-
-        Returns:
-            Tuple[bool, float]: A tuple containing:
-                - bool: True if the watchdog is active (recent enough and meets TPS threshold), False otherwise.
-                - float: The current TPS value.
-
-        """
-        with self._lock:
-            if self._last_tick is None:
-                return True, 0  # No ticks yet, consider it active
-            age = time.time() - self._last_tick
-            tps = 1 / self._average_tick if self._average_tick > 0 else 0
-            return age <= self._time_limit and tps >= self._tps_threshold, tps
 
 
 def empty_run(fn):
