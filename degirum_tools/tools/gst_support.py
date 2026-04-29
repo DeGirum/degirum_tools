@@ -13,20 +13,154 @@ Focus: Compatibility over optimization
 """
 
 import os
+import sys
 import subprocess
 from pathlib import Path
+import threading
 from typing import Tuple
+
+import concurrent
 from .. import logger_get
+from ..tools import Watchdog
 
 
-def _run_command(cmd: list, timeout: int = 5, check_for_lingering_process: bool = False) -> Tuple[str, str, int]:
+def setup_gst_environment(*plugin_dirs):
+    """Set GST_PLUGIN_PATH before gi package is imported. Then import gi and return it for convenience.
+
+    GStreamer scans the plugin registry when the library first loads,
+    so the env var must be in place before any gi import.
+
+    Args:
+        plugin_dirs: iterable of directory paths to prepend to GST_PLUGIN_PATH.
+                     Relative paths are resolved relative to this file.
+
+    Returns:        The imported gi module (for convenience).
+    """
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+
+    abs_dirs = [
+        os.path.join(script_dir, d) if not os.path.isabs(d) else d for d in plugin_dirs
+    ]
+
+    existing = os.environ.get("GST_PLUGIN_PATH", "")
+    all_dirs = abs_dirs + ([existing] if existing else [])
+    if all_dirs:
+        os.environ["GST_PLUGIN_PATH"] = ":".join(all_dirs)
+
+    import gi
+
+    gi.require_version("Gst", "1.0")
+    return gi
+
+
+class GstPipelineHandler:
+    """Manages a single GStreamer pipeline lifecycle.
+
+    Pass a fully-formed gst-launch pipeline string to the constructor;
+    the pipeline starts immediately.  Use .wait() to block until it ends
+    or .stop() to tear it down early.
+
+    A single GLib main loop shared across all instances is started
+    automatically on first use.
+    """
+
+    _glib_loop = None
+    _glib_loop_lock = threading.Lock()
+
+    @classmethod
+    def _ensure_main_loop(cls):
+        from gi.repository import GLib
+
+        with cls._glib_loop_lock:
+            if cls._glib_loop is None or not cls._glib_loop.is_running():
+                cls._glib_loop = GLib.MainLoop()
+                threading.Thread(
+                    target=cls._glib_loop.run,
+                    daemon=True,
+                    name="glib-main-loop",
+                ).start()
+
+    def __init__(self, pipeline_str, probe_element_name=""):
+        from gi.repository import Gst
+
+        self._Gst = Gst
+
+        self._pipeline = self._Gst.parse_launch(pipeline_str)
+        self._future: concurrent.futures.Future = concurrent.futures.Future()
+        self._watchdog = (
+            Watchdog(time_limit=5.0, tps_threshold=0.0) if probe_element_name else None
+        )
+
+        if probe_element_name:
+            element = self._pipeline.get_by_name(probe_element_name)
+            if element is None:
+                raise ValueError(
+                    f"Element '{probe_element_name}' not found in pipeline"
+                )
+            pad = element.get_static_pad("src")
+            if pad is None:
+                raise ValueError(f"Element '{probe_element_name}' has no src pad")
+            pad.add_probe(Gst.PadProbeType.BUFFER, self._on_buffer)
+
+        def on_bus_message(bus, message):
+            mtype = message.type
+            if mtype == Gst.MessageType.EOS:
+                print("End of stream")
+                self._pipeline.set_state(Gst.State.NULL)
+                if not self._future.done():
+                    self._future.set_result(None)
+            elif mtype == Gst.MessageType.ERROR:
+                err, debug = message.parse_error()
+                print(f"GStreamer error: {err.message} ({debug})", file=sys.stderr)
+                self._pipeline.set_state(Gst.State.NULL)
+                if not self._future.done():
+                    self._future.set_exception(RuntimeError(f"{err.message} ({debug})"))
+
+        bus = self._pipeline.get_bus()
+        bus.add_signal_watch()
+        bus.connect("message", on_bus_message)
+
+    def start(self):
+        """Start the pipeline. Returns self for chaining."""
+        self._ensure_main_loop()
+        self._pipeline.set_state(self._Gst.State.PLAYING)
+        return self
+
+    def _on_buffer(self, pad, info):
+        assert self._watchdog is not None
+        self._watchdog.tick()
+        return self._Gst.PadProbeReturn.OK
+
+    def check(self):
+        """Return current throughput as (is_active, fps). Requires probe_element_name to be set."""
+        if self._watchdog is None:
+            raise RuntimeError("check() requires probe_element_name to be set")
+        return self._watchdog.check()
+
+    def wait(self):
+        """Block until the pipeline ends (EOS). Raises RuntimeError on error."""
+        self._future.result()
+
+    def stop(self):
+        """Gracefully stop the pipeline."""
+        self._pipeline.set_state(self._Gst.State.NULL)
+        if not self._future.done():
+            self._future.set_result(None)
+
+
+def _run_command(
+    cmd: list, timeout: int = 5, check_for_lingering_process: bool = False
+) -> Tuple[str, str, int]:
     """Run command and return stdout, stderr, returncode"""
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         # Check for lingering processes if requested
         if check_for_lingering_process and cmd:
             process_name = cmd[0]  # Use the first part of the command as process name
-            lingering = subprocess.run(["pgrep", process_name], capture_output=True, text=True)
+            lingering = subprocess.run(
+                ["pgrep", process_name], capture_output=True, text=True
+            )
             if lingering.stdout.strip():
                 logger_get().warning(f"{process_name} process still running!")
         return result.stdout, result.stderr, result.returncode
@@ -43,13 +177,24 @@ def _detect_camera_type(device_index: int) -> str:
     if not os.path.exists(device_path):
         raise FileNotFoundError(f"Camera device {device_path} not found")
     # Method 1: Check v4l2-ctl device info
-    stdout, stderr, ret = _run_command(["v4l2-ctl", "-d", device_path, "--info"], check_for_lingering_process=True)
+    stdout, stderr, ret = _run_command(
+        ["v4l2-ctl", "-d", device_path, "--info"], check_for_lingering_process=True
+    )
     if ret == 0:
         info_lower = stdout.lower()
         # Raspberry Pi indicators (more comprehensive list)
         rpi_indicators = [
-            'unicam', 'csi', 'rp1-cfe', 'rp1_cfe', 'bcm2835', 'mmal',
-            'raspberry', 'rpi', 'broadcom', 'brcm', 'vc4'
+            "unicam",
+            "csi",
+            "rp1-cfe",
+            "rp1_cfe",
+            "bcm2835",
+            "mmal",
+            "raspberry",
+            "rpi",
+            "broadcom",
+            "brcm",
+            "vc4",
         ]
         for indicator in rpi_indicators:
             if indicator in info_lower:
@@ -65,20 +210,33 @@ def _detect_camera_type(device_index: int) -> str:
             # Read the real path
             real_path = os.readlink(sys_path).lower()
             # Check for RPi-specific paths
-            rpi_path_indicators = ['platform/axi:csi', 'platform/soc/csi', 'platform/rp1', 'bcm2835', 'unicam', 'cfe']
+            rpi_path_indicators = [
+                "platform/axi:csi",
+                "platform/soc/csi",
+                "platform/rp1",
+                "bcm2835",
+                "unicam",
+                "cfe",
+            ]
             for indicator in rpi_path_indicators:
                 if indicator in real_path:
-                    logger_get().info(f"Found RPi path indicator '{indicator}' in sys path")
+                    logger_get().info(
+                        f"Found RPi path indicator '{indicator}' in sys path"
+                    )
                     return "rpi_csi"
     except Exception as e:
         logger_get().debug(f"Sys path check failed: {e}")
     try:
-        stdout, stderr, ret = _run_command(["v4l2-ctl", "-d", device_path, "--list-formats"])
+        stdout, stderr, ret = _run_command(
+            ["v4l2-ctl", "-d", device_path, "--list-formats"]
+        )
         if ret == 0:
             formats_lower = stdout.lower()
             # logger.info(f"v4l2-ctl formats for {device_path}: {stdout}")
             #  RPi cameras often have specific format patterns
-            if any(indicator in formats_lower for indicator in ['bayer', 'rggb', 'grbg']):
+            if any(
+                indicator in formats_lower for indicator in ["bayer", "rggb", "grbg"]
+            ):
                 logger_get().info("Found raw Bayer format - likely RPi CSI camera")
                 return "rpi_csi"
     except Exception as e:
@@ -88,7 +246,9 @@ def _detect_camera_type(device_index: int) -> str:
         logger_get().info(f"High device number {device_index} - likely RPi camera")
         # But still need confirmation from other methods, so this is just a hint
     # Everything else is treated as USB/webcam
-    logger_get().info(f"No RPi indicators found - assuming USB/Webcam for {device_path}")
+    logger_get().info(
+        f"No RPi indicators found - assuming USB/Webcam for {device_path}"
+    )
     return "usb"
 
 
@@ -199,9 +359,9 @@ def build_gst_pipeline(source):
         # unlinked audio pad that would propagate a not-linked error upstream.
         return (
             f'rtspsrc location="{source}" latency=0 protocols=tcp ! '
-            f'application/x-rtp,media=video ! '
-            f'decodebin ! videoconvert ! videoscale ! '
-            f'video/x-raw,format={format} ! appsink name=sink'
+            f"application/x-rtp,media=video ! "
+            f"decodebin ! videoconvert ! videoscale ! "
+            f"video/x-raw,format={format} ! appsink name=sink"
         )
 
     # ==================== FILE SOURCE ====================
@@ -211,9 +371,9 @@ def build_gst_pipeline(source):
         # Always use decodebin for maximum compatibility
         return (
             f'filesrc location="{source}" ! '
-            f'decodebin ! videoconvert ! videoscale ! '
-            f'video/x-raw, format={format} ! '
-            f'appsink name=sink'
+            f"decodebin ! videoconvert ! videoscale ! "
+            f"video/x-raw, format={format} ! "
+            f"appsink name=sink"
         )
     else:
         raise ValueError(f"Unknown source type or file not found: {source}")
@@ -229,27 +389,33 @@ def _is_gstreamer_pipeline(source: str) -> bool:
     """
     # Check for common GStreamer elements and patterns
     gst_indicators = [
-        '!',  # Pipeline separator
-        'src',  # Source elements
-        'sink',  # Sink elements
-        'videoconvert',  # Common video element
-        'appsink',  # Common sink for applications
-        'v4l2src',  # Video source
-        'filesrc',  # File source
-        'rtspsrc',  # RTSP source
-        'decodebin',  # Decoder
-        'videoscale',  # Video scaler
-        'video/x-raw',  # Video format
-        'audio/x-raw',  # Audio format
+        "!",  # Pipeline separator
+        "src",  # Source elements
+        "sink",  # Sink elements
+        "videoconvert",  # Common video element
+        "appsink",  # Common sink for applications
+        "v4l2src",  # Video source
+        "filesrc",  # File source
+        "rtspsrc",  # RTSP source
+        "decodebin",  # Decoder
+        "videoscale",  # Video scaler
+        "video/x-raw",  # Video format
+        "audio/x-raw",  # Audio format
     ]
     # Must contain pipeline separator and at least one GStreamer element
-    has_pipeline_sep = '!' in source
+    has_pipeline_sep = "!" in source
     has_gst_element = any(indicator in source.lower() for indicator in gst_indicators)
     # Additional check: should not look like a simple file path or URL
-    is_url = source.startswith(('http://', 'https://', 'rtsp://', 'rtmp://'))
-    is_absolute_path = source.startswith('/')
-    is_relative_path = source.startswith('./') or source.startswith('../')
-    has_dot = '.' in source
-    has_one_dot = len(source.split('.')) == 2
-    is_simple_path = (not is_url and not is_absolute_path and not is_relative_path and has_dot and has_one_dot)
+    is_url = source.startswith(("http://", "https://", "rtsp://", "rtmp://"))
+    is_absolute_path = source.startswith("/")
+    is_relative_path = source.startswith("./") or source.startswith("../")
+    has_dot = "." in source
+    has_one_dot = len(source.split(".")) == 2
+    is_simple_path = (
+        not is_url
+        and not is_absolute_path
+        and not is_relative_path
+        and has_dot
+        and has_one_dot
+    )
     return has_pipeline_sep and has_gst_element and not is_simple_path
