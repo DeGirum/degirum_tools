@@ -106,8 +106,6 @@ class GstPipelineHandler:
         from gi.repository import Gst
 
         self._Gst = Gst
-
-        self._stopping = False
         self._pipeline = self._Gst.parse_launch(pipeline_str)
         self._future: concurrent.futures.Future = concurrent.futures.Future()
         self._watchdog = (
@@ -126,13 +124,8 @@ class GstPipelineHandler:
             pad.add_probe(Gst.PadProbeType.BUFFER, self._on_buffer)
 
         def on_bus_message(bus, message):
-            mtype = message.type
-            if mtype == Gst.MessageType.EOS:
-                self.stop()
-            elif mtype == Gst.MessageType.ERROR:
+            if message.type == Gst.MessageType.ERROR:
                 err, debug = message.parse_error()
-                if not self._stopping:
-                    print(f"GStreamer error: {err.message} ({debug})", file=sys.stderr)
                 self._pipeline.set_state(Gst.State.NULL)
                 if not self._future.done():
                     self._future.set_exception(RuntimeError(f"{err.message} ({debug})"))
@@ -175,7 +168,6 @@ class GstPipelineHandler:
 
     def stop(self):
         """Gracefully stop the pipeline."""
-        self._stopping = True
         self._pipeline.set_state(self._Gst.State.NULL)
         self._pipeline.get_state(timeout=2 * self._Gst.SECOND)
         if not self._future.done():

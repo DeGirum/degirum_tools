@@ -1209,7 +1209,11 @@ class MediaServer:
         stderr = None if self._verbose else subprocess.DEVNULL
 
         self._process = subprocess.Popen(
-            cmd, cwd=self._working_dir, stdout=stdout, stderr=stderr
+            cmd,
+            cwd=self._working_dir,
+            stdout=stdout,
+            stderr=stderr,
+            start_new_session=True,
         )
 
     def stop(self):
