@@ -50,7 +50,7 @@ def setup_gst_environment(*plugin_dirs):
         The imported gi module.
     """
 
-    if not plugin_dirs:
+    if plugin_dirs:
         caller_dir = os.path.dirname(os.path.abspath(inspect.stack()[1].filename))
 
         abs_dirs = [
@@ -218,18 +218,6 @@ class GstElementBase:
     # they are populated by __init_subclass__ at concrete-subclass creation time.
     __gstmetadata__: tuple
     __gsttemplates__: tuple
-
-    # ------------------------------------------------------------------
-    # Stubs for Gst.Element methods supplied via multiple inheritance.
-    # These are never called on GstElementBase directly; they exist solely
-    # to let mypy resolve the calls made in __init__ and do_set_state.
-    # ------------------------------------------------------------------
-
-    def get_pad_template(self, name: str) -> Gst.PadTemplate:  # type: ignore[empty-body]
-        ...
-
-    def add_pad(self, pad: Gst.Pad) -> bool:  # type: ignore[empty-body]
-        ...
 
     class SinkPad:
         """Wraps a GStreamer sink pad with its buffer queue and frame metadata.
@@ -406,9 +394,9 @@ class GstElementBase:
         for info in pad_infos:
             if info.direction == GstElementBase.PadDirection.SRC:
                 pad = Gst.Pad.new_from_template(
-                    self.get_pad_template(info.name), info.name
+                    self.get_pad_template(info.name), info.name  # type: ignore[attr-defined]
                 )
-                self.add_pad(pad)
+                self.add_pad(pad)  # type: ignore[attr-defined]
                 self.sources[info.name] = pad
 
         # Create SINK pads.
