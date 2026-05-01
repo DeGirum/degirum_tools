@@ -228,6 +228,17 @@ class GstElementBase:
             forward_to: Source pad to forward non-CAPS/non-EOS events to.
             forward_caps: Whether to forward CAPS events to `forward_to`.
             forward_eos: Whether to forward EOS events to `forward_to`.
+
+        Attributes:
+            pad: The underlying `Gst.Pad` added to the parent element.
+            width: Frame width in pixels, populated on the first CAPS event.
+            height: Frame height in pixels, populated on the first CAPS event.
+            format: Pixel format string (e.g. `"NV12"`), populated on the first CAPS event.
+            stride: Per-plane byte strides read from `GstVideoMeta` on the first
+                buffer. `None` until the first buffer arrives, or if the buffer
+                carries no `GstVideoMeta`.
+            queue: Buffer queue fed by the chain function. Iterate over it in the
+                worker thread; yields `Gst.Buffer` items and terminates on EOS.
         """
 
         def __init__(
@@ -256,6 +267,7 @@ class GstElementBase:
             self.width: Optional[int] = None
             self.height: Optional[int] = None
             self.format: Optional[str] = None
+            self.stride: Optional[List[int]] = None
 
             # Holds Gst.Buffer items; None is the stop sentinel.
             from .. import streams
@@ -266,6 +278,12 @@ class GstElementBase:
             return self.width is not None and self.height is not None
 
         def _chain(self, pad: Gst.Pad, parent, buf: Gst.Buffer) -> Gst.FlowReturn:
+            if self.stride is None:
+                from gi.repository import GstVideo
+
+                meta = GstVideo.buffer_get_video_meta(buf)
+                if meta is not None:
+                    self.stride = list(meta.stride)
             self.queue.put(buf)
             return self._Gst.FlowReturn.OK
 
