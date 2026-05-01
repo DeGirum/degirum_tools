@@ -23,7 +23,7 @@ import threading
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 import concurrent
-from .. import logger_get, streams
+from .. import logger_get
 from .time_tools import Watchdog
 
 if TYPE_CHECKING:
@@ -48,16 +48,18 @@ def setup_gst_environment(*plugin_dirs):
         The imported gi module.
     """
 
-    caller_dir = os.path.dirname(os.path.abspath(inspect.stack()[1].filename))
+    if not plugin_dirs:
+        caller_dir = os.path.dirname(os.path.abspath(inspect.stack()[1].filename))
 
-    abs_dirs = [
-        os.path.join(caller_dir, d) if not os.path.isabs(d) else d for d in plugin_dirs
-    ]
+        abs_dirs = [
+            os.path.join(caller_dir, d) if not os.path.isabs(d) else d
+            for d in plugin_dirs
+        ]
 
-    existing = os.environ.get("GST_PLUGIN_PATH", "")
-    all_dirs = abs_dirs + ([existing] if existing else [])
-    if all_dirs:
-        os.environ["GST_PLUGIN_PATH"] = ":".join(all_dirs)
+        existing = os.environ.get("GST_PLUGIN_PATH", "")
+        all_dirs = abs_dirs + ([existing] if existing else [])
+        if all_dirs:
+            os.environ["GST_PLUGIN_PATH"] = ":".join(all_dirs)
 
     import gi
 
@@ -266,6 +268,8 @@ class GstElementBase:
             self.format: Optional[str] = None
 
             # Holds Gst.Buffer items; None is the stop sentinel.
+            from .. import streams
+
             self.queue = streams.Stream(10, True)
 
         def is_initialized(self) -> bool:
