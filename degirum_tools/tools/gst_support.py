@@ -12,6 +12,8 @@ Simple GStreamer Pipeline Builder
 Focus: Compatibility over optimization
 """
 
+from __future__ import annotations
+
 import os
 import sys
 import inspect
