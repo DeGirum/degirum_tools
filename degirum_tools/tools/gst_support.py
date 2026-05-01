@@ -16,27 +16,36 @@ import os
 import sys
 import inspect
 import subprocess
+from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 import threading
-from typing import Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 import concurrent
-from .. import logger_get
+from .. import logger_get, streams
 from .time_tools import Watchdog
+
+if TYPE_CHECKING:
+    from gi.repository import Gst
 
 
 def setup_gst_environment(*plugin_dirs):
-    """Set GST_PLUGIN_PATH before gi package is imported. Then import gi and return it for convenience.
-    Also initializes GStreamer.
+    """Set GST_PLUGIN_PATH before gi is imported, then import and return gi.
 
-    GStreamer scans the plugin registry when the library first loads,
-    so the env var must be in place before any gi import.
+    GStreamer scans the plugin registry when the library first loads, so
+    GST_PLUGIN_PATH must be in place before any gi import.
+
+    To use custom Python plugins, place your plugin .py files under a
+    subdirectory named `python` inside any directory passed here, and pass
+    that parent directory as one of the arguments.
 
     Args:
-        plugin_dirs: iterable of directory paths to prepend to GST_PLUGIN_PATH.
-                     Relative paths are resolved relative to the calling file.
+        *plugin_dirs: Directory paths to prepend to GST_PLUGIN_PATH.
+            Relative paths are resolved relative to the calling file.
 
-    Returns:        The imported gi module (for convenience).
+    Returns:
+        The imported gi module.
     """
 
     caller_dir = os.path.dirname(os.path.abspath(inspect.stack()[1].filename))
@@ -65,8 +74,8 @@ class GstPipelineHandler:
     """Manages a single GStreamer pipeline lifecycle.
 
     Pass a fully-formed gst-launch pipeline string to the constructor;
-    the pipeline starts immediately.  Use .wait() to block until it ends
-    or .stop() to tear it down early.
+    the pipeline starts immediately. Use `wait()` to block until it ends
+    or `stop()` to tear it down early.
 
     A single GLib main loop shared across all instances is started
     automatically on first use.
@@ -140,13 +149,24 @@ class GstPipelineHandler:
         return self._Gst.PadProbeReturn.OK
 
     def check(self):
-        """Return current throughput as (is_active, fps). Requires probe_element_name to be set."""
+        """Return current throughput.
+
+        Returns:
+            Tuple (is_active, fps).
+
+        Raises:
+            RuntimeError: If `probe_element_name` was not set at construction.
+        """
         if self._watchdog is None:
             raise RuntimeError("check() requires probe_element_name to be set")
         return self._watchdog.check()
 
     def wait(self):
-        """Block until the pipeline ends (EOS). Raises RuntimeError on error."""
+        """Block until the pipeline reaches EOS.
+
+        Raises:
+            RuntimeError: On pipeline error.
+        """
         self._future.result()
 
     def stop(self):
@@ -154,6 +174,315 @@ class GstPipelineHandler:
         self._pipeline.set_state(self._Gst.State.NULL)
         if not self._future.done():
             self._future.set_result(None)
+
+
+# ---------------------------------------------------------------------------
+# Base element class for custom GStreamer Python elements
+# ---------------------------------------------------------------------------
+class GstElementBase:
+    """Mixin base for custom GStreamer Python elements.
+
+    Because `gi` must not be imported before `setup_gst_environment` patches `GST_PLUGIN_PATH`,
+    this class intentionally does **not** inherit from `Gst.Element`. Concrete plugin classes
+    must use multiple inheritance so that `Gst.Element` appears in the MRO:
+
+        class MyElement(GstElementBase, Gst.Element): ...
+
+    **Inheritance order matters:** `GstElementBase` must be listed *before* `Gst.Element` so that
+    cooperative `super()` calls resolve correctly and gst-python's GObject metaclass machinery works as expected.
+
+    Subclasses must implement:
+
+    * `get_metadata()` — return an `ElementMetadata` instance.
+    * `get_pads()`     — return a list of `PadInfo` instances.
+    * `_worker_func()` — worker thread body; runs until all sink queues are exhausted.
+
+    `__init_subclass__` automatically builds `__gstmetadata__` and `__gsttemplates__` from those declarations
+    so that gst-python can register the element.
+
+    `__init__` creates all pads (SRC first so SINK pads can resolve `forward_to` by name), populates `self.sources`
+    and `self.sinks`, then starts the worker thread.
+
+    `do_set_state` closes all sink queues and joins the worker thread when the element transitions to NULL.
+    """
+
+    # ------------------------------------------------------------------
+    # Nested types used in the public API
+    # ------------------------------------------------------------------
+
+    # Declared here so mypy knows these attributes exist on the class;
+    # they are populated by __init_subclass__ at concrete-subclass creation time.
+    __gstmetadata__: tuple
+    __gsttemplates__: tuple
+
+    # ------------------------------------------------------------------
+    # Stubs for Gst.Element methods supplied via multiple inheritance.
+    # These are never called on GstElementBase directly; they exist solely
+    # to let mypy resolve the calls made in __init__ and do_set_state.
+    # ------------------------------------------------------------------
+
+    def get_pad_template(self, name: str) -> Gst.PadTemplate:  # type: ignore[empty-body]
+        ...
+
+    def add_pad(self, pad: Gst.Pad) -> bool:  # type: ignore[empty-body]
+        ...
+
+    class SinkPad:
+        """Wraps a GStreamer sink pad with its buffer queue and frame metadata.
+
+        Args:
+            element: Parent `Gst.Element` that owns this pad.
+            template_name: Name of the pad template (also used as the pad name).
+            forward_to: Source pad to forward non-CAPS/non-EOS events to.
+            forward_caps: Whether to forward CAPS events to `forward_to`.
+            forward_eos: Whether to forward EOS events to `forward_to`.
+        """
+
+        def __init__(
+            self,
+            element: Gst.Element,
+            template_name: str,
+            forward_to: Optional[Gst.Pad] = None,
+            *,
+            forward_caps: bool = True,
+            forward_eos: bool = True,
+        ):
+            from gi.repository import Gst
+
+            self._Gst = Gst
+            self.pad = Gst.Pad.new_from_template(
+                element.get_pad_template(template_name), template_name
+            )
+            self.pad.set_chain_function_full(self._chain)
+            self.pad.set_event_function_full(self._event)
+            element.add_pad(self.pad)
+
+            self._forward_to = forward_to
+            self._forward_caps = forward_caps
+            self._forward_eos = forward_eos
+
+            self.width: Optional[int] = None
+            self.height: Optional[int] = None
+            self.format: Optional[str] = None
+
+            # Holds Gst.Buffer items; None is the stop sentinel.
+            self.queue = streams.Stream(10, True)
+
+        def is_initialized(self) -> bool:
+            return self.width is not None and self.height is not None
+
+        def _chain(self, pad: Gst.Pad, parent, buf: Gst.Buffer) -> Gst.FlowReturn:
+            self.queue.put(buf)
+            return self._Gst.FlowReturn.OK
+
+        def _event(self, pad: Gst.Pad, parent, event: Gst.Event) -> bool:
+            if event.type == self._Gst.EventType.CAPS:
+                caps = event.parse_caps()
+                s = caps.get_structure(0)
+                _, self.width = s.get_int("width")
+                _, self.height = s.get_int("height")
+                self.format = s.get_string("format")
+                if self._forward_caps and self._forward_to:
+                    return self._forward_to.push_event(event)
+
+            elif event.type == self._Gst.EventType.EOS:
+                self.queue.put(None)  # sentinel
+                if self._forward_eos and self._forward_to:
+                    return self._forward_to.push_event(event)
+
+            elif self._forward_to:
+                return self._forward_to.push_event(event)
+
+            return True
+
+    class PadDirection(Enum):
+        """Direction of a pad template declared in `get_pads`."""
+
+        SINK = 1
+        SRC = 2
+
+    @dataclass
+    class ElementMetadata:
+        """GStreamer element metadata returned by `get_metadata`.
+
+        Attributes:
+            longname: Human-readable element name.
+            klass: Element classification (e.g. "Filter/Video").
+            description: Short description of what the element does.
+            author: Author / organization string.
+        """
+
+        longname: str
+        klass: str
+        description: str
+        author: str
+
+    @dataclass
+    class PadInfo:
+        """Descriptor for a single pad template returned by `get_pads`.
+
+        `PadPresence.ALWAYS` is assumed for all pads. Use `PadDirection` instead of Gst types.
+
+        Attributes:
+            name: Pad name (used as both template name and pad name).
+            direction: `PadDirection.SINK` or `PadDirection.SRC`.
+            caps: Gst pad capabilities string (e.g. `"video/x-raw,format=NV12"`).
+            forward_to: Name of the SRC pad to forward events to. `None` disables forwarding entirely.
+            forward_caps: Whether to forward CAPS events to `forward_to`.
+            forward_eos: Whether to forward EOS events to `forward_to`.
+        """
+
+        name: str
+        direction: GstElementBase.PadDirection
+        caps: str
+        # SINK-pad forwarding controls
+        forward_to: Optional[str] = None
+        forward_caps: bool = True
+        forward_eos: bool = True
+
+    # ------------------------------------------------------------------
+    # Subclass hook: build __gstmetadata__ / __gsttemplates__ automatically
+    # ------------------------------------------------------------------
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+
+        # Only act when both classmethods are defined directly on this class,
+        # so intermediate abstract layers are skipped gracefully.
+        if "get_metadata" not in cls.__dict__ or "get_pads" not in cls.__dict__:
+            return
+
+        from gi.repository import Gst
+
+        meta = cls.get_metadata()
+        cls.__gstmetadata__ = (
+            meta.longname,
+            meta.klass,
+            meta.description,
+            meta.author,
+        )
+
+        templates = []
+        for pad in cls.get_pads():
+            gst_direction = (
+                Gst.PadDirection.SINK
+                if pad.direction == GstElementBase.PadDirection.SINK
+                else Gst.PadDirection.SRC
+            )
+            templates.append(
+                Gst.PadTemplate.new(
+                    pad.name,
+                    gst_direction,
+                    Gst.PadPresence.ALWAYS,
+                    Gst.Caps.from_string(pad.caps),
+                )
+            )
+        cls.__gsttemplates__ = tuple(templates)
+
+    # ------------------------------------------------------------------
+    # Constructor
+    # ------------------------------------------------------------------
+
+    def __init__(self):
+        super().__init__()
+
+        from gi.repository import Gst
+
+        self._Gst = Gst
+        #: Dict of SRC pad name → Gst.Pad
+        self.sources: Dict[str, Gst.Pad] = {}
+        #: Dict of SINK pad name → GstElementBase.SinkPad
+        self.sinks: Dict[str, GstElementBase.SinkPad] = {}
+
+        pad_infos = self.get_pads()
+
+        # Create SRC pads first so SINK pads can resolve forward_to by name.
+        for info in pad_infos:
+            if info.direction == GstElementBase.PadDirection.SRC:
+                pad = Gst.Pad.new_from_template(
+                    self.get_pad_template(info.name), info.name
+                )
+                self.add_pad(pad)
+                self.sources[info.name] = pad
+
+        # Create SINK pads.
+        for info in pad_infos:
+            if info.direction == GstElementBase.PadDirection.SINK:
+                forward_pad = (
+                    self.sources.get(info.forward_to)
+                    if info.forward_to is not None
+                    else None
+                )
+                sink = GstElementBase.SinkPad(
+                    self,
+                    info.name,
+                    forward_to=forward_pad,
+                    forward_caps=info.forward_caps,
+                    forward_eos=info.forward_eos,
+                )
+                self.sinks[info.name] = sink
+
+        # Start worker thread.
+        self._worker = threading.Thread(
+            target=self._worker_func,
+            name=f"{type(self).__name__}-worker",
+            daemon=True,
+        )
+        self._worker.start()
+
+    # ------------------------------------------------------------------
+    # Abstract interface for subclasses
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def get_metadata(cls) -> GstElementBase.ElementMetadata:
+        """Return element metadata.
+
+        Returns:
+            An `ElementMetadata` instance.
+
+        Raises:
+            NotImplementedError: Must be overridden in every concrete subclass.
+        """
+        raise NotImplementedError(f"{cls.__name__} must implement get_metadata()")
+
+    @classmethod
+    def get_pads(cls) -> List[GstElementBase.PadInfo]:
+        """Return the list of pad descriptors.
+
+        Returns:
+            A list of `PadInfo` instances.
+
+        Raises:
+            NotImplementedError: Must be overridden in every concrete subclass.
+        """
+        raise NotImplementedError(f"{cls.__name__} must implement get_pads()")
+
+    def _worker_func(self) -> None:
+        """Worker thread body.
+
+        Iterates over `self.sinks` queues, performs processing, and pushes
+        results to the appropriate pad in `self.sources`. Returns when all
+        sink queues have yielded their `None` sentinel.
+
+        Raises:
+            NotImplementedError: Must be overridden in every concrete subclass.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} must implement _worker_func()"
+        )
+
+    # ------------------------------------------------------------------
+    # State management
+    # ------------------------------------------------------------------
+
+    def do_set_state(self, state: Gst.State) -> Gst.StateChangeReturn:
+        """Override: close sink queues and join worker thread on NULL transition."""
+        if state == self._Gst.State.NULL:
+            for sink in self.sinks.values():
+                sink.queue.close()
+            self._worker.join(timeout=2.0)
+        return super().do_set_state(state)  # type: ignore[misc]
 
 
 def _run_command(
@@ -291,30 +620,30 @@ def _detect_platform() -> str:
 
 
 def build_gst_pipeline(source):
-    """
-    Build a GStreamer pipeline string for various video sources.
+    """Build a GStreamer pipeline string for various video sources.
 
-    This function automatically detects the source type and constructs an appropriate
-    GStreamer pipeline. It supports camera devices, RTSP streams, video files, and
-    custom GStreamer pipelines.
+    Automatically detects the source type and constructs an appropriate
+    GStreamer pipeline string. Supports camera devices, RTSP streams,
+    video files, and custom GStreamer pipeline strings.
 
     Args:
-        source: Video source specification. Can be one of:
-            - int: Camera device index (e.g., 0, 1)
-            - str (digits): Camera device index as string (e.g., "0", "1")
-            - str (rtsp://...): RTSP stream URL
-            - str (file path): Path to video file
-            - str (GStreamer pipeline): Custom GStreamer pipeline string
+        source: Video source specification. One of:
+
+            - `int`: Camera device index (e.g. 0, 1).
+            - `str` of digits: Camera device index as string (e.g. "0").
+            - `str` starting with `rtsp://`: RTSP stream URL.
+            - `str` (file path): Path to a video file.
+            - `str` (pipeline): Custom GStreamer pipeline string.
 
     Returns:
-        str: GStreamer pipeline string ready to be used with OpenCV or GStreamer
+        GStreamer pipeline string.
 
     Raises:
-        ValueError: If the source type is unknown or file not found
-        FileNotFoundError: If camera device path doesn't exist (raised by _detect_camera_type)
+        ValueError: If the source type is unknown or the file is not found.
+        FileNotFoundError: If the camera device path does not exist.
 
     Examples:
-        >>> build_gst_pipeline(0)  # USB camera device 0
+        >>> build_gst_pipeline(0)
         'v4l2src device=/dev/video0 ! videoscale ! videoconvert ! video/x-raw,format=BGR ! appsink name=sink'
 
         >>> build_gst_pipeline("rtsp://example.com/stream")
@@ -324,7 +653,7 @@ def build_gst_pipeline(source):
         'filesrc location="/path/to/video.mp4" ! decodebin ! videoconvert ! videoscale ! video/x-raw, format=BGR ! appsink name=sink'
 
         >>> build_gst_pipeline("v4l2src ! videoconvert ! appsink")
-        'v4l2src ! videoconvert ! appsink'  # Returns custom pipeline as-is
+        'v4l2src ! videoconvert ! appsink'
     """
     platform = _detect_platform()
     format = "BGR"  # Default format for OpenCV compatibility
