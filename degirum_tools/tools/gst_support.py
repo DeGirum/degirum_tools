@@ -1,7 +1,7 @@
 #
 # gst_support.py: GStreamer pipeline builder for video sources
 #
-# Copyright DeGirum Corporation 2025
+# Copyright DeGirum Corporation 2026
 # All rights reserved
 #
 # Implements functions to build GStreamer pipelines for various video sources
@@ -15,14 +15,14 @@ Focus: Compatibility over optimization
 from __future__ import annotations
 
 import os
-import sys
 import inspect
 import subprocess
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 import threading
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, Generator, List, Optional, Tuple
 
 import concurrent
 from .. import logger_get
@@ -75,6 +75,39 @@ def setup_gst_environment(*plugin_dirs):
     return gi
 
 
+@contextmanager
+def map_gst_buffer(buf_or_sample: "Gst.Buffer | Gst.Sample", readonly: bool = True):
+    """Map a `Gst.Buffer` (or extract one from a `Gst.Sample`), yield the raw data, then unmap.
+
+    Args:
+        buf_or_sample: A `Gst.Buffer` to map directly, or a `Gst.Sample` whose
+            buffer will be extracted and mapped.
+        readonly: When ``True`` (default), map with READ-only access.
+            When ``False``, map with READ+WRITE access.
+
+    Yields:
+        A ``memoryview`` of the mapped buffer data.
+
+    Raises:
+        RuntimeError: If the buffer cannot be mapped.
+    """
+    from gi.repository import Gst
+
+    buf = (
+        buf_or_sample.get_buffer()
+        if isinstance(buf_or_sample, Gst.Sample)
+        else buf_or_sample
+    )
+    flags = Gst.MapFlags.READ if readonly else Gst.MapFlags.READ | Gst.MapFlags.WRITE
+    ok, mapinfo = buf.map(flags)
+    if not ok:
+        raise RuntimeError("Failed to map GStreamer buffer")
+    try:
+        yield mapinfo.data
+    finally:
+        buf.unmap(mapinfo)
+
+
 class GstPipelineHandler:
     """Manages a single GStreamer pipeline lifecycle.
 
@@ -89,6 +122,60 @@ class GstPipelineHandler:
     _glib_loop = None
     _glib_loop_lock = threading.Lock()
 
+    class AppSink:
+        """Wraps a GStreamer appsink element with a sample queue.
+
+        Installs a `new-sample` callback on the appsink so that every decoded
+        frame is pulled and pushed into `queue` for downstream consumption.
+
+        Args:
+            name: Name of the `appsink` element in the pipeline.
+            handler: Owning `GstPipelineHandler` instance whose pipeline
+                contains the element.
+            queue_maxsize: Maximum number of samples buffered in the queue.
+                `0` means unlimited.
+            queue_drop: When `True`, the oldest sample is silently discarded
+                when the queue is full. When `False`, the producer blocks
+                until space is available.
+
+        Attributes:
+            name: Element name passed at construction.
+            queue: `streams.Stream` that receives `Gst.Sample` objects.
+                Yields samples as they arrive; a `None` sentinel is pushed
+                when the pipeline reaches EOS.
+        """
+
+        def __init__(
+            self,
+            name: str,
+            handler: "GstPipelineHandler",
+            *,
+            queue_maxsize: int,
+            queue_drop: bool,
+        ):
+            from gi.repository import Gst
+
+            self._Gst = Gst
+            self.name = name
+
+            element = handler._pipeline.get_by_name(name)
+            if element is None:
+                raise ValueError(f"appsink element '{name}' not found in pipeline")
+
+            from .. import streams
+
+            self.queue = streams.Stream(queue_maxsize, queue_drop)
+
+            element.set_property("emit-signals", True)
+            element.set_property("sync", False)
+            element.connect("new-sample", self._on_new_sample)
+
+        def _on_new_sample(self, appsink):
+            sample = appsink.emit("pull-sample")
+            if sample is not None:
+                self.queue.put(sample)
+            return self._Gst.FlowReturn.OK
+
     @classmethod
     def _ensure_main_loop(cls):
         from gi.repository import GLib
@@ -102,7 +189,37 @@ class GstPipelineHandler:
                     name="glib-main-loop",
                 ).start()
 
-    def __init__(self, pipeline_str, probe_element_name=""):
+    def __init__(
+        self,
+        pipeline_str,
+        probe_element_name="",
+        appsink_names: List[str] = [],
+        *,
+        appsink_queue_maxsize: int = 0,
+        appsink_queue_drop: bool = False,
+    ):
+        """Create and configure a GStreamer pipeline.
+
+        The pipeline is parsed and configured but not started. Call `start()` to
+        set it to PLAYING state.
+
+        Args:
+            pipeline_str: A gst-launch-style pipeline description string.
+            probe_element_name: Name of an element whose `src` pad will be probed
+                to measure throughput via `check()`. Leave empty to skip probing.
+            appsink_names: Names of `appsink` elements to wrap with `AppSink`
+                instances. The resulting objects are available in `self.appsinks`.
+            appsink_queue_maxsize: Maximum number of samples buffered in each
+                `AppSink` queue. `0` means unlimited. Defaults to `0`.
+            appsink_queue_drop: When `True`, the oldest sample is silently
+                discarded when the queue is full. When `False`, the producer
+                blocks until space is available. Defaults to `False`.
+
+        Raises:
+            ValueError: If `probe_element_name` is set but the element or its
+                `src` pad is not found, or if any name in `appsink_names` does
+                not match an element in the pipeline.
+        """
         from gi.repository import Gst
 
         self._Gst = Gst
@@ -123,12 +240,28 @@ class GstPipelineHandler:
                 raise ValueError(f"Element '{probe_element_name}' has no src pad")
             pad.add_probe(Gst.PadProbeType.BUFFER, self._on_buffer)
 
+        #: Dict of appsink name → AppSink
+        self.appsinks: Dict[str, GstPipelineHandler.AppSink] = {
+            name: GstPipelineHandler.AppSink(
+                name,
+                self,
+                queue_maxsize=appsink_queue_maxsize,
+                queue_drop=appsink_queue_drop,
+            )
+            for name in appsink_names
+        }
+
         def on_bus_message(bus, message):
             if message.type == Gst.MessageType.ERROR:
                 err, debug = message.parse_error()
                 self._pipeline.set_state(Gst.State.NULL)
                 if not self._future.done():
                     self._future.set_exception(RuntimeError(f"{err.message} ({debug})"))
+            elif message.type == Gst.MessageType.EOS:
+                for sink in self.appsinks.values():
+                    sink.queue.put(None)
+                if not self._future.done():
+                    self._future.set_result(None)
 
         bus = self._pipeline.get_bus()
         bus.add_signal_watch()
@@ -201,7 +334,7 @@ class GstElementBase:
     `__init__` creates all pads (SRC first so SINK pads can resolve `forward_to` by name), populates `self.sources`
     and `self.sinks`, then starts the worker thread.
 
-    `do_set_state` closes all sink queues and joins the worker thread when the element transitions to NULL.
+    `do_change_state` closes all sink queues and joins the worker thread when the element transitions to NULL.
     """
 
     # ------------------------------------------------------------------
@@ -243,6 +376,8 @@ class GstElementBase:
             *,
             forward_caps: bool = True,
             forward_eos: bool = True,
+            queue_maxsize: int = 10,
+            queue_drop: bool = True,
         ):
             from gi.repository import Gst
 
@@ -266,10 +401,32 @@ class GstElementBase:
             # Holds Gst.Buffer items; None is the stop sentinel.
             from .. import streams
 
-            self.queue = streams.Stream(10, True)
+            self.queue = streams.Stream(queue_maxsize, queue_drop)
 
         def is_initialized(self) -> bool:
             return self.width is not None and self.height is not None
+
+        @contextmanager
+        def map_buffer(
+            self,
+            buf: "Gst.Buffer",
+            readonly: bool = True,
+        ) -> "Generator[memoryview, None, None]":
+            """Context manager that maps *buf*, yields the raw data, then unmaps.
+
+            Args:
+                buf: The `Gst.Buffer` to map.
+                readonly: When ``True`` (default), map with READ-only access.
+                    When ``False``, map with READ+WRITE access.
+
+            Yields:
+                A ``memoryview`` of the mapped buffer data.
+
+            Raises:
+                RuntimeError: If the buffer cannot be mapped.
+            """
+            with map_gst_buffer(buf, readonly) as data:
+                yield data
 
         def _chain(self, pad: Gst.Pad, parent, buf: Gst.Buffer) -> Gst.FlowReturn:
             if self.stride is None:
@@ -300,6 +457,54 @@ class GstElementBase:
                 return self._forward_to.push_event(event)
 
             return True
+
+    class SrcPad:
+        """Wraps a GStreamer source pad with stream-start helpers.
+
+        Args:
+            element: Parent `Gst.Element` that owns this pad.
+            template_name: Name of the pad template (also used as the pad name).
+
+        Attributes:
+            pad: The underlying `Gst.Pad` added to the parent element.
+        """
+
+        def __init__(self, element: Gst.Element, template_name: str):
+            from gi.repository import Gst
+
+            self._Gst = Gst
+            self.pad = Gst.Pad.new_from_template(
+                element.get_pad_template(template_name), template_name
+            )
+            element.add_pad(self.pad)
+            self._stream_id = f"{element.get_name()}-{self.pad.get_name()}"
+
+        def push_event(self, event: Gst.Event) -> bool:
+            """Push an event downstream."""
+            return self.pad.push_event(event)
+
+        def start_stream(self) -> bool:
+            """Push `stream-start` and `segment` events on this pad.
+
+            Call once from the worker thread before pushing any buffers.
+            """
+            if not self.push_event(self._Gst.Event.new_stream_start(self._stream_id)):
+                return False
+            seg = self._Gst.Segment.new()
+            seg.init(self._Gst.Format.TIME)
+            return self.push_event(self._Gst.Event.new_segment(seg))
+
+        def stop_stream(self) -> bool:
+            """Push an EOS event on this pad to signal end of stream."""
+            return self.push_event(self._Gst.Event.new_eos())
+
+        def push_bytes(self, data: bytes) -> Gst.FlowReturn:
+            """Wrap *data* in a new `Gst.Buffer` and push it downstream."""
+            return self.pad.push(self._Gst.Buffer.new_wrapped(data))
+
+        def push(self, buf: Gst.Buffer) -> Gst.FlowReturn:
+            """Push a buffer downstream."""
+            return self.pad.push(buf)
 
     class PadDirection(Enum):
         """Direction of a pad template declared in `get_pads`."""
@@ -336,6 +541,11 @@ class GstElementBase:
             forward_to: Name of the SRC pad to forward events to. `None` disables forwarding entirely.
             forward_caps: Whether to forward CAPS events to `forward_to`.
             forward_eos: Whether to forward EOS events to `forward_to`.
+            queue_maxsize: Maximum number of buffers held in the sink queue.
+                `0` means unlimited. Defaults to `3`.
+            queue_drop: When `True`, the oldest buffer is silently discarded
+                when the queue is full. When `False`, the chain function blocks.
+                Defaults to `True`.
         """
 
         name: str
@@ -345,6 +555,9 @@ class GstElementBase:
         forward_to: Optional[str] = None
         forward_caps: bool = True
         forward_eos: bool = True
+        # Queue controls
+        queue_maxsize: int = 3
+        queue_drop: bool = True
 
     # ------------------------------------------------------------------
     # Subclass hook: build __gstmetadata__ / __gsttemplates__ automatically
@@ -352,6 +565,11 @@ class GstElementBase:
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
+
+        # Ensure do_change_state is in every concrete class's __dict__ so that
+        # GObject.type_register sees it as a virtual-method override.
+        if "do_change_state" not in cls.__dict__:
+            setattr(cls, "do_change_state", GstElementBase.do_change_state)
 
         # Only act when both classmethods are defined directly on this class,
         # so intermediate abstract layers are skipped gracefully.
@@ -395,8 +613,8 @@ class GstElementBase:
         from gi.repository import Gst
 
         self._Gst = Gst
-        #: Dict of SRC pad name → Gst.Pad
-        self.sources: Dict[str, Gst.Pad] = {}
+        #: Dict of SRC pad name → GstElementBase.SrcPad
+        self.sources: Dict[str, GstElementBase.SrcPad] = {}
         #: Dict of SINK pad name → GstElementBase.SinkPad
         self.sinks: Dict[str, GstElementBase.SinkPad] = {}
 
@@ -405,17 +623,14 @@ class GstElementBase:
         # Create SRC pads first so SINK pads can resolve forward_to by name.
         for info in pad_infos:
             if info.direction == GstElementBase.PadDirection.SRC:
-                pad = Gst.Pad.new_from_template(
-                    self.get_pad_template(info.name), info.name  # type: ignore[attr-defined]
-                )
-                self.add_pad(pad)  # type: ignore[attr-defined]
-                self.sources[info.name] = pad
+                src = GstElementBase.SrcPad(self, info.name)
+                self.sources[info.name] = src
 
         # Create SINK pads.
         for info in pad_infos:
             if info.direction == GstElementBase.PadDirection.SINK:
                 forward_pad = (
-                    self.sources.get(info.forward_to)
+                    self.sources[info.forward_to].pad
                     if info.forward_to is not None
                     else None
                 )
@@ -425,8 +640,13 @@ class GstElementBase:
                     forward_to=forward_pad,
                     forward_caps=info.forward_caps,
                     forward_eos=info.forward_eos,
+                    queue_maxsize=info.queue_maxsize,
+                    queue_drop=info.queue_drop,
                 )
                 self.sinks[info.name] = sink
+
+        # Gate for source elements: set when the element reaches PLAYING.
+        self._playing_event = threading.Event()
 
         # Start worker thread.
         self._worker = threading.Thread(
@@ -478,17 +698,76 @@ class GstElementBase:
             f"{type(self).__name__} must implement _worker_func()"
         )
 
+    def wait_for_playing(self) -> None:
+        """Block until the element reaches PLAYING state.
+
+        Source elements (no sink pads) should call this at the top of
+        `_worker_func` to avoid pushing data while pads are still flushing.
+        """
+        self._playing_event.wait()
+
+    # ------------------------------------------------------------------
+    # Registration
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def register(
+        cls,
+        name: Optional[str] = None,
+    ) -> bool:
+        """Register this element class with GStreamer.
+
+        Calls `GObject.type_register` to expose the class to the GObject type
+        system, then calls `Gst.Element.register` to make it available as a
+        GStreamer element factory.
+
+        Args:
+            name: Factory name used to instantiate the element (e.g. `"myelement"`).  Defaults to the class name
+                converted to lower-case.
+
+        Returns:
+            `True` on success, `False` otherwise.
+        """
+        from gi.repository import GObject, Gst
+
+        if name is None:
+            name = cls.__name__.lower()
+
+        GObject.type_register(cls)
+        return Gst.Element.register(None, name, Gst.Rank.NONE, cls)
+
     # ------------------------------------------------------------------
     # State management
     # ------------------------------------------------------------------
 
-    def do_set_state(self, state: Gst.State) -> Gst.StateChangeReturn:
-        """Override: close sink queues and join worker thread on NULL transition."""
-        if state == self._Gst.State.NULL:
+    def do_change_state(self, transition: Gst.StateChange) -> Gst.StateChangeReturn:
+        """Start/stop worker resources on explicit GStreamer state transitions."""
+
+        if transition == self._Gst.StateChange.PAUSED_TO_PLAYING:
+            self._playing_event.set()
+
+        elif transition == self._Gst.StateChange.PLAYING_TO_PAUSED:
+            self._playing_event.clear()
+
+        ret = self._Gst.Element.do_change_state(self, transition)
+        if ret == self._Gst.StateChangeReturn.FAILURE:
+            return ret
+
+        if transition == self._Gst.StateChange.READY_TO_PAUSED and not self.sinks:
+            # Live sources (no sink pads) must report NO_PREROLL so the
+            # pipeline does not wait for preroll data before going to PLAYING.
+            ret = self._Gst.StateChangeReturn.NO_PREROLL
+
+        elif transition == self._Gst.StateChange.PAUSED_TO_READY:
+            self._playing_event.set()  # unblock worker if it is waiting
+
             for sink in self.sinks.values():
                 sink.queue.close()
-            self._worker.join(timeout=2.0)
-        return super().do_set_state(state)  # type: ignore[misc]
+
+            if self._worker.is_alive():
+                self._worker.join(timeout=2.0)
+
+        return ret
 
 
 def _run_command(
