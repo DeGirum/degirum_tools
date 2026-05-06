@@ -62,6 +62,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Tuple
 
@@ -92,6 +93,8 @@ def _detect_camera_type(device_index: int) -> str:
     Detect camera type using multiple methods
     Returns: 'rpi_csi', 'usb', or 'unknown'
     """
+    if sys.platform == "win32":
+        return "usb"
     device_path = f"/dev/video{device_index}"
     if not os.path.exists(device_path):
         raise FileNotFoundError(f"Camera device {device_path} not found")
@@ -179,6 +182,8 @@ def _check_element_exists(element_name: str) -> bool:
 
 def _detect_platform() -> str:
     """Simple platform detection"""
+    if sys.platform == "win32":
+        return "windows"
     try:
         # Check device tree for ARM devices
         model_path = Path("/proc/device-tree/model")
@@ -230,7 +235,7 @@ def _is_gstreamer_pipeline(source: str) -> bool:
     has_gst_element = any(indicator in source.lower() for indicator in gst_indicators)
     # Additional check: should not look like a simple file path or URL
     is_url = source.startswith(("http://", "https://", "rtsp://", "rtmp://"))
-    is_absolute_path = source.startswith("/")
+    is_absolute_path = os.path.isabs(source)
     is_relative_path = source.startswith("./") or source.startswith("../")
     has_dot = "." in source
     has_one_dot = len(source.split(".")) == 2
@@ -280,6 +285,7 @@ def build_gst_pipeline(source):
         >>> build_gst_pipeline("v4l2src ! videoconvert ! appsink")
         'v4l2src ! videoconvert ! appsink'
     """
+
     platform = _detect_platform()
     format = "BGR"  # Default format for OpenCV compatibility
 
@@ -298,10 +304,21 @@ def build_gst_pipeline(source):
     else:
         # Not a camera source, skip to other checks
         device_index = None
+
     if device_index is not None:
+
         device = _detect_camera_type(device_index)
         logger_get().info(f"Detected platform: {platform}, camera type: {device}")
-        if device == "rpi_csi" and platform == "raspberrypi":
+
+        if platform == "windows":
+            # Windows: prefer Media Foundation source, fall back to KernelStreaming
+            if _check_element_exists("mfvideosrc"):
+                logger_get().info("Using mfvideosrc for Windows camera")
+                return f"mfvideosrc device-index={device_index} ! videoconvert ! video/x-raw,format={format} ! appsink name=sink"
+            else:
+                logger_get().info("Using ksvideosrc for Windows camera")
+                return f"ksvideosrc device-index={device_index} ! videoconvert ! video/x-raw,format={format} ! appsink name=sink"
+        elif device == "rpi_csi" and platform == "raspberrypi":
             # Raspberry Pi CSI Camera
             if _check_element_exists("libcamerasrc"):
                 logger_get().info("Using libcamerasrc for RPi CSI camera")
@@ -329,9 +346,11 @@ def build_gst_pipeline(source):
     # 2. if source is str (and not RTSP, not digits, not custom pipeline)
     elif isinstance(source, str) and os.path.exists(source):
         logger_get().info(f"Building file pipeline for: {source}")
+        # Normalize path separators for GStreamer (use forward slashes on all platforms)
+        location = source.replace("\\", "/")
         # Always use decodebin for maximum compatibility
         return (
-            f'filesrc location="{source}" ! '
+            f'filesrc location="{location}" ! '
             f"decodebin ! videoconvert ! videoscale ! "
             f"video/x-raw, format={format} ! "
             f"appsink name=sink"

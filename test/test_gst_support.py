@@ -7,12 +7,13 @@
 
 import struct
 import threading
-from typing import List
-
 import pytest
+from unittest.mock import patch
+from typing import List
+from pathlib import Path
 
 
-def test_gst_support():
+def test_gst_pipeline_handler():
     """Test setup_gst_environment, GstPipelineHandler, and GstElementBase."""
 
     # ------------------------------------------------------------------
@@ -222,3 +223,172 @@ def test_gst_support():
         assert not t.is_alive(), "Concurrent pipeline thread timed out"
 
     assert not concurrent_errors, f"Concurrent pipeline errors: {concurrent_errors}"
+
+
+def test_gst_pipeline_builder(tmp_path):
+    """Test build_gst_pipeline"""
+
+    from degirum_tools.gst import build_gst_pipeline
+
+    # --- Custom GStreamer pipeline strings are returned unchanged ---
+    custom = "v4l2src ! videoconvert ! appsink name=sink"
+    assert build_gst_pipeline(custom) == custom
+
+    custom_complex = "videotestsrc ! video/x-raw,format=BGR ! appsink name=out"
+    assert build_gst_pipeline(custom_complex) == custom_complex
+
+    # --- RTSP URLs produce an rtspsrc-based pipeline ---
+    url = "rtsp://192.168.1.10/stream"
+    result = build_gst_pipeline(url)
+    assert f'rtspsrc location="{url}"' in result
+    assert "decodebin" in result
+    assert "appsink" in result
+    assert "media=video" in result  # audio-isolation cap filter
+    assert "format=BGR" in result
+
+    # RTSP detection is case-insensitive
+    result = build_gst_pipeline("RTSP://CAM/stream")
+    assert "rtspsrc" in result
+    assert "format=BGR" in result
+
+    # --- File paths produce a filesrc ! decodebin pipeline ---
+    video_file = tmp_path / "clip.mp4"
+    video_file.write_bytes(b"")
+    result = build_gst_pipeline(str(video_file))
+    assert "filesrc" in result
+    assert "decodebin" in result
+    assert "appsink" in result
+    assert "format=BGR" in result
+    # GStreamer requires forward slashes in location even on Windows
+    location = result.split('location="')[1].split('"')[0]
+    assert "\\" not in location
+
+    # Nested subdirectory path also uses forward slashes
+    nested = tmp_path / "subdir" / "video.avi"
+    nested.parent.mkdir(parents=True, exist_ok=True)
+    nested.write_bytes(b"")
+    nested_result = build_gst_pipeline(str(nested))
+    location = nested_result.split('location="')[1].split('"')[0]
+    assert "\\" not in location
+    assert "format=BGR" in nested_result
+
+    # --- Unknown sources raise ValueError ---
+    with pytest.raises(ValueError):
+        build_gst_pipeline("/nonexistent/does_not_exist.mp4")
+    with pytest.raises(ValueError):
+        build_gst_pipeline("totally_unknown_source")
+
+    _PB = "degirum_tools.gst.pipeline_builder"
+
+    # --- Camera: Windows, mfvideosrc available ---
+    with (
+        patch(f"{_PB}._detect_platform", return_value="windows"),
+        patch(f"{_PB}._detect_camera_type", return_value="usb"),
+        patch(f"{_PB}._check_element_exists", return_value=True),
+    ):
+        result = build_gst_pipeline(0)
+    assert (
+        "mfvideosrc" in result
+        and "device-index=0" in result
+        and "appsink" in result
+        and "format=BGR" in result
+    )
+
+    # --- Camera: Windows, fallback to ksvideosrc ---
+    with (
+        patch(f"{_PB}._detect_platform", return_value="windows"),
+        patch(f"{_PB}._detect_camera_type", return_value="usb"),
+        patch(f"{_PB}._check_element_exists", return_value=False),
+    ):
+        result = build_gst_pipeline(2)
+    assert (
+        "ksvideosrc" in result
+        and "device-index=2" in result
+        and "appsink" in result
+        and "format=BGR" in result
+    )
+
+    # --- Camera: Linux generic USB ---
+    with (
+        patch(f"{_PB}._detect_platform", return_value="generic"),
+        patch(f"{_PB}._detect_camera_type", return_value="usb"),
+    ):
+        result = build_gst_pipeline(1)
+    assert (
+        "v4l2src" in result
+        and "device=/dev/video1" in result
+        and "appsink" in result
+        and "format=BGR" in result
+    )
+
+    # Digit string is treated as a device index
+    with (
+        patch(f"{_PB}._detect_platform", return_value="generic"),
+        patch(f"{_PB}._detect_camera_type", return_value="usb"),
+    ):
+        result = build_gst_pipeline("3")
+    assert (
+        "v4l2src" in result
+        and "device=/dev/video3" in result
+        and "format=BGR" in result
+    )
+
+    # --- Camera: Raspberry Pi CSI, libcamerasrc available ---
+    with (
+        patch(f"{_PB}._detect_platform", return_value="raspberrypi"),
+        patch(f"{_PB}._detect_camera_type", return_value="rpi_csi"),
+        patch(f"{_PB}._check_element_exists", return_value=True),
+    ):
+        result = build_gst_pipeline(0)
+    assert "libcamerasrc" in result and "appsink" in result and "format=BGR" in result
+
+    # --- Camera: Raspberry Pi CSI, fallback to v4l2src ---
+    with (
+        patch(f"{_PB}._detect_platform", return_value="raspberrypi"),
+        patch(f"{_PB}._detect_camera_type", return_value="rpi_csi"),
+        patch(f"{_PB}._check_element_exists", return_value=False),
+    ):
+        result = build_gst_pipeline(0)
+    assert (
+        "v4l2src" in result
+        and "device=/dev/video0" in result
+        and "format=BGR" in result
+    )
+
+
+def test_gst_open_video_stream():
+    """Test open_video_stream() with use_gstreamer=True on a video file."""
+
+    from degirum_tools.tools.video_support import (
+        open_video_stream,
+        video_source,
+        VideoCaptureGst,
+    )
+
+    # Skip if GStreamer is not available
+    try:
+        from degirum_tools.gst import setup_gst_environment
+
+        setup_gst_environment()
+    except ImportError:
+        pytest.skip("gi module not available")
+
+    VIDEO_FILE = str(Path(__file__).parent / "images" / "Traffic2_short.mp4")
+
+    # Verify open_video_stream does not raise and returns a VideoCaptureGst object
+    with open_video_stream(VIDEO_FILE, use_gstreamer=True) as stream:
+        assert isinstance(
+            stream, VideoCaptureGst
+        ), f"Expected VideoCaptureGst, got {type(stream)}"
+
+        # Read all frames via GStreamer
+        gst_frames = sum(1 for _ in video_source(stream))
+
+    # Read all frames via OpenCV baseline
+    with open_video_stream(VIDEO_FILE, use_gstreamer=False) as stream_cv:
+        cv_frames = sum(1 for _ in video_source(stream_cv))
+
+    assert gst_frames > 0, "GStreamer read zero frames"
+    assert (
+        gst_frames == cv_frames
+    ), f"Frame count mismatch: GStreamer={gst_frames}, OpenCV={cv_frames}"
