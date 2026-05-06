@@ -73,7 +73,7 @@ from typing import (
 )
 
 from typing_extensions import TypeGuard
-from ..gst import build_gst_pipeline, setup_gst_environment
+from ..gst import build_gst_pipeline, setup_gst_environment, GstPipelineHandler
 from enum import Enum
 
 
@@ -147,39 +147,33 @@ class VideoCaptureGst:
         """Initialize GStreamer pipeline from string.
 
         Args:
-            pipeline_str: GStreamer pipeline string
+            pipeline_str: GStreamer pipeline string, must include an appsink named "sink".
         """
-        print(f"Initializing VideoCaptureGst with pipeline: {pipeline_str}")
         self._ensure_gst()
 
-        from gi.repository import Gst, GLib
+        from gi.repository import Gst
 
         self._Gst = Gst
 
         try:
-            self._pipeline = self._Gst.parse_launch(pipeline_str)
-        except GLib.Error as e:
+            self._handler = GstPipelineHandler(
+                pipeline_str,
+                appsink_names=["sink"],
+                appsink_queue_maxsize=5,
+                appsink_queue_drop=True,
+            )
+        except ValueError as e:
+            raise Exception(
+                f"Invalid GStreamer pipeline (no appsink): {pipeline_str}"
+            ) from e
+        except Exception as e:
             raise Exception(f"Invalid GStreamer pipeline: {pipeline_str}") from e
 
-        self._appsink = self._pipeline.get_by_name("sink")
-        if not self._appsink:
-            raise Exception(f"Invalid GStreamer pipeline (no appsink): {pipeline_str}")
+        self._handler.start(wait_timeout_s=15.0)
 
-        self._appsink.set_property("emit-signals", True)
-        # Live sources (RTSP/cameras) need sync=False to avoid blocking the
-        # PAUSED→PLAYING transition while waiting for a clock reference.
-        self._appsink.set_property("sync", False)
-        self._appsink.set_property("drop", True)
-        self._appsink.set_property("max-buffers", 5)
-        self._pipeline.set_state(self._Gst.State.PLAYING)
-
-        # RTSP connections need more time to negotiate and start streaming.
-        state_change_result = self._pipeline.get_state(15 * self._Gst.SECOND)
-        if state_change_result[1] != self._Gst.State.PLAYING:
-            raise Exception(f"GStreamer pipeline failed to start: {pipeline_str}")
+        self._appsink = self._handler.appsinks["sink"]
 
         self._running = True
-        # Add initialization flags
         self._initialized = False
         self._frame_format = None
         self._frame_width: Optional[int] = None
@@ -277,8 +271,8 @@ class VideoCaptureGst:
         """
         if not self._running:
             return False, None
-        sample = self._appsink.emit("pull-sample")
-        if not sample:
+        sample = self._appsink.queue.get()
+        if sample is None:
             self._running = False
             return False, None
 
@@ -348,8 +342,8 @@ class VideoCaptureGst:
         Returns:
             Property value or None if not available
         """
-        pad = self._appsink.get_static_pad("sink")
-        caps = pad.get_current_caps()
+
+        caps = self._appsink.sink_pad.get_current_caps()
         if not caps:
             return None
 
@@ -366,8 +360,7 @@ class VideoCaptureGst:
             return 30.0  # Default fallback
         elif prop == cv2.CAP_PROP_FRAME_COUNT:
             # For files, try to get duration
-
-            duration = self._pipeline.query_duration(self._Gst.Format.TIME)
+            duration = self._handler.pipeline.query_duration(self._Gst.Format.TIME)
             if duration[0]:
                 fps = self.get(cv2.CAP_PROP_FPS)
                 return int((duration[1] / self._Gst.SECOND) * fps)
@@ -410,7 +403,7 @@ class VideoCaptureGst:
     def release(self):
         """Release the GStreamer pipeline."""
         if self._running:
-            self._pipeline.set_state(self._Gst.State.NULL)
+            self._handler.stop()
             self._running = False
 
 

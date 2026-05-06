@@ -104,6 +104,7 @@ class GstPipelineHandler:
 
         Attributes:
             name: Element name passed at construction.
+            element: The underlying ``appsink`` ``Gst.Element``.
             queue: `streams.Stream` that receives `Gst.Sample` objects.
                 Yields samples as they arrive; a `None` sentinel is pushed
                 when the pipeline reaches EOS.
@@ -122,23 +123,28 @@ class GstPipelineHandler:
             self._Gst = Gst
             self.name = name
 
-            element = handler._pipeline.get_by_name(name)
-            if element is None:
+            self.element = handler._pipeline.get_by_name(name)
+            if self.element is None:
                 raise ValueError(f"appsink element '{name}' not found in pipeline")
 
             from .. import streams
 
             self.queue = streams.Stream(queue_maxsize, queue_drop)
 
-            element.set_property("emit-signals", True)
-            element.set_property("sync", False)
-            element.connect("new-sample", self._on_new_sample)
+            self.element.set_property("emit-signals", True)
+            self.element.set_property("sync", False)
+            self.element.connect("new-sample", self._on_new_sample)
 
         def _on_new_sample(self, appsink):
             sample = appsink.emit("pull-sample")
             if sample is not None:
                 self.queue.put(sample)
             return self._Gst.FlowReturn.OK
+
+        @property
+        def sink_pad(self):
+            """The static sink pad of the appsink element."""
+            return self.element.get_static_pad("sink")
 
     @classmethod
     def _ensure_main_loop(cls):
@@ -231,10 +237,27 @@ class GstPipelineHandler:
         bus.add_signal_watch()
         bus.connect("message", on_bus_message)
 
-    def start(self):
-        """Start the pipeline. Returns self for chaining."""
+    def start(self, wait_timeout_s: float = 0.0):
+        """Start the pipeline. Returns self for chaining.
+
+        Args:
+            wait_timeout_s: If > 0, block until the pipeline reaches PLAYING state
+                or the timeout elapses, then raise ``RuntimeError`` if the state was
+                not reached. Defaults to ``0.0`` (no wait).
+
+        Raises:
+            RuntimeError: If ``wait_timeout_s`` > 0 and the pipeline did not reach
+                PLAYING within the specified timeout.
+        """
         self._ensure_main_loop()
         self._pipeline.set_state(self._Gst.State.PLAYING)
+        if wait_timeout_s > 0:
+            timeout_ns = int(wait_timeout_s * self._Gst.SECOND)
+            _, state, _ = self._pipeline.get_state(timeout_ns)
+            if state != self._Gst.State.PLAYING:
+                raise RuntimeError(
+                    f"Pipeline did not reach PLAYING state within {wait_timeout_s}s"
+                )
         return self
 
     def _on_buffer(self, pad, info):
@@ -262,6 +285,11 @@ class GstPipelineHandler:
             RuntimeError: On pipeline error.
         """
         self._future.result()
+
+    @property
+    def pipeline(self):
+        """The underlying ``Gst.Pipeline`` object."""
+        return self._pipeline
 
     def stop(self):
         """Gracefully stop the pipeline."""
