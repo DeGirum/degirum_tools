@@ -62,6 +62,11 @@ setup(
         "notifications": ["apprise", "minio"],
         # annotation tool
         "annotator": ["tk"],
+        # GStreamer support
+        "gst": [
+            "PyGObject; platform_system == 'Linux'",
+            "gstreamer-bundle; platform_system == 'Windows'",
+        ],
     },
     include_package_data=True,
 )

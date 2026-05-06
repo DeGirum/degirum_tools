@@ -18,7 +18,7 @@ def test_gst_support():
     # ------------------------------------------------------------------
     # 1. Initialise GStreamer
     # ------------------------------------------------------------------
-    from degirum_tools.tools.gst_support import (
+    from degirum_tools.gst import (
         GstElementBase,
         GstPipelineHandler,
         map_gst_buffer,
@@ -127,7 +127,7 @@ def test_gst_support():
                     (value,) = struct.unpack(">Q", bytes(data))
 
                 # Push doubled value
-                ret = src_double.push_bytes(struct.pack(">Q", value * 2))
+                src_double.push_bytes(struct.pack(">Q", value * 2))
 
                 # Push string representation (may return NOT_LINKED
                 # when src_string is not connected in the pipeline).

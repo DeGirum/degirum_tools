@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 # Ensure we use the local development version, not the installed one
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
 def test_gstreamer():
@@ -39,10 +39,10 @@ def test_gstreamer():
         Gst.init(None)
     version = Gst.version_string()
     assert isinstance(version, str)
-    assert version.count('.') >= 2
+    assert version.count(".") >= 2
 
     # Test 4: Test GStreamer pipeline builder for file sources
-    from degirum_tools.tools.gst_support import build_gst_pipeline
+    from degirum_tools.gst import build_gst_pipeline
 
     # Create a dummy file for testing
     test_file = "test_video.mp4"
@@ -70,4 +70,8 @@ def test_gstreamer():
 
     # Verify the error message contains expected text
     error_msg = str(exc_info.value)
-    assert "Error opening" in error_msg or "not found" in error_msg or "Unknown source type" in error_msg
+    assert (
+        "Error opening" in error_msg
+        or "not found" in error_msg
+        or "Unknown source type" in error_msg
+    )

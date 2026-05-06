@@ -73,7 +73,7 @@ from typing import (
 )
 
 from typing_extensions import TypeGuard
-from .gst_support import build_gst_pipeline, setup_gst_environment
+from ..gst import build_gst_pipeline, setup_gst_environment
 from enum import Enum
 
 
