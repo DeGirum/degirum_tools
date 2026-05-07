@@ -392,3 +392,213 @@ def test_gst_open_video_stream():
     assert (
         gst_frames == cv_frames
     ), f"Frame count mismatch: GStreamer={gst_frames}, OpenCV={cv_frames}"
+
+
+def test_gst_element_properties():
+    """Test GstElementBase GObject property support.
+
+    Covers:
+    - All scalar types (bool, int, float, str) and Python-object type.
+    - Default values after element creation.
+    - Round-trip via set_property / get_property.
+    - Round-trip via gi props attribute shorthand (el.props.xxx).
+    - Direct access to the internal _props dict.
+    - Values set from a pipeline string.
+    """
+
+    from degirum_tools.gst import (
+        GstElementBase,
+        GstPipelineHandler,
+        setup_gst_environment,
+    )
+
+    try:
+        setup_gst_environment()
+    except ImportError:
+        pytest.skip("gi not available")
+
+    from gi.repository import Gst
+
+    _CAPS = "application/x-raw"
+
+    class PropTestElement(GstElementBase, Gst.Element):
+        """Sink-only element exposing all property types for testing."""
+
+        @classmethod
+        def get_metadata(cls) -> GstElementBase.ElementMetadata:
+            return GstElementBase.ElementMetadata(
+                longname="Prop Test Element",
+                klass="Sink",
+                description="Element for testing GObject property support",
+                author="Test",
+            )
+
+        @classmethod
+        def get_pads(cls) -> List[GstElementBase.PadInfo]:
+            return [
+                GstElementBase.PadInfo(
+                    name="sink",
+                    direction=GstElementBase.PadDirection.SINK,
+                    caps=_CAPS,
+                )
+            ]
+
+        @classmethod
+        def get_properties(cls) -> List[GstElementBase.PropInfo]:
+            return [
+                GstElementBase.PropInfo("prop-bool", False, "Boolean property"),
+                GstElementBase.PropInfo(
+                    "prop-int", 0, "Integer property", min=-1000, max=1000
+                ),
+                GstElementBase.PropInfo("prop-float", 0.0, "Float property"),
+                GstElementBase.PropInfo("prop-str", "", "String property"),
+                GstElementBase.PropInfo("prop-obj", None, "Python-object property"),
+            ]
+
+        def _worker_func(self) -> None:
+            self.wait_for_playing()
+            for _ in self.sinks["sink"].queue:
+                pass
+
+    PROPS_ELEMENT = "test_proptestelem"
+    assert PropTestElement.register(PROPS_ELEMENT)
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def assert_props(el, expected: dict):
+        """Assert all expected values via get_property, gi shorthand, and _props."""
+        for hyphen_name, value in expected.items():
+            underscore_name = hyphen_name.replace("-", "_")
+
+            actual_get = el.get_property(hyphen_name)
+            actual_gi = getattr(el.props, underscore_name)
+            actual_dict = el._props[underscore_name]
+
+            for actual, label in [
+                (actual_get, "get_property"),
+                (actual_gi, "props shorthand"),
+                (actual_dict, "_props dict"),
+            ]:
+                if isinstance(value, float):
+                    assert (
+                        abs(actual - value) < 1e-9
+                    ), f"{hyphen_name} via {label}: expected {value}, got {actual}"
+                else:
+                    assert (
+                        actual == value
+                    ), f"{hyphen_name} via {label}: expected {value!r}, got {actual!r}"
+
+    def set_props_api(el, values: dict):
+        """Set properties via set_property."""
+        for name, value in values.items():
+            el.set_property(name, value)
+
+    def set_props_gi(el, values: dict):
+        """Set properties via gi props shorthand."""
+        for hyphen_name, value in values.items():
+            setattr(el.props, hyphen_name.replace("-", "_"), value)
+
+    # ------------------------------------------------------------------
+    # 1. Default values after element creation
+    # ------------------------------------------------------------------
+    el = Gst.ElementFactory.make(PROPS_ELEMENT, "el_defaults")
+    assert el is not None
+
+    assert_props(
+        el,
+        {
+            "prop-bool": False,
+            "prop-int": 0,
+            "prop-float": 0.0,
+            "prop-str": "",
+            "prop-obj": None,
+        },
+    )
+
+    # ------------------------------------------------------------------
+    # 2. Round-trip via set_property / get_property
+    # ------------------------------------------------------------------
+    set_props_api(
+        el,
+        {
+            "prop-bool": True,
+            "prop-int": 42,
+            "prop-float": 3.14,
+            "prop-str": "hello",
+            "prop-obj": [1, 2, 3],
+        },
+    )
+    assert_props(
+        el,
+        {
+            "prop-bool": True,
+            "prop-int": 42,
+            "prop-float": 3.14,
+            "prop-str": "hello",
+            "prop-obj": [1, 2, 3],
+        },
+    )
+
+    # ------------------------------------------------------------------
+    # 3. Round-trip via gi props shorthand
+    # ------------------------------------------------------------------
+    set_props_gi(
+        el,
+        {
+            "prop-bool": False,
+            "prop-int": -7,
+            "prop-float": 2.718,
+            "prop-str": "world",
+            "prop-obj": {"key": "value"},
+        },
+    )
+    assert_props(
+        el,
+        {
+            "prop-bool": False,
+            "prop-int": -7,
+            "prop-float": 2.718,
+            "prop-str": "world",
+            "prop-obj": {"key": "value"},
+        },
+    )
+
+    # ------------------------------------------------------------------
+    # 4. Values set from a pipeline string (scalar types only)
+    # ------------------------------------------------------------------
+    # Wrap in a GstPipelineHandler so element() can retrieve by name.
+    pipe_str = (
+        f"{PROPS_ELEMENT} name=pe "
+        f"prop-bool=true prop-int=99 prop-float=1.5 prop-str=pipeline"
+    )
+    handler = GstPipelineHandler(pipe_str)
+    pe = handler.element("pe")
+
+    assert_props(
+        pe,
+        {
+            "prop-bool": True,
+            "prop-int": 99,
+            "prop-float": 1.5,
+            "prop-str": "pipeline",
+            # Object property is not settable from a pipeline string; default must be kept.
+            "prop-obj": None,
+        },
+    )
+
+    pe.props.prop_bool = False
+    pe.props.prop_int = -123
+    pe.props.prop_float = 0.001
+    pe.props.prop_str = "modified"
+    assert_props(
+        pe,
+        {
+            "prop-bool": False,
+            "prop-int": -123,
+            "prop-float": 0.001,
+            "prop-str": "modified",
+            "prop-obj": None,
+        },
+    )

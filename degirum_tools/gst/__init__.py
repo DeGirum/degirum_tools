@@ -16,7 +16,7 @@ sources.
 
 Key Features
 
-- One-call GStreamer environment initialisation with optional custom plugin discovery.
+- One-call GStreamer environment initialization with optional custom plugin discovery.
 - ``GstPipelineHandler`` for launching, monitoring, and gracefully stopping pipelines.
 - ``GstElementBase`` mixin for implementing custom GStreamer Python elements with minimal
   boilerplate: pad templates, worker threads, and state management are handled

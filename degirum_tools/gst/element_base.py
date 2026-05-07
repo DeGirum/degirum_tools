@@ -86,6 +86,8 @@ Public API
 - ``GstElementBase.ElementMetadata`` — dataclass describing element identity for GStreamer registration.
 - ``GstElementBase.PadInfo`` — dataclass describing a pad template.
 - ``GstElementBase.PadDirection`` — enum selecting ``SINK`` or ``SRC``.
+- ``GstElementBase.PropInfo`` — dataclass describing a GObject property.
+- ``GstElementBase.get_properties()`` — return a list of ``PropInfo`` instances (optional override).
 - ``GstElementBase.register(name)`` — register the element class with GStreamer.
 - ``GstElementBase.wait_for_playing()`` — block until the element reaches ``PLAYING`` state.
 """
@@ -96,7 +98,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 import threading
-from typing import TYPE_CHECKING, Dict, Generator, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, Generator, List, Optional
 
 if TYPE_CHECKING:
     from gi.repository import Gst
@@ -387,6 +389,44 @@ class GstElementBase:
         queue_maxsize: int = 3
         queue_drop: bool = True
 
+    @dataclass
+    class PropInfo:
+        """Descriptor for a single GObject property returned by `get_properties`.
+
+        The GObject type is inferred from `default`:
+
+        * `bool`  → ``G_TYPE_BOOLEAN``
+        * `int`   → ``G_TYPE_INT64``
+        * `float` → ``G_TYPE_DOUBLE``
+        * `str`   → ``G_TYPE_STRING``
+        * anything else (including `None`) → ``G_TYPE_PYOBJECT``
+
+        Scalar properties (bool/int/float/str) are settable from a pipeline
+        string.  Python-object properties are only settable from Python code.
+
+        Attributes:
+            name: GObject property name.  Hyphens are allowed (``"model-path"``).
+            default: Default value.  Its type determines the GObject type.
+            desc: Human-readable description shown by ``gst-inspect``.
+            min: Lower bound for numeric properties.  ``None`` uses the type minimum.
+            max: Upper bound for numeric properties.  ``None`` uses the type maximum.
+        """
+
+        name: str
+        default: Any
+        desc: str = ""
+        min: Any = None
+        max: Any = None
+
+        def _resolved_type(self) -> type:
+            """Return the Python type used for GObject type mapping."""
+            t = type(self.default)
+            return t if t in (bool, int, float, str) else object
+
+        def _prop_key(self) -> str:
+            """Return the Python-safe key (hyphens → underscores)."""
+            return self.name.replace("-", "_")
+
     # ------------------------------------------------------------------
     # Subclass hook: build __gstmetadata__ / __gsttemplates__ automatically
     # ------------------------------------------------------------------
@@ -399,12 +439,13 @@ class GstElementBase:
         if "do_change_state" not in cls.__dict__:
             setattr(cls, "do_change_state", GstElementBase.do_change_state)
 
-        # Only act when both classmethods are defined directly on this class,
-        # so intermediate abstract layers are skipped gracefully.
-        if "get_metadata" not in cls.__dict__ or "get_pads" not in cls.__dict__:
+        if (
+            cls.get_metadata is GstElementBase.get_metadata
+            or cls.get_pads is GstElementBase.get_pads
+        ):
             return
 
-        from gi.repository import Gst
+        from gi.repository import GObject, Gst
 
         meta = cls.get_metadata()
         cls.__gstmetadata__ = (
@@ -430,6 +471,62 @@ class GstElementBase:
                 )
             )
         cls.__gsttemplates__ = tuple(templates)
+
+        # Build __gproperties__ from get_properties() if overridden.
+        props = cls.get_properties()
+        if props:
+            import sys
+
+            gprops: Dict[str, Any] = {}
+            for p in props:
+                t = p._resolved_type()
+                flags = GObject.ParamFlags.READWRITE
+                if t is object:
+                    gprops[p.name] = (object, p.name, p.desc, flags)
+                elif t is str:
+                    gprops[p.name] = (str, p.name, p.desc, p.default or "", flags)
+                elif t is bool:
+                    gprops[p.name] = (bool, p.name, p.desc, bool(p.default), flags)
+                elif t is float:
+                    lo = p.min if p.min is not None else -1e308
+                    hi = p.max if p.max is not None else 1e308
+                    gprops[p.name] = (
+                        float,
+                        p.name,
+                        p.desc,
+                        lo,
+                        hi,
+                        float(p.default),
+                        flags,
+                    )
+                elif t is int:
+                    lo = p.min if p.min is not None else -sys.maxsize
+                    hi = p.max if p.max is not None else sys.maxsize
+                    gprops[p.name] = (
+                        int,
+                        p.name,
+                        p.desc,
+                        lo,
+                        hi,
+                        int(p.default),
+                        flags,
+                    )
+            cls.__gproperties__ = gprops  # type: ignore[attr-defined]
+
+            # Inject do_get_property / do_set_property if not already defined.
+            if "do_get_property" not in cls.__dict__:
+
+                def _do_get_property(self, prop):
+                    return self._props.get(prop.name.replace("-", "_"))
+
+                cls.do_get_property = _do_get_property  # type: ignore[attr-defined]
+
+            if "do_set_property" not in cls.__dict__:
+
+                def _do_set_property(self, prop, value):
+                    self._props[prop.name.replace("-", "_")] = value
+
+                cls.do_set_property = _do_set_property  # type: ignore[attr-defined]
 
     # ------------------------------------------------------------------
     # Constructor
@@ -473,6 +570,11 @@ class GstElementBase:
                 )
                 self.sinks[info.name] = sink
 
+        # Seed _props from PropInfo defaults so reads before any set_property work.
+        self._props: Dict[str, Any] = {
+            p._prop_key(): p.default for p in self.get_properties()
+        }
+
         # Gate for source elements: set when the element reaches PLAYING.
         self._playing_event = threading.Event()
 
@@ -512,6 +614,19 @@ class GstElementBase:
         """
         raise NotImplementedError(f"{cls.__name__} must implement get_pads()")
 
+    @classmethod
+    def get_properties(cls) -> List[GstElementBase.PropInfo]:
+        """Return the list of GObject property descriptors.
+
+        Override in subclasses to declare GObject properties settable from
+        pipeline strings or Python code.  The base implementation returns an
+        empty list (no properties).
+
+        Returns:
+            A list of `PropInfo` instances, or an empty list.
+        """
+        return []
+
     def _worker_func(self) -> None:
         """Worker thread body.
 
@@ -550,8 +665,8 @@ class GstElementBase:
         GStreamer element factory.
 
         Args:
-            name: Factory name used to instantiate the element (e.g. `"myelement"`).  Defaults to the class name
-                converted to lower-case.
+            name: Factory name used to instantiate the element (e.g. `"myelement"`).
+                Defaults to the class name converted to lower-case.
 
         Returns:
             `True` on success, `False` otherwise.

@@ -123,9 +123,7 @@ class GstPipelineHandler:
             self._Gst = Gst
             self.name = name
 
-            self.element = handler._pipeline.get_by_name(name)
-            if self.element is None:
-                raise ValueError(f"appsink element '{name}' not found in pipeline")
+            self.element = handler.element(name)
 
             from .. import streams
 
@@ -194,17 +192,20 @@ class GstPipelineHandler:
 
         self._Gst = Gst
         self._pipeline = self._Gst.parse_launch(pipeline_str)
+        # parse_launch returns a bare Gst.Element (not a Gst.Pipeline) when the
+        # string contains no '!' separators. Wrap it so get_bus() and
+        # get_by_name() work uniformly regardless of string complexity.
+        if not isinstance(self._pipeline, self._Gst.Bin):
+            wrapper = self._Gst.Pipeline.new(None)
+            wrapper.add(self._pipeline)
+            self._pipeline = wrapper
         self._future: concurrent.futures.Future = concurrent.futures.Future()
         self._watchdog = (
             Watchdog(time_limit=5.0, tps_threshold=0.0) if probe_element_name else None
         )
 
         if probe_element_name:
-            element = self._pipeline.get_by_name(probe_element_name)
-            if element is None:
-                raise ValueError(
-                    f"Element '{probe_element_name}' not found in pipeline"
-                )
+            element = self.element(probe_element_name)
             pad = element.get_static_pad("src")
             if pad is None:
                 raise ValueError(f"Element '{probe_element_name}' has no src pad")
@@ -290,6 +291,23 @@ class GstPipelineHandler:
     def pipeline(self):
         """The underlying ``Gst.Pipeline`` object."""
         return self._pipeline
+
+    def element(self, name: str):
+        """Return the pipeline element with the given name.
+
+        Args:
+            name: The ``name=`` given to the element in the pipeline string.
+
+        Returns:
+            The ``Gst.Element`` instance.
+
+        Raises:
+            KeyError: If no element with that name exists in the pipeline.
+        """
+        el = self._pipeline.get_by_name(name)
+        if el is None:
+            raise KeyError(f"Element '{name}' not found in pipeline")
+        return el
 
     def stop(self):
         """Gracefully stop the pipeline."""
