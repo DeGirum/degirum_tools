@@ -95,6 +95,7 @@ import inspect
 
 # flake8: noqa
 from .element_base import *
+from .ai_element import *
 from .pipeline_handler import *
 from .pipeline_builder import *
 

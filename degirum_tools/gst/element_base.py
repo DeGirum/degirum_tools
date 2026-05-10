@@ -21,15 +21,12 @@ Key Features
 - Sink pads are backed by ``streams.Stream`` queues with configurable depth and drop policy;
   iterate in a worker thread without additional synchronisation code.
 - Source pads expose helpers for pushing stream-start, segment, EOS events, and raw buffers.
-- Worker thread is started automatically by ``__init__`` and joined on the
-  ``PAUSED → READY`` state transition.
-- ``wait_for_playing()`` gate lets source elements safely defer data production until the
-  pipeline reaches ``PLAYING``.
+- Worker thread is started on ``READY → PAUSED`` so that Python-object properties
+  set between ``parse_launch()`` and ``start()`` are visible to it, and joined on
+  ``PAUSED → READY``.
 - ``register()`` calls ``GObject.type_register`` and ``Gst.Element.register`` in one step.
 - ``map_gst_buffer`` safely maps a ``Gst.Buffer`` (or extracts and maps one from a
   ``Gst.Sample``) using a context manager, guaranteeing ``unmap`` even on error.
-
-Inheritance Order
 
 ``GstElementBase`` must be listed **before** ``Gst.Element`` in the MRO so that
 cooperative ``super()`` calls and gst-python's GObject metaclass machinery work correctly::
@@ -89,15 +86,14 @@ Public API
 - ``GstElementBase.PropInfo`` — dataclass describing a GObject property.
 - ``GstElementBase.get_properties()`` — return a list of ``PropInfo`` instances (optional override).
 - ``GstElementBase.register(name)`` — register the element class with GStreamer.
-- ``GstElementBase.wait_for_playing()`` — block until the element reaches ``PLAYING`` state.
 """
 
 from __future__ import annotations
 
+import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
-import threading
 from typing import TYPE_CHECKING, Any, Dict, Generator, List, Optional
 
 if TYPE_CHECKING:
@@ -158,6 +154,10 @@ class GstElementBase:
     * `get_pads()`     — return a list of `PadInfo` instances.
     * `_worker_func()` — worker thread body; runs until all sink queues are exhausted.
 
+    Subclasses may optionally override:
+
+    * `get_properties()` — return a list of `PropInfo` instances to expose GObject properties.
+
     `__init_subclass__` automatically builds `__gstmetadata__` and `__gsttemplates__` from those declarations
     so that gst-python can register the element.
 
@@ -171,10 +171,22 @@ class GstElementBase:
     # Nested types used in the public API
     # ------------------------------------------------------------------
 
-    # Declared here so mypy knows these attributes exist on the class;
-    # they are populated by __init_subclass__ at concrete-subclass creation time.
-    __gstmetadata__: tuple
-    __gsttemplates__: tuple
+    if TYPE_CHECKING:
+        # Stubs for attributes/methods provided by Gst.Element at runtime via
+        # multiple inheritance.  Declaring them here avoids mypy attr-defined
+        # errors in GstElementBase subclasses without requiring gi type stubs.
+        from typing import Any as _Any
+
+        # Populated by register() / GObject metaclass at class-creation time.
+        __gstmetadata__: tuple
+        __gsttemplates__: tuple
+
+        props: _Any  # GObject property proxy
+
+        def get_bus(self) -> _Any: ...  # noqa: E704
+        def get_name(self) -> str: ...  # noqa: E704
+        def add_pad(self, pad: _Any) -> bool: ...  # noqa: E704
+        def get_pad_template(self, name: str) -> _Any: ...  # noqa: E704
 
     class SinkPad:
         """Wraps a GStreamer sink pad with its buffer queue and frame metadata.
@@ -236,6 +248,10 @@ class GstElementBase:
         def is_initialized(self) -> bool:
             return self.width is not None and self.height is not None
 
+        def is_linked(self) -> bool:
+            """Return ``True`` if this pad is currently linked to a peer pad."""
+            return self.pad.is_linked()
+
         @contextmanager
         def map_buffer(
             self,
@@ -279,7 +295,7 @@ class GstElementBase:
                     return self._forward_to.push_event(event)
 
             elif event.type == self._Gst.EventType.EOS:
-                self.queue.put(None)  # sentinel
+                self.queue.close()  # sentinel
                 if self._forward_eos and self._forward_to:
                     return self._forward_to.push_event(event)
 
@@ -313,13 +329,24 @@ class GstElementBase:
             """Push an event downstream."""
             return self.pad.push_event(event)
 
-        def start_stream(self) -> bool:
-            """Push `stream-start` and `segment` events on this pad.
+        def start_stream(self, caps: Optional[str] = None) -> bool:
+            """Push ``stream-start``, optional ``caps``, and ``segment`` events on this pad.
 
             Call once from the worker thread before pushing any buffers.
+
+            Args:
+                caps: Optional caps string (e.g. ``"application/json"``).  When provided,
+                    a ``caps`` event is pushed between ``stream-start`` and ``segment``,
+                    which is required for source pads that have no upstream sink pad to
+                    forward caps automatically.
             """
             if not self.push_event(self._Gst.Event.new_stream_start(self._stream_id)):
                 return False
+            if caps is not None:
+                if not self.push_event(
+                    self._Gst.Event.new_caps(self._Gst.Caps.from_string(caps))
+                ):
+                    return False
             seg = self._Gst.Segment.new()
             seg.init(self._Gst.Format.TIME)
             return self.push_event(self._Gst.Event.new_segment(seg))
@@ -362,8 +389,6 @@ class GstElementBase:
     class PadInfo:
         """Descriptor for a single pad template returned by `get_pads`.
 
-        `PadPresence.ALWAYS` is assumed for all pads. Use `PadDirection` instead of Gst types.
-
         Attributes:
             name: Pad name (used as both template name and pad name).
             direction: `PadDirection.SINK` or `PadDirection.SRC`.
@@ -376,6 +401,8 @@ class GstElementBase:
             queue_drop: When `True`, the oldest buffer is silently discarded
                 when the queue is full. When `False`, the chain function blocks.
                 Defaults to `True`.
+            optional: When ``True``, the pad template uses ``PadPresence.SOMETIMES``
+                so the pipeline does not require the pad to be linked. Defaults to ``False``.
         """
 
         name: str
@@ -388,6 +415,8 @@ class GstElementBase:
         # Queue controls
         queue_maxsize: int = 3
         queue_drop: bool = True
+        # Pad presence
+        optional: bool = False
 
     @dataclass
     class PropInfo:
@@ -405,7 +434,7 @@ class GstElementBase:
         string.  Python-object properties are only settable from Python code.
 
         Attributes:
-            name: GObject property name.  Hyphens are allowed (``"model-path"``).
+            name: GObject property name (use underscores, e.g. ``"model_path"``).
             default: Default value.  Its type determines the GObject type.
             desc: Human-readable description shown by ``gst-inspect``.
             min: Lower bound for numeric properties.  ``None`` uses the type minimum.
@@ -422,111 +451,6 @@ class GstElementBase:
             """Return the Python type used for GObject type mapping."""
             t = type(self.default)
             return t if t in (bool, int, float, str) else object
-
-        def _prop_key(self) -> str:
-            """Return the Python-safe key (hyphens → underscores)."""
-            return self.name.replace("-", "_")
-
-    # ------------------------------------------------------------------
-    # Subclass hook: build __gstmetadata__ / __gsttemplates__ automatically
-    # ------------------------------------------------------------------
-
-    def __init_subclass__(cls, **kwargs):
-        super().__init_subclass__(**kwargs)
-
-        # Ensure do_change_state is in every concrete class's __dict__ so that
-        # GObject.type_register sees it as a virtual-method override.
-        if "do_change_state" not in cls.__dict__:
-            setattr(cls, "do_change_state", GstElementBase.do_change_state)
-
-        if (
-            cls.get_metadata is GstElementBase.get_metadata
-            or cls.get_pads is GstElementBase.get_pads
-        ):
-            return
-
-        from gi.repository import GObject, Gst
-
-        meta = cls.get_metadata()
-        cls.__gstmetadata__ = (
-            meta.longname,
-            meta.klass,
-            meta.description,
-            meta.author,
-        )
-
-        templates = []
-        for pad in cls.get_pads():
-            gst_direction = (
-                Gst.PadDirection.SINK
-                if pad.direction == GstElementBase.PadDirection.SINK
-                else Gst.PadDirection.SRC
-            )
-            templates.append(
-                Gst.PadTemplate.new(
-                    pad.name,
-                    gst_direction,
-                    Gst.PadPresence.ALWAYS,
-                    Gst.Caps.from_string(pad.caps),
-                )
-            )
-        cls.__gsttemplates__ = tuple(templates)
-
-        # Build __gproperties__ from get_properties() if overridden.
-        props = cls.get_properties()
-        if props:
-            import sys
-
-            gprops: Dict[str, Any] = {}
-            for p in props:
-                t = p._resolved_type()
-                flags = GObject.ParamFlags.READWRITE
-                if t is object:
-                    gprops[p.name] = (object, p.name, p.desc, flags)
-                elif t is str:
-                    gprops[p.name] = (str, p.name, p.desc, p.default or "", flags)
-                elif t is bool:
-                    gprops[p.name] = (bool, p.name, p.desc, bool(p.default), flags)
-                elif t is float:
-                    lo = p.min if p.min is not None else -1e308
-                    hi = p.max if p.max is not None else 1e308
-                    gprops[p.name] = (
-                        float,
-                        p.name,
-                        p.desc,
-                        lo,
-                        hi,
-                        float(p.default),
-                        flags,
-                    )
-                elif t is int:
-                    lo = p.min if p.min is not None else -sys.maxsize
-                    hi = p.max if p.max is not None else sys.maxsize
-                    gprops[p.name] = (
-                        int,
-                        p.name,
-                        p.desc,
-                        lo,
-                        hi,
-                        int(p.default),
-                        flags,
-                    )
-            cls.__gproperties__ = gprops  # type: ignore[attr-defined]
-
-            # Inject do_get_property / do_set_property if not already defined.
-            if "do_get_property" not in cls.__dict__:
-
-                def _do_get_property(self, prop):
-                    return self._props.get(prop.name.replace("-", "_"))
-
-                cls.do_get_property = _do_get_property  # type: ignore[attr-defined]
-
-            if "do_set_property" not in cls.__dict__:
-
-                def _do_set_property(self, prop, value):
-                    self._props[prop.name.replace("-", "_")] = value
-
-                cls.do_set_property = _do_set_property  # type: ignore[attr-defined]
 
     # ------------------------------------------------------------------
     # Constructor
@@ -571,20 +495,36 @@ class GstElementBase:
                 self.sinks[info.name] = sink
 
         # Seed _props from PropInfo defaults so reads before any set_property work.
-        self._props: Dict[str, Any] = {
-            p._prop_key(): p.default for p in self.get_properties()
-        }
+        self._props: Dict[str, Any] = {p.name: p.default for p in self.get_properties()}
 
-        # Gate for source elements: set when the element reaches PLAYING.
-        self._playing_event = threading.Event()
-
-        # Start worker thread.
+        # Worker thread is created but not started until READY_TO_PAUSED so that
+        # Python-object properties set after parse_launch() are visible to it.
         self._worker = threading.Thread(
-            target=self._worker_func,
+            target=self._run_worker,
             name=f"{type(self).__name__}-worker",
             daemon=True,
         )
-        self._worker.start()
+
+    def _run_worker(self) -> None:
+        """Internal wrapper that runs ``_worker_func`` and handles exceptions."""
+        try:
+            self._worker_func()
+        except Exception as exc:
+            import traceback
+            from gi.repository import GLib
+
+            # Drain / close all sink queues so nothing else blocks.
+            for sink in self.sinks.values():
+                sink.queue.close(force=True)
+            # Post a fatal error on the bus so the pipeline surfaces the exception.
+            debug_info = traceback.format_exc()
+            gerror = GLib.Error.new_literal(
+                self._Gst.CoreError.quark(), str(exc), self._Gst.CoreError.FAILED
+            )
+            msg = self._Gst.Message.new_error(self, gerror, debug_info)
+            bus = self.get_bus()
+            if bus is not None:
+                bus.post(msg)
 
     # ------------------------------------------------------------------
     # Abstract interface for subclasses
@@ -641,13 +581,113 @@ class GstElementBase:
             f"{type(self).__name__} must implement _worker_func()"
         )
 
-    def wait_for_playing(self) -> None:
-        """Block until the element reaches PLAYING state.
+    # ------------------------------------------------------------------
+    # GObject virtual method overrides
+    # ------------------------------------------------------------------
 
-        Source elements (no sink pads) should call this at the top of
-        `_worker_func` to avoid pushing data while pads are still flushing.
-        """
-        self._playing_event.wait()
+    def do_get_property(self, prop):
+        """Default GObject property getter backed by ``_props``."""
+        return self._props.get(prop.name)
+
+    def do_set_property(self, prop, value):
+        """Default GObject property setter backed by ``_props``."""
+        self._props[prop.name] = value
+
+    def do_change_state(self, transition: Gst.StateChange) -> Gst.StateChangeReturn:
+        """Start/stop worker resources on explicit GStreamer state transitions."""
+        ret = self._Gst.Element.do_change_state(self, transition)
+        if ret == self._Gst.StateChangeReturn.FAILURE:
+            return ret
+
+        if transition == self._Gst.StateChange.READY_TO_PAUSED:
+            # Start worker here, not in __init__, so properties set between
+            # parse_launch() and start() (e.g. a pre-built model object) are
+            # already visible to the worker thread.
+            if not self._worker.is_alive():
+                self._worker.start()
+            if not self.sinks:
+                # Live sources (no sink pads) must report NO_PREROLL so the
+                # pipeline does not wait for preroll data before going to PLAYING.
+                ret = self._Gst.StateChangeReturn.NO_PREROLL
+
+        elif transition == self._Gst.StateChange.PAUSED_TO_READY:
+            for sink in self.sinks.values():
+                sink.queue.close(force=True)
+
+            if self._worker.is_alive():
+                self._worker.join(timeout=2.0)
+
+        return ret
+
+    # ------------------------------------------------------------------
+    # Registration helpers
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def _build_gst_metadata(cls) -> tuple:
+        """Return a ``__gstmetadata__`` tuple from ``get_metadata()``."""
+        meta = cls.get_metadata()
+        return (meta.longname, meta.klass, meta.description, meta.author)
+
+    @classmethod
+    def _build_gst_templates(cls, Gst) -> tuple:
+        """Return a ``__gsttemplates__`` tuple from ``get_pads()``."""
+        templates = []
+        for pad in cls.get_pads():
+            gst_direction = (
+                Gst.PadDirection.SINK
+                if pad.direction == GstElementBase.PadDirection.SINK
+                else Gst.PadDirection.SRC
+            )
+            presence = (
+                Gst.PadPresence.SOMETIMES if pad.optional else Gst.PadPresence.ALWAYS
+            )
+            templates.append(
+                Gst.PadTemplate.new(
+                    pad.name,
+                    gst_direction,
+                    presence,
+                    Gst.Caps.from_string(pad.caps),
+                )
+            )
+        return tuple(templates)
+
+    @classmethod
+    def _build_gst_properties(cls, GObject) -> Dict[str, Any]:
+        """Return a ``__gproperties__`` dict from ``get_properties()``."""
+        import sys
+
+        props = cls.get_properties()
+        if not props:
+            return {}
+
+        flags = GObject.ParamFlags.READWRITE
+        gprops: Dict[str, Any] = {}
+        for p in props:
+            t = p._resolved_type()
+            if t is object:
+                gprops[p.name] = (object, p.name, p.desc, flags)
+            elif t is str:
+                gprops[p.name] = (str, p.name, p.desc, p.default or "", flags)
+            elif t is bool:
+                gprops[p.name] = (bool, p.name, p.desc, bool(p.default), flags)
+            elif t is float:
+                lo = p.min if p.min is not None else -1e308
+                hi = p.max if p.max is not None else 1e308
+                gprops[p.name] = (
+                    float,
+                    p.name,
+                    p.desc,
+                    lo,
+                    hi,
+                    float(p.default),
+                    flags,
+                )
+            elif t is int:
+                lo = p.min if p.min is not None else -sys.maxsize
+                hi = p.max if p.max is not None else sys.maxsize
+                gprops[p.name] = (int, p.name, p.desc, lo, hi, int(p.default), flags)
+        return gprops
 
     # ------------------------------------------------------------------
     # Registration
@@ -660,54 +700,47 @@ class GstElementBase:
     ) -> bool:
         """Register this element class with GStreamer.
 
-        Calls `GObject.type_register` to expose the class to the GObject type
-        system, then calls `Gst.Element.register` to make it available as a
-        GStreamer element factory.
+        Builds ``__gstmetadata__``, ``__gsttemplates__``, and ``__gproperties__``
+        from ``get_metadata()``, ``get_pads()``, and ``get_properties()``, then
+        calls ``GObject.type_register`` and ``Gst.Element.register``.
+
+        If ``Gst.Element`` is not already in the MRO (i.e. the class was defined
+        as a plain ``GstElementBase`` subclass without explicitly inheriting
+        ``Gst.Element``), a concrete subclass that adds ``Gst.Element`` is
+        created automatically.
 
         Args:
-            name: Factory name used to instantiate the element (e.g. `"myelement"`).
+            name: Factory name used to instantiate the element (e.g. ``"myelement"``).
                 Defaults to the class name converted to lower-case.
 
         Returns:
-            `True` on success, `False` otherwise.
+            ``True`` on success, ``False`` otherwise.
         """
         from gi.repository import GObject, Gst
 
         if name is None:
             name = cls.__name__.lower()
 
-        GObject.type_register(cls)
+        # Collect all GStreamer class attributes up-front so they are visible
+        # to the GObject metaclass during ``type()`` (auto-subclass path).
+        class_dict: Dict[str, Any] = {
+            "__gstmetadata__": cls._build_gst_metadata(),
+            "__gsttemplates__": cls._build_gst_templates(Gst),
+            "__gproperties__": cls._build_gst_properties(GObject),
+            "do_get_property": cls.do_get_property,
+            "do_set_property": cls.do_set_property,
+            "do_change_state": cls.do_change_state,
+        }
+
+        if Gst.Element not in cls.__mro__:
+            # Auto-create concrete subclass with Gst.Element in MRO.
+            # All attributes are passed in the dict so the GObject metaclass
+            # picks them up during class creation and auto-registers the type.
+            cls = type(cls.__name__, (cls, Gst.Element), class_dict)
+        else:
+            # Gst.Element already in MRO — inject attributes directly and
+            # register the type manually.
+            for key, value in class_dict.items():
+                setattr(cls, key, value)
+            GObject.type_register(cls)
         return Gst.Element.register(None, name, Gst.Rank.NONE, cls)
-
-    # ------------------------------------------------------------------
-    # State management
-    # ------------------------------------------------------------------
-
-    def do_change_state(self, transition: Gst.StateChange) -> Gst.StateChangeReturn:
-        """Start/stop worker resources on explicit GStreamer state transitions."""
-
-        if transition == self._Gst.StateChange.PAUSED_TO_PLAYING:
-            self._playing_event.set()
-
-        elif transition == self._Gst.StateChange.PLAYING_TO_PAUSED:
-            self._playing_event.clear()
-
-        ret = self._Gst.Element.do_change_state(self, transition)
-        if ret == self._Gst.StateChangeReturn.FAILURE:
-            return ret
-
-        if transition == self._Gst.StateChange.READY_TO_PAUSED and not self.sinks:
-            # Live sources (no sink pads) must report NO_PREROLL so the
-            # pipeline does not wait for preroll data before going to PLAYING.
-            ret = self._Gst.StateChangeReturn.NO_PREROLL
-
-        elif transition == self._Gst.StateChange.PAUSED_TO_READY:
-            self._playing_event.set()  # unblock worker if it is waiting
-
-            for sink in self.sinks.values():
-                sink.queue.close()
-
-            if self._worker.is_alive():
-                self._worker.join(timeout=2.0)
-
-        return ret

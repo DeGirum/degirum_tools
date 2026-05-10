@@ -43,7 +43,7 @@ def test_gst_pipeline_handler():
     # Caps used throughout: a single-channel 8-byte "application" buffer.
     _CAPS = "application/x-raw"
 
-    class CounterSource(GstElementBase, Gst.Element):
+    class CounterSource(GstElementBase):
         """Source element: emits NUM_FRAMES buffers, each containing a single
         big-endian uint64 counter value (0, 1, …, NUM_FRAMES-1), then EOS."""
 
@@ -67,7 +67,6 @@ def test_gst_pipeline_handler():
             ]
 
         def _worker_func(self) -> None:
-            self.wait_for_playing()
             src_pad = self.sources["src"]
             src_pad.start_stream()
             for i in range(NUM_FRAMES):
@@ -76,7 +75,7 @@ def test_gst_pipeline_handler():
                     break
             src_pad.stop_stream()
 
-    class SplitterElement(GstElementBase, Gst.Element):
+    class SplitterElement(GstElementBase):
         """Filter element: one sink, two src pads.
 
         * ``src_double`` — the counter value multiplied by 2 (uint64 BE).
@@ -114,7 +113,6 @@ def test_gst_pipeline_handler():
             ]
 
         def _worker_func(self) -> None:
-            self.wait_for_playing()
 
             sink = self.sinks["sink"]
             src_double = self.sources["src_double"]
@@ -421,7 +419,7 @@ def test_gst_element_properties():
 
     _CAPS = "application/x-raw"
 
-    class PropTestElement(GstElementBase, Gst.Element):
+    class PropTestElement(GstElementBase):
         """Sink-only element exposing all property types for testing."""
 
         @classmethod
@@ -456,7 +454,6 @@ def test_gst_element_properties():
             ]
 
         def _worker_func(self) -> None:
-            self.wait_for_playing()
             for _ in self.sinks["sink"].queue:
                 pass
 
@@ -474,7 +471,7 @@ def test_gst_element_properties():
 
             actual_get = el.get_property(hyphen_name)
             actual_gi = getattr(el.props, underscore_name)
-            actual_dict = el._props[underscore_name]
+            actual_dict = el._props[hyphen_name]
 
             for actual, label in [
                 (actual_get, "get_property"),
@@ -602,3 +599,302 @@ def test_gst_element_properties():
             "prop-obj": None,
         },
     )
+
+
+def test_gst_worker_exception():
+    """Test that an exception raised inside _worker_func is propagated by handler.wait()."""
+
+    from degirum_tools.gst import (
+        GstElementBase,
+        GstPipelineHandler,
+        setup_gst_environment,
+    )
+
+    try:
+        setup_gst_environment()
+    except ImportError:
+        pytest.skip("gi not available")
+
+    class BrokenSink(GstElementBase):
+        """Sink element whose worker always raises a RuntimeError."""
+
+        @classmethod
+        def get_metadata(cls) -> GstElementBase.ElementMetadata:
+            return GstElementBase.ElementMetadata(
+                longname="Broken Sink",
+                klass="Sink",
+                description="Always raises in _worker_func",
+                author="Test",
+            )
+
+        @classmethod
+        def get_pads(cls) -> List[GstElementBase.PadInfo]:
+            return [
+                GstElementBase.PadInfo(
+                    name="sink",
+                    direction=GstElementBase.PadDirection.SINK,
+                    caps="video/x-raw",
+                )
+            ]
+
+        def _worker_func(self) -> None:
+            raise RuntimeError("intentional worker failure")
+
+    BROKEN_SINK = "test_brokensink"
+    assert BrokenSink.register(BROKEN_SINK)
+
+    pipe_str = f"videotestsrc ! {BROKEN_SINK}"
+    handler = GstPipelineHandler(pipe_str)
+    handler.start()
+
+    with pytest.raises(RuntimeError, match="intentional worker failure"):
+        handler.wait()
+
+
+def test_gst_old_ai_element():
+    """Test GstAiElement: read mp4, run AI inference, display with autovideosink."""
+
+    from degirum_tools.gst import (
+        GstAiElement,
+        GstPipelineHandler,
+        setup_gst_environment,
+    )
+
+    try:
+        setup_gst_environment()
+    except ImportError:
+        pytest.skip("gi not available")
+
+    from gi.repository import Gst
+
+    AI_ELEMENT = "test_aielement"
+    assert GstAiElement.register(AI_ELEMENT)
+
+    video_path = str(Path(__file__).parent / "images" / "Traffic2.mp4").replace(
+        "\\", "/"
+    )
+
+    pipeline_str = (
+        f'filesrc location="{video_path}" ! qtdemux ! h264parse ! avdec_h264 ! '
+        "videoconvert ! video/x-raw,format=RGB ! tee name=t "
+        "t. ! queue ! ai.sink_full "
+        f"t. ! queue ! {AI_ELEMENT} name=ai"
+        '  model_name="yolov8n_relu6_coco--640x640_quant_n2x_orca1_1"'
+        '  zoo_url="degirum/degirum"'
+        '  inference_host_address="@cloud"'
+        "  ai_overlay=false"
+        "  model_properties_json='{\"overlay_show_probabilities\": true}' ! "
+        "videoconvert ! autovideosink sync=false "
+    )
+
+    handler = GstPipelineHandler(pipeline_str, main_thread_loop=True)
+
+    handler.element("ai").props.model_properties = dict(overlay_line_width=1)
+
+    handler.start()
+    handler.wait()
+
+
+def test_gst_ai_element():
+    """Test GstAiElement in four operating modes using Traffic2_short.mp4."""
+
+    import json as _json
+    import numpy as np
+
+    from degirum_tools.gst import (
+        GstAiElement,
+        GstPipelineHandler,
+        map_gst_buffer,
+        setup_gst_environment,
+    )
+
+    try:
+        setup_gst_environment()
+    except ImportError:
+        pytest.skip("gi not available")
+
+    AI_ELEMENT = "test_aielement2"
+    assert GstAiElement.register(AI_ELEMENT)
+
+    video_path = str(Path(__file__).parent / "images" / "Traffic2_short.mp4").replace(
+        "\\", "/"
+    )
+
+    _MODEL_NAME = "yolov8n_relu6_coco--640x640_quant_n2x_orca1_1"
+    _ZOO_URL = "degirum/degirum"
+    _HOST = "@cloud"
+
+    _AI_PROPS = (
+        f' model_name="{_MODEL_NAME}"'
+        f' zoo_url="{_ZOO_URL}"'
+        f' inference_host_address="{_HOST}"'
+    )
+
+    def _video_source() -> str:
+        """Return the decode + colorconvert portion of the pipeline."""
+        return (
+            f'filesrc location="{video_path}" ! qtdemux ! h264parse ! avdec_h264 ! '
+            f"videoconvert ! video/x-raw,format=RGB"
+        )
+
+    def _collect_frames(appsink_name: str, handler: GstPipelineHandler):
+        """Return list of numpy frames from the named appsink."""
+        frames = []
+        for sample in handler.appsinks[appsink_name].queue:
+            caps = sample.get_caps()
+            s = caps.get_structure(0)
+            w = s.get_value("width")
+            h = s.get_value("height")
+            with map_gst_buffer(sample) as data:
+                frames.append(
+                    np.frombuffer(bytes(data), dtype=np.uint8).reshape((h, w, 3)).copy()
+                )
+        return frames
+
+    def _assert_frames_identical(frames_a, frames_b, tag: str) -> None:
+        """Assert two frame sequences have the same length and identical pixel data."""
+        assert len(frames_a) > 0, f"{tag}: no frames in first sequence"
+        assert len(frames_b) > 0, f"{tag}: no frames in second sequence"
+        assert len(frames_a) == len(
+            frames_b
+        ), f"{tag}: frame count mismatch {len(frames_a)} vs {len(frames_b)}"
+        for i, (fa, fb) in enumerate(zip(frames_a, frames_b)):
+            assert fa.shape == fb.shape, f"{tag}: frame {i} shape mismatch"
+            assert np.array_equal(fa, fb), f"{tag}: frame {i} pixel data differs"
+
+    def _assert_frames_annotated(
+        frames_a, frames_b, tag: str, max_diff_fraction: float = 0.05
+    ) -> None:
+        """Assert that frames differ (AI overlay applied) but not excessively.
+
+        The mean absolute per-pixel difference, normalized to [0, 1], must be
+        greater than zero and no more than *max_diff_fraction*.
+        """
+        assert len(frames_a) > 0, f"{tag}: no frames in first sequence"
+        assert len(frames_b) > 0, f"{tag}: no frames in second sequence"
+        total_diff = 0.0
+        total_pixels = 0
+        for fa, fb in zip(frames_a, frames_b):
+            assert fa.shape == fb.shape, f"{tag}: frame shape mismatch"
+            total_diff += float(np.abs(fa.astype(np.int32) - fb.astype(np.int32)).sum())
+            total_pixels += fa.size
+        mean_diff_fraction = total_diff / (total_pixels * 255.0)
+        assert (
+            mean_diff_fraction > 0.0
+        ), f"{tag}: no annotated frames — all output frames are identical to input"
+        assert mean_diff_fraction <= max_diff_fraction, (
+            f"{tag}: mean pixel difference {mean_diff_fraction:.3%} exceeds "
+            f"threshold {max_diff_fraction:.0%}"
+        )
+
+    def _assert_json_has_detections(
+        json_sink_name: str, handler: GstPipelineHandler, tag: str
+    ) -> None:
+        """Assert that at least one JSON sample has non-empty _inference_results
+        and every result dict in that sample contains a 'bbox' key."""
+        samples = list(handler.appsinks[json_sink_name].queue)
+        assert len(samples) > 0, f"{tag}: no JSON samples received"
+        for sample in samples:
+            with map_gst_buffer(sample) as data:
+                obj = _json.loads(bytes(data).decode())
+            results = obj.get("_inference_results", [])
+            if not results:
+                continue
+            assert all(
+                "bbox" in r and "label" in r and "score" in r for r in results
+            ), f"{tag}: some results in '_inference_results' are missing required keys"
+            return
+        assert False, f"{tag}: no non-empty '_inference_results' found in JSON output"
+
+    # ------------------------------------------------------------------
+    # Mode 1: Single input, single output, no JSON, no AI annotations.
+    # Validate that output frames are identical to input frames.
+    # ------------------------------------------------------------------
+    pipe1 = (
+        f"{_video_source()} ! tee name=t "
+        f"t. ! appsink name=sink_in async=false "
+        f"t. ! {AI_ELEMENT} name=ai1 ai_overlay=false {_AI_PROPS} "
+        f"! appsink name=sink_out async=false"
+    )
+    h1 = GstPipelineHandler(pipe1, appsink_names=["sink_in", "sink_out"])
+    h1.start()
+    h1.wait()
+
+    _assert_frames_identical(
+        _collect_frames("sink_in", h1),
+        _collect_frames("sink_out", h1),
+        "Mode 1",
+    )
+    print("\nTest 1 done")
+
+    # ------------------------------------------------------------------
+    # Mode 2: Single input, single output, no JSON, with AI annotations.
+    # Validate that output frames differ from input (annotations present).
+    # ------------------------------------------------------------------
+    pipe2 = (
+        f"{_video_source()} ! tee name=t "
+        f"t. ! queue max-size-buffers=0 ! appsink name=sink_in2 "
+        f"t. ! queue ! {AI_ELEMENT} name=ai2 ai_overlay=true {_AI_PROPS} ! "
+        f"appsink name=sink_out2"
+    )
+    h2 = GstPipelineHandler(pipe2, appsink_names=["sink_in2", "sink_out2"])
+    h2.start()
+    h2.wait()
+
+    _assert_frames_annotated(
+        _collect_frames("sink_in2", h2),
+        _collect_frames("sink_out2", h2),
+        "Mode 2",
+    )
+    print("Test 2 done")
+
+    # ------------------------------------------------------------------
+    # Mode 3: Single input, two outputs (video + JSON), no AI annotations.
+    # Validate JSON contains detected objects.
+    # ------------------------------------------------------------------
+    pipe3 = (
+        f"{_video_source()} ! "
+        f"{AI_ELEMENT} name=ai3 ai_overlay=false {_AI_PROPS} "
+        f"ai3.src ! appsink name=sink_video3 "
+        f"ai3.src_json ! appsink name=sink_json3"
+    )
+    h3 = GstPipelineHandler(pipe3, appsink_names=["sink_video3", "sink_json3"])
+    h3.start()
+    h3.wait()
+
+    _assert_json_has_detections("sink_json3", h3, "Mode 3")
+    print("Test 3 done")
+
+    # ------------------------------------------------------------------
+    # Mode 4: Two inputs (main full-size + resized model input), two outputs
+    # (video + JSON), no AI annotations.
+    # Validate JSON contains detected objects.
+    # Validate that output video frames are identical to full-size input frames.
+    # ------------------------------------------------------------------
+    pipe4 = (
+        f"{_video_source()} ! tee name=t4 "
+        # Full-size branch → sink_full pad AND input capture
+        f"t4. ! queue ! tee name=t4_full "
+        f"t4_full. ! queue ! ai4.sink_full "
+        f"t4_full. ! queue max-size-buffers=0 ! appsink name=sink_full_in "
+        # Resized branch → model input sink pad
+        f"t4. ! queue ! videoscale ! video/x-raw,format=RGB,width=320,height=180 ! "
+        f"ai4.sink "
+        f"{AI_ELEMENT} name=ai4 ai_overlay=false {_AI_PROPS} "
+        f"ai4.src ! appsink name=sink_video4 "
+        f"ai4.src_json ! appsink name=sink_json4"
+    )
+    h4 = GstPipelineHandler(
+        pipe4,
+        appsink_names=["sink_full_in", "sink_video4", "sink_json4"],
+    )
+    h4.start()
+    h4.wait()
+
+    _assert_frames_identical(
+        _collect_frames("sink_full_in", h4),
+        _collect_frames("sink_video4", h4),
+        "Mode 4",
+    )
+    _assert_json_has_detections("sink_json4", h4, "Mode 4")
+    print("Test 4 done")

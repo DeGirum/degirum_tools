@@ -129,8 +129,9 @@ class GstPipelineHandler:
 
             self.queue = streams.Stream(queue_maxsize, queue_drop)
 
-            self.element.set_property("emit-signals", True)
-            self.element.set_property("sync", False)
+            self.element.set_property("emit-signals", True)  # to receive callbacks
+            self.element.set_property("sync", False)  # to avoid syncing with timestamps
+            self.element.set_property("async", False)  # to avoid blocking on preroll
             self.element.connect("new-sample", self._on_new_sample)
 
         def _on_new_sample(self, appsink):
@@ -165,6 +166,7 @@ class GstPipelineHandler:
         *,
         appsink_queue_maxsize: int = 0,
         appsink_queue_drop: bool = False,
+        main_thread_loop: bool = False,
     ):
         """Create and configure a GStreamer pipeline.
 
@@ -182,6 +184,11 @@ class GstPipelineHandler:
             appsink_queue_drop: When `True`, the oldest sample is silently
                 discarded when the queue is full. When `False`, the producer
                 blocks until space is available. Defaults to `False`.
+            main_thread_loop: When `True`, ``wait()`` runs the GLib main loop
+                on the calling thread instead of using a background daemon
+                thread. Required on Windows for video sinks that need the
+                main thread to pump window messages (e.g. ``autovideosink``).
+                Defaults to `False`.
 
         Raises:
             ValueError: If `probe_element_name` is set but the element or its
@@ -199,6 +206,7 @@ class GstPipelineHandler:
             wrapper = self._Gst.Pipeline.new(None)
             wrapper.add(self._pipeline)
             self._pipeline = wrapper
+        self._main_thread_loop = main_thread_loop
         self._future: concurrent.futures.Future = concurrent.futures.Future()
         self._watchdog = (
             Watchdog(time_limit=5.0, tps_threshold=0.0) if probe_element_name else None
@@ -230,7 +238,7 @@ class GstPipelineHandler:
                     self._future.set_exception(RuntimeError(f"{err.message} ({debug})"))
             elif message.type == Gst.MessageType.EOS:
                 for sink in self.appsinks.values():
-                    sink.queue.put(None)
+                    sink.queue.close()
                 if not self._future.done():
                     self._future.set_result(None)
 
@@ -250,7 +258,8 @@ class GstPipelineHandler:
             RuntimeError: If ``wait_timeout_s`` > 0 and the pipeline did not reach
                 PLAYING within the specified timeout.
         """
-        self._ensure_main_loop()
+        if not self._main_thread_loop:
+            self._ensure_main_loop()
         self._pipeline.set_state(self._Gst.State.PLAYING)
         if wait_timeout_s > 0:
             timeout_ns = int(wait_timeout_s * self._Gst.SECOND)
@@ -282,9 +291,19 @@ class GstPipelineHandler:
     def wait(self):
         """Block until the pipeline reaches EOS.
 
+        When ``main_thread_loop`` was set at construction, runs the GLib main
+        loop on the calling thread so that video sink windows receive events.
+
         Raises:
             RuntimeError: On pipeline error.
         """
+        if self._main_thread_loop:
+            from gi.repository import GLib
+
+            loop = GLib.MainLoop()
+            self._future.add_done_callback(lambda _: loop.quit())
+            if not self._future.done():
+                loop.run()
         self._future.result()
 
     @property

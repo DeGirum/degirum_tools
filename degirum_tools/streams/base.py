@@ -17,7 +17,6 @@ from typing import Optional, Any, List, Dict, Union, Iterator, Tuple
 from ..tools import get_test_mode, Watchdog
 from degirum.exceptions import DegirumException
 
-
 # Predefined meta tag for timing metadata
 tag_timing = "dgt_timing"  # tag for gizmo timing metadata
 
@@ -262,6 +261,7 @@ class Stream(queue.Queue):
         super().__init__(maxsize)
         self.allow_drop = allow_drop
         self.dropped_cnt = 0  # number of dropped items
+        self._force_closed = False  # internal flag to indicate forced closure (used in close(force=True))
 
     _poison = None
 
@@ -277,6 +277,9 @@ class Stream(queue.Queue):
             block (bool): Whether to block if the stream is full (ignored if dropping is enabled). Defaults to True.
             timeout (float, optional): Timeout in seconds for the blocking put. Defaults to None (no timeout).
         """
+        if self._force_closed:
+            return
+
         if self.allow_drop:
             while True:
                 try:
@@ -295,9 +298,25 @@ class Stream(queue.Queue):
         """Return an iterator over the stream's items."""
         return iter(self.get, self._poison)
 
-    def close(self):
-        """Close the stream by inserting a poison pill."""
-        self.put(self._poison)
+    def close(self, force: bool = False):
+        """Close the stream by inserting a poison pill.
+
+        Args:
+            force: When ``True``, atomically evicts one item if the queue is
+                full before inserting the poison pill, so the call never
+                blocks even when a producer has filled the queue and exited.
+                When ``False`` (default), behaves like a normal blocking put.
+        """
+        if force:
+            with self.mutex:
+                self._force_closed = True
+                if self.maxsize > 0:
+                    self.queue.clear()  # Clear the queue to make room for the poison pill
+                    self.not_full.notify()
+                self._put(self._poison)
+                self.not_empty.notify()
+        else:
+            self.put(self._poison)
 
 
 def empty_run(fn):
