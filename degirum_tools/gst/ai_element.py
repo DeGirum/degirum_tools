@@ -32,11 +32,13 @@ The element exposes four GObject properties:
   applied after model load (e.g. ``model_properties_json='{"threshold":0.5}'``). Merged with
   ``model_properties`` when both are set; ``model_properties`` takes precedence on key conflicts.
 
-The element has an optional second sink pad **sink_full** (BGR/RGB/NV12). When connected:
+The element has an optional second sink pad **sink_full** (BGR/RGB). When connected:
 
 - ``ai_overlay=False``: ``sink_full`` frames are forwarded directly to the output; the model
   still runs on ``sink`` but its rendered output is discarded.
-- ``ai_overlay=True``: not yet implemented.
+- ``ai_overlay=True``: bounding-box and landmark coordinates are scaled from the model-input
+  resolution to the full-frame resolution, the overlay is drawn on the full frame, and the
+  result is pushed to the output.
 
 The element has an optional source pad **src_json**. When connected, each frame's inference
 result is serialized to a UTF-8 JSON string and pushed as an ``application/json`` buffer.
@@ -91,9 +93,11 @@ class GstAiElement(GstElementBase):
 
     Notes
     -----
-    An optional ``sink_full`` pad (BGR/RGB/NV12) can be linked to provide a full-size frame
+    An optional ``sink_full`` pad (BGR/RGB) can be linked to provide a full-size frame
     stream. When ``ai_overlay=False`` its buffers are forwarded directly to the output pad.
-    When ``ai_overlay=True`` this mode is not yet implemented.
+    When ``ai_overlay=True``, detected-object coordinates are scaled from the model-input
+    resolution to the full-frame resolution, the AI overlay is rendered on the full frame,
+    and the result is pushed downstream as BGR.
 
     An optional ``src_json`` source pad outputs each frame's inference result serialized as
     a UTF-8 JSON buffer (``application/json`` caps). It operates independently of
@@ -105,7 +109,7 @@ class GstAiElement(GstElementBase):
     # ------------------------------------------------------------------
 
     _RAW_BGR_RGB_CAPS: str = "video/x-raw,format=(string){BGR,RGB}"
-    _FULL_INPUT_CAPS: str = "video/x-raw,format=(string){BGR,RGB,NV12}"
+    _FULL_INPUT_CAPS: str = "video/x-raw,format=(string){BGR,RGB}"
 
     # ------------------------------------------------------------------
     # GstElementBase interface
@@ -223,6 +227,30 @@ class GstAiElement(GstElementBase):
     _SERIALIZABLE_TYPES = (bool, int, float, str, list, dict, tuple, type(None))
 
     @staticmethod
+    def _rescale_results(result, scale_x: float, scale_y: float) -> None:
+        """Rescale bounding-box and landmark coordinates in *result* in-place.
+
+        Args:
+            result: An inference result whose ``_inference_results`` list is
+                updated directly.
+            scale_x: Horizontal scale factor (full_width / model_input_width).
+            scale_y: Vertical scale factor (full_height / model_input_height).
+        """
+        for res in result._inference_results:
+            if "bbox" in res:
+                box = res["bbox"]
+                res["bbox"] = [
+                    box[0] * scale_x,
+                    box[1] * scale_y,
+                    box[2] * scale_x,
+                    box[3] * scale_y,
+                ]
+            if "landmarks" in res:
+                for m in res["landmarks"]:
+                    m["landmark"][0] *= scale_x
+                    m["landmark"][1] *= scale_y
+
+    @staticmethod
     def _serialize_result(result) -> bytes:
         """Serialize an inference result to a UTF-8 JSON byte string.
 
@@ -315,10 +343,15 @@ class GstAiElement(GstElementBase):
         assert sink.format in ("BGR", "RGB"), f"Unsupported format {sink.format}"
         model.input_numpy_colorspace = sink.format
 
+        # Pre-compute coordinate scaling factors for the has_full_input + ai_overlay mode.
+        h_full = w_full = 0
+        scale_x = scale_y = 1.0
         if has_full_input and ai_overlay:
-            raise NotImplementedError(
-                "ai_overlay=True with sink_full pad is not yet implemented"
-            )
+            h_full = sink_full.height or 0
+            w_full = sink_full.width or 0
+            assert h_full and w_full, "sink_full CAPS not yet negotiated"
+            scale_x = w_full / w
+            scale_y = h_full / h
 
         if has_json_output:
             src_json.start_stream("application/json")
@@ -331,7 +364,19 @@ class GstAiElement(GstElementBase):
         for result in model.predict_batch(frame_source()):
             # Video output: forward full-size frame (sink_full mode) or model output.
             if has_full_input:
-                src.push(sink_full.queue.get())
+                full_buf = sink_full.queue.get()
+                if ai_overlay:
+                    # Recalculate bboxes and landmarks from model-input space to full-frame space.
+                    self._rescale_results(result, scale_x, scale_y)
+
+                    with sink_full.map_buffer(full_buf) as data:
+                        result._input_image = np.frombuffer(
+                            data, dtype=np.uint8
+                        ).reshape((h_full, w_full, 3))
+                        img = result.image_overlay
+                        src.push_bytes(img.tobytes())
+                else:
+                    src.push(full_buf)
             else:
                 img = result.image_overlay if ai_overlay else result.image
                 src.push_bytes(img.tobytes())
