@@ -651,50 +651,6 @@ def test_gst_worker_exception():
         handler.wait()
 
 
-def test_gst_old_ai_element():
-    """Test GstAiElement: read mp4, run AI inference, display with autovideosink."""
-
-    from degirum_tools.gst import (
-        GstAiElement,
-        GstPipelineHandler,
-        setup_gst_environment,
-    )
-
-    try:
-        setup_gst_environment()
-    except ImportError:
-        pytest.skip("gi not available")
-
-    from gi.repository import Gst
-
-    AI_ELEMENT = "test_aielement"
-    assert GstAiElement.register(AI_ELEMENT)
-
-    video_path = str(Path(__file__).parent / "images" / "Traffic2.mp4").replace(
-        "\\", "/"
-    )
-
-    pipeline_str = (
-        f'filesrc location="{video_path}" ! qtdemux ! h264parse ! avdec_h264 ! '
-        "videoconvert ! video/x-raw,format=RGB ! tee name=t "
-        "t. ! queue ! ai.sink_full "
-        f"t. ! queue ! {AI_ELEMENT} name=ai"
-        '  model_name="yolov8n_relu6_coco--640x640_quant_n2x_orca1_1"'
-        '  zoo_url="degirum/degirum"'
-        '  inference_host_address="@cloud"'
-        "  ai_overlay=false"
-        "  model_properties_json='{\"overlay_show_probabilities\": true}' ! "
-        "videoconvert ! autovideosink sync=false "
-    )
-
-    handler = GstPipelineHandler(pipeline_str, main_thread_loop=True)
-
-    handler.element("ai").props.model_properties = dict(overlay_line_width=1)
-
-    handler.start()
-    handler.wait()
-
-
 def test_gst_ai_element():
     """Test GstAiElement in four operating modes using Traffic2_short.mp4."""
 

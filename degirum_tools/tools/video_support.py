@@ -161,6 +161,7 @@ class VideoCaptureGst:
                 appsink_names=["sink"],
                 appsink_queue_maxsize=5,
                 appsink_queue_drop=True,
+                appsink_async_preroll=True,
             )
         except ValueError as e:
             raise Exception(
@@ -357,12 +358,11 @@ class VideoCaptureGst:
             framerate = structure.get_fraction("framerate")
             if framerate:
                 return framerate.value_numerator / framerate.value_denominator
-            return 30.0  # Default fallback
+            return None
         elif prop == cv2.CAP_PROP_FRAME_COUNT:
-            # For files, try to get duration
             duration = self._handler.pipeline.query_duration(self._Gst.Format.TIME)
             if duration[0]:
-                fps = self.get(cv2.CAP_PROP_FPS)
+                fps = self.get(cv2.CAP_PROP_FPS) or 30.0
                 return int((duration[1] / self._Gst.SECOND) * fps)
             return 0
         return None
@@ -608,7 +608,8 @@ def video_source(
             containing 'timestamp', 'frame_id', 'fps', 'frame_width', 'frame_height'.
     """
 
-    is_file = stream.get(cv2.CAP_PROP_FRAME_COUNT) > 0
+    frame_count = stream.get(cv2.CAP_PROP_FRAME_COUNT)
+    is_file = frame_count is not None and frame_count > 0
     report_error = False if env.get_test_mode() or is_file else True
 
     if fps:

@@ -117,6 +117,7 @@ class GstPipelineHandler:
             *,
             queue_maxsize: int,
             queue_drop: bool,
+            async_preroll: bool = False,
         ):
             from gi.repository import Gst
 
@@ -131,7 +132,7 @@ class GstPipelineHandler:
 
             self.element.set_property("emit-signals", True)  # to receive callbacks
             self.element.set_property("sync", False)  # to avoid syncing with timestamps
-            self.element.set_property("async", False)  # to avoid blocking on preroll
+            self.element.set_property("async", async_preroll)  # preroll participation
             self.element.connect("new-sample", self._on_new_sample)
 
         def _on_new_sample(self, appsink):
@@ -166,6 +167,7 @@ class GstPipelineHandler:
         *,
         appsink_queue_maxsize: int = 0,
         appsink_queue_drop: bool = False,
+        appsink_async_preroll: bool = False,
         main_thread_loop: bool = False,
     ):
         """Create and configure a GStreamer pipeline.
@@ -184,6 +186,12 @@ class GstPipelineHandler:
             appsink_queue_drop: When `True`, the oldest sample is silently
                 discarded when the queue is full. When `False`, the producer
                 blocks until space is available. Defaults to `False`.
+            appsink_async_preroll: When `True`, appsinks participate in pipeline
+                preroll (GStreamer ``async`` property). This causes caps to be
+                negotiated before the pipeline reaches PLAYING, so
+                ``get_current_caps()`` is available immediately after ``start()``.
+                Defaults to `False` (no preroll) which is suitable for live sources
+                where preroll could block indefinitely.
             main_thread_loop: When `True`, ``wait()`` runs the GLib main loop
                 on the calling thread instead of using a background daemon
                 thread. Required on Windows for video sinks that need the
@@ -226,6 +234,7 @@ class GstPipelineHandler:
                 self,
                 queue_maxsize=appsink_queue_maxsize,
                 queue_drop=appsink_queue_drop,
+                async_preroll=appsink_async_preroll,
             )
             for name in appsink_names
         }
