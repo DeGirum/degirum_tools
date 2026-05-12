@@ -768,9 +768,9 @@ def test_gst_ai_element():
     # ------------------------------------------------------------------
     pipe1 = (
         f"{_video_source()} ! tee name=t "
-        f"t. ! appsink name=sink_in async=false "
+        f"t. ! appsink name=sink_in "
         f"t. ! {AI_ELEMENT} name=ai1 ai_overlay=false {_AI_PROPS} "
-        f"! appsink name=sink_out async=false"
+        f"! appsink name=sink_out "
     )
     h1 = GstPipelineHandler(pipe1, appsink_names=["sink_in", "sink_out"])
     h1.start()
@@ -830,13 +830,12 @@ def test_gst_ai_element():
     pipe4 = (
         f"{_video_source()} ! tee name=t4 "
         # Full-size branch → sink_full pad AND input capture
-        f"t4. ! queue ! tee name=t4_full "
-        f"t4_full. ! queue ! ai4.sink_full "
-        f"t4_full. ! queue max-size-buffers=0 ! appsink name=sink_full_in "
+        f"t4. ! tee name=t4_full "
+        f"t4_full. ! ai4.sink_full "
+        f"t4_full. ! appsink name=sink_full_in "
         # Resized branch → model input sink pad
-        f"t4. ! queue ! videoscale ! video/x-raw,format=RGB,width=320,height=180 ! "
-        f"ai4.sink "
         f"{AI_ELEMENT} name=ai4 ai_overlay=false {_AI_PROPS} "
+        f"t4. ! videoscale ! video/x-raw,format=RGB,width=640,height=360 ! ai4.sink "
         f"ai4.src ! appsink name=sink_video4 "
         f"ai4.src_json ! appsink name=sink_json4"
     )
@@ -854,3 +853,33 @@ def test_gst_ai_element():
     )
     _assert_json_has_detections("sink_json4", h4, "Mode 4")
     print("Test 4 done")
+
+    # ------------------------------------------------------------------
+    # Mode 5: Two inputs (main full-size + resized model input), one output,
+    # with AI annotations drawn on full-size frames.
+    # Validate that output frames differ from full-size input frames (annotations present).
+    # ------------------------------------------------------------------
+    pipe5 = (
+        f"{_video_source()} ! tee name=t5 "
+        # Full-size branch → sink_full pad AND input capture
+        f"t5. ! tee name=t5_full "
+        f"t5_full. ! ai5.sink_full "
+        f"t5_full. ! appsink name=sink_full_in5 "
+        # Resized branch → model input sink pad
+        f"{AI_ELEMENT} name=ai5 ai_overlay=true {_AI_PROPS} "
+        f"t5. ! queue ! videoscale ! video/x-raw,format=RGB,width=640,height=360 ! ai5.sink "
+        f"ai5.src ! appsink name=sink_video5"
+    )
+    h5 = GstPipelineHandler(
+        pipe5,
+        appsink_names=["sink_full_in5", "sink_video5"],
+    )
+    h5.start()
+    h5.wait()
+
+    _assert_frames_annotated(
+        _collect_frames("sink_full_in5", h5),
+        _collect_frames("sink_video5", h5),
+        "Mode 5",
+    )
+    print("Test 5 done")
