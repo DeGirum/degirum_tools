@@ -121,10 +121,12 @@ from .tools import (
     open_video_writer,
     VideoSourceType,
     VideoCaptureProtocol,
+    Timer,
+    Progress,
+    Display,
+    environment as env,
 )
 from .tools.video_support import _is_video_capture
-from .tools.ui_support import Progress, Display, Timer
-from .tools import environment as env
 
 # Inference options: parameters for connect_model_zoo
 CloudInference = 1  # use DeGirum cloud server for inference

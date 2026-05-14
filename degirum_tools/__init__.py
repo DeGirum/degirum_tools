@@ -57,6 +57,7 @@ from .analyzers import *
 from .compound_models import *
 from .evaluators import *
 from .inference_support import *
+from .gst import *
 from .tools import *
 
 # aliases for backward compatibility

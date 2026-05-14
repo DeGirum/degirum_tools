@@ -39,6 +39,7 @@ from ..tools import (
     VideoStreamer,
     VideoCaptureProtocol,
 )
+from ..tools.video_support import _is_video_capture
 from ..inference_support import VideoSourceType
 
 from ..analyzers.event_detector import EventDetector
@@ -82,19 +83,22 @@ class VideoSourceGizmo(Gizmo):
 
     def __init__(
         self,
-        video_source=None,
+        video_source: Union[int, str, None, VideoCaptureProtocol] = None,
         *,
         source_type: Union[str, VideoSourceType] = VideoSourceType.AUTO,
         stop_composition_on_end: bool = False,
         retry_on_error: bool = False,
         fps_override: Optional[float] = None,
         resolution_override: Optional[Tuple[int, int]] = None,
+        **kwargs,
     ):
         """Constructor.
 
         Args:
-            video_source (int or str, optional): A cv2.VideoCapture-compatible video source
-                (device index as int, or file path/URL as str). Defaults to None.
+            video_source (int, str, VideoCaptureProtocol, or None, optional): Video source.
+                Can be a device index (int), file path or URL (str), or an already-created
+                video capture object (e.g., cv2.VideoCapture or VideoCaptureGst).
+                Defaults to None.
             source_type (Union[str, VideoSourceType]): Video backend to use. Options:
                 - VideoSourceType.AUTO or "auto": Automatically choose best backend
                 - VideoSourceType.GSTREAMER or "gstream": Force GStreamer backend
@@ -103,6 +107,8 @@ class VideoSourceGizmo(Gizmo):
             retry_on_error (bool): If True, retry opening the video source on error after some time. Defaults to False.
             fps_override (float, optional): If provided, overrides the FPS value reported by source (some IP cameras report 100FPS). Defaults to None.
             resolution_override (Tuple[int, int], optional): If provided, overrides the resolution (width, height) reported by source. Defaults to None.
+            **kwargs: Additional keyword arguments passed to cv2.VideoCapture constructor
+                (e.g., apiPreference=cv2.CAP_V4L2, params=[cv2.CAP_PROP_FRAME_WIDTH, 1280]).
         """
         super().__init__()
         self._video_source = video_source
@@ -111,6 +117,7 @@ class VideoSourceGizmo(Gizmo):
         self._retry_on_error = retry_on_error
         self._fps_override = fps_override
         self._resolution_override = resolution_override
+        self._cv_kwargs = kwargs
         self._stream: Optional[VideoCaptureProtocol] = None
 
     def get_video_properties(self) -> tuple:
@@ -120,12 +127,15 @@ class VideoSourceGizmo(Gizmo):
     def _open_video_source(self):
         """Open the video source if it is not opened."""
         if self._stream is None:
-            # Convert source_type to enum and determine backend
-            source_type_enum = VideoSourceType.from_string(self._source_type)
-            use_gstreamer = source_type_enum == VideoSourceType.GSTREAMER
-            self._stream = create_video_stream(
-                self._video_source, use_gstreamer=use_gstreamer
-            )
+            if _is_video_capture(self._video_source):
+                self._stream = self._video_source
+            else:
+                # Convert source_type to enum and determine backend
+                source_type_enum = VideoSourceType.from_string(self._source_type)
+                use_gstreamer = source_type_enum == VideoSourceType.GSTREAMER
+                self._stream = create_video_stream(
+                    self._video_source, use_gstreamer=use_gstreamer, **self._cv_kwargs
+                )
             if self._fps_override is not None:
                 # set FPS if override is provided
                 self._stream.set(cv2.CAP_PROP_FPS, self._fps_override)
@@ -517,6 +527,7 @@ class VideoStreamerGizmo(Gizmo):
         stream_url: str,
         *,
         fps: float = 0,
+        vcodec: str = "",
         show_ai_overlay: bool = False,
         stream_depth: int = 10,
         allow_drop: bool = False,
@@ -528,6 +539,7 @@ class VideoStreamerGizmo(Gizmo):
                             Typically you use `MediaServer` class to start media server and
                             then use its RTMP/RTSP URL like `rtsp://localhost:8554/mystream`
             fps (float, optional): Frames per second for the stream. Defaults to 0, meaning to deduce from upstream video source.
+            vcodec (str, optional): Video codec for the stream. Defaults to "" which uses "libx264".
             show_ai_overlay (bool, optional): If True, overlay AI inference results on frames before saving (when available). Defaults to False.
             stream_depth (int, optional): Depth of the input frame queue. Defaults to 10.
             allow_drop (bool, optional): If True, allow dropping frames if the input queue is full. Defaults to False.
@@ -535,12 +547,13 @@ class VideoStreamerGizmo(Gizmo):
         super().__init__([(stream_depth, allow_drop)])
         self._stream_url = stream_url
         self._fps = fps
+        self._vcodec = vcodec
         self._show_ai_overlay = show_ai_overlay
 
     def run(self):
-        """Run the video saving loop.
+        """Run the video streaming loop.
 
-        Reads frames from the input stream and writes them to the output file until the stream is exhausted or aborted.
+        Reads frames from the input stream and streams them via RTSP/RTMP until the stream is exhausted or aborted.
         """
 
         def get_img(data: StreamData) -> ImageType:
@@ -549,19 +562,20 @@ class VideoStreamerGizmo(Gizmo):
                 inference_meta = data.meta.find_last(tag_inference)
                 if inference_meta:
                     frame = inference_meta.image_overlay
-            self.send_result(data)
             return frame
 
         input_q = self.get_input(0)
         data0 = input_q.get()
         if data0 == Stream._poison:
             return
+
         last_data = data0
+        self.send_result(data0)
         img = get_img(data0)
         w, h = image_size(img)
 
         if self._fps <= 0:  # deduce FPS
-            default_fps = 30.0  # default FPS if not specified
+            default_fps = 30.0
             video_meta = data0.meta.find_last(tag_video)
             if video_meta:
                 self._fps = video_meta.get(VideoSourceGizmo.key_fps, default_fps)
@@ -569,11 +583,11 @@ class VideoStreamerGizmo(Gizmo):
                     self._fps = default_fps
             else:
                 self._fps = default_fps
+
         frame_interval_s = 1.0 / self._fps
         read_timeout_s = 0.5 * frame_interval_s
-        fps_threshold = 0.8 * self._fps
-        alpha = 0.05  # IIR smoothing factor
-        avg_duration_s = 1.0 / self._fps  # initialize with target FPS
+        alpha = 0.05
+        avg_send_duration_s = frame_interval_s  # smoothed duration of send_frame()
 
         with VideoStreamer(
             self._stream_url,
@@ -581,42 +595,70 @@ class VideoStreamerGizmo(Gizmo):
             h,
             fps=self._fps,
             pix_fmt="bgr24" if isinstance(img, np.ndarray) else "rgb24",
+            vcodec=self._vcodec,
         ) as streamer:
 
-            self.result_cnt += 1
-            streamer.write(img)
-            prev_time_s = time.time()
-
             def send_frame(data: StreamData):
-                nonlocal avg_duration_s, prev_time_s, last_data
+                nonlocal avg_send_duration_s, last_data
 
+                t0 = time.monotonic()
                 streamer.write(get_img(data))
-                self.result_cnt += 1
+                t1 = time.monotonic()
+
+                self.send_result(data)
                 last_data = data
-                now = time.time()
-                avg_duration_s = (
-                    alpha * (now - prev_time_s) + (1 - alpha) * avg_duration_s
+
+                send_duration_s = t1 - t0
+                avg_send_duration_s = (
+                    alpha * send_duration_s + (1.0 - alpha) * avg_send_duration_s
                 )
-                prev_time_s = now
+
+            # Send first frame
+            streamer.write(img)
+
+            now_s = time.monotonic()
+            next_frame_due_s = now_s + frame_interval_s
 
             while not self._abort:
-                # try to read a real frame from the input queue
+                got_real_frame = False
+
                 try:
                     data = input_q.get(timeout=read_timeout_s)
                     if data == Stream._poison:
                         break
-                    send_frame(data)
-                except queue.Empty:
-                    pass  # no new frame, possibly starvation
 
-                # if FPS is too low, send fake frames to catch up
-                fps_est = 1.0 / (
-                    alpha * (time.time() - prev_time_s) + (1 - alpha) * avg_duration_s
-                )
-                if fps_est < fps_threshold:
+                    send_frame(data)
+                    got_real_frame = True
+
+                    # Advance schedule by one frame slot.
+                    # If we are badly behind, resync to current time instead of trying to "catch up" forever.
+                    now_s = time.monotonic()
+                    next_frame_due_s = max(
+                        next_frame_due_s + frame_interval_s, now_s + frame_interval_s
+                    )
+
+                except queue.Empty:
+                    pass  # source starvation
+
+                if got_real_frame:
+                    continue
+
+                now_s = time.monotonic()
+
+                # No real frame available. Emit duplicate frames only for overdue slots.
+                # But if encoder/write path is slower than target frame interval,
+                # do not try to catch up in a loop: it is impossible and would spin forever.
+                if avg_send_duration_s >= frame_interval_s:
+                    continue
+
+                while not self._abort and now_s >= next_frame_due_s:
                     send_frame(last_data)
-                    while 1.0 / avg_duration_s < fps_threshold:
-                        send_frame(last_data)
+                    next_frame_due_s += frame_interval_s
+                    now_s = time.monotonic()
+
+                    # Safety: if sending became too slow while duplicating, stop immediately.
+                    if avg_send_duration_s >= frame_interval_s:
+                        break
 
 
 class ResizingGizmo(Gizmo):

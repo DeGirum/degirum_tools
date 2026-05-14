@@ -73,20 +73,8 @@ from typing import (
 )
 
 from typing_extensions import TypeGuard
-from .gst_support import build_gst_pipeline
+from ..gst import build_gst_pipeline, VideoCaptureGst
 from enum import Enum
-
-# Import GStreamer libraries
-try:
-    import gi
-
-    gi.require_version("Gst", "1.0")
-    from gi.repository import Gst, GLib
-
-    Gst.init(None)
-    GST_AVAILABLE = True
-except Exception:
-    GST_AVAILABLE = False
 
 
 class VideoCaptureProtocol(Protocol):
@@ -135,272 +123,12 @@ class VideoSourceType(Enum):
         raise TypeError(f"Expected str or VideoSourceType, got {type(value)}")
 
 
-class VideoCaptureGst:
-    """GStreamer-based video capture class that mimics cv2.VideoCapture interface."""
-
-    def __init__(self, pipeline_str):
-        """Initialize GStreamer pipeline from string.
-
-        Args:
-            pipeline_str: GStreamer pipeline string
-        """
-        print(f"Initializing VideoCaptureGst with pipeline: {pipeline_str}")
-        if not GST_AVAILABLE:
-            raise ImportError("GStreamer Python bindings (gi) not available")
-
-        try:
-            self._pipeline = Gst.parse_launch(pipeline_str)
-        except GLib.Error as e:
-            raise Exception(f"Invalid GStreamer pipeline: {pipeline_str}") from e
-
-        self._appsink = self._pipeline.get_by_name("sink")
-        if not self._appsink:
-            raise Exception(f"Invalid GStreamer pipeline (no appsink): {pipeline_str}")
-
-        self._appsink.set_property("emit-signals", True)
-        # Live sources (RTSP/cameras) need sync=False to avoid blocking the
-        # PAUSED→PLAYING transition while waiting for a clock reference.
-        self._appsink.set_property("sync", False)
-        self._appsink.set_property("drop", True)
-        self._appsink.set_property("max-buffers", 5)
-        self._pipeline.set_state(Gst.State.PLAYING)
-
-        # RTSP connections need more time to negotiate and start streaming.
-        state_change_result = self._pipeline.get_state(15 * Gst.SECOND)
-        if state_change_result[1] != Gst.State.PLAYING:
-            raise Exception(f"GStreamer pipeline failed to start: {pipeline_str}")
-
-        self._running = True
-        # Add initialization flags
-        self._initialized = False
-        self._frame_format = None
-        self._frame_width: Optional[int] = None
-        self._frame_height: Optional[int] = None
-        self._frame_channels: Optional[int] = None
-        self._conversion_func = None
-
-    def _get_format_info(
-        self, format_str: str, width: int, height: int
-    ) -> tuple[int, int]:
-        """Get channel count and expected buffer size for a given format.
-        Args:
-            format_str: GStreamer format string (e.g., 'BGR', 'RGB', 'I420')
-            width: Frame width
-            height: Frame height
-        Returns:
-            (channels, expected_size): Number of channels and expected buffer size
-        """
-        if not format_str:
-            # Default to 3 channels if format is unknown
-            return 3, width * height * 3
-        # Common format mappings
-        format_info = {
-            # 3-channel formats
-            "BGR": (3, width * height * 3),
-            "RGB": (3, width * height * 3),
-            "BGRx": (4, width * height * 4),
-            "RGBx": (4, width * height * 4),
-            "BGRA": (4, width * height * 4),
-            "RGBA": (4, width * height * 4),
-            # Grayscale
-            "GRAY8": (1, width * height),
-            "GRAY16_LE": (1, width * height * 2),
-            "GRAY16_BE": (1, width * height * 2),
-            # YUV formats (planar)
-            "I420": (1, width * height * 3 // 2),  # 4:2:0 planar
-            "YV12": (1, width * height * 3 // 2),  # 4:2:0 planar
-            "NV12": (1, width * height * 3 // 2),  # 4:2:0 semi-planar
-            "NV21": (1, width * height * 3 // 2),  # 4:2:0 semi-planar
-            # Other common formats
-            "YUY2": (2, width * height * 2),  # 4:2:2 packed
-            "UYVY": (2, width * height * 2),  # 4:2:2 packed
-        }
-        return format_info.get(format_str, (3, width * height * 3))
-
-    def _initialize_frame_processing(self, sample):
-        """Initialize frame processing parameters from the first frame."""
-        caps = sample.get_caps()
-        structure = caps.get_structure(0)
-        self._frame_width = structure.get_value("width")
-        self._frame_height = structure.get_value("height")
-        format_str = (
-            structure.get_string("format")[1]
-            if structure.get_string("format")[0]
-            else None
-        )
-        # Calculate format info once
-        self._frame_channels, _ = self._get_format_info(
-            format_str or "", self._frame_width, self._frame_height
-        )
-        # Determine conversion function once
-        self._conversion_func = self._get_conversion_function(format_str)
-        self._initialized = True
-
-    def _get_conversion_function(self, format_str):
-        """Get the appropriate conversion function for the format."""
-        if format_str in ["RGB", "RGBx"]:
-            return lambda frame: cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-        elif format_str in ["I420", "YV12", "NV12", "NV21"]:
-            return lambda frame: cv2.cvtColor(frame, cv2.COLOR_YUV2BGR_I420)
-        elif format_str in ["RGBA", "RGBx"]:
-            return lambda frame: cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
-        elif format_str in ["YUY2"]:
-            return lambda frame: cv2.cvtColor(frame, cv2.COLOR_YUV2BGR_YUY2)
-        elif format_str in ["UYVY"]:
-            return lambda frame: cv2.cvtColor(frame, cv2.COLOR_YUV2BGR_UYVY)
-        elif format_str in ["BGRA"]:
-            return lambda frame: frame[:, :, :3]  # Remove alpha channel
-        else:
-            # No conversion needed for BGR, BGRx, or unknown formats
-            return None
-
-    def _convert_frame(self, frame):
-        """Apply the pre-determined conversion to the frame."""
-        if self._conversion_func:
-            return self._conversion_func(frame)
-        return frame
-
-    def read(self):
-        """Read a frame from the GStreamer pipeline.
-
-        Returns:
-            (bool, np.ndarray): Success flag and frame data
-        """
-        if not self._running:
-            return False, None
-        sample = self._appsink.emit("pull-sample")
-        if not sample:
-            self._running = False
-            return False, None
-
-        # Initialize frame processing on first frame
-        if not self._initialized:
-            self._initialize_frame_processing(sample)
-
-        # Ensure frame dimensions are properly initialized
-        if (
-            self._frame_width is None
-            or self._frame_height is None
-            or self._frame_channels is None
-        ):
-            raise RuntimeError("Frame dimensions not properly initialized")
-
-        buf = sample.get_buffer()
-        success, mapinfo = buf.map(Gst.MapFlags.READ)
-        if not success:
-            return False, None
-
-        try:
-            # Use cached format info - much faster!
-            if self._frame_channels == 1:
-                frame: np.ndarray = np.ndarray(
-                    (self._frame_height, self._frame_width),
-                    buffer=mapinfo.data,
-                    dtype=np.uint8,
-                )
-            elif self._frame_channels == 3:
-                frame = np.ndarray(
-                    (self._frame_height, self._frame_width, 3),
-                    buffer=mapinfo.data,
-                    dtype=np.uint8,
-                )
-            elif self._frame_channels == 4:
-                frame = np.ndarray(
-                    (self._frame_height, self._frame_width, 4),
-                    buffer=mapinfo.data,
-                    dtype=np.uint8,
-                )
-            else:
-                frame = np.ndarray(
-                    (self._frame_height, self._frame_width, self._frame_channels),
-                    buffer=mapinfo.data,
-                    dtype=np.uint8,
-                )
-            # Apply pre-determined conversion
-            frame = self._convert_frame(frame)
-            return True, frame
-        finally:
-            buf.unmap(mapinfo)
-
-    def get(self, prop: int):
-        """Get capture properties (mimics cv2.VideoCapture.get).
-
-        Args:
-            prop: OpenCV property constant (e.g., cv2.CAP_PROP_FRAME_WIDTH)
-
-        Returns:
-            Property value or None if not available
-        """
-        pad = self._appsink.get_static_pad("sink")
-        caps = pad.get_current_caps()
-        if not caps:
-            return None
-
-        structure = caps.get_structure(0)
-
-        if prop == cv2.CAP_PROP_FRAME_WIDTH:
-            return structure.get_value("width")
-        elif prop == cv2.CAP_PROP_FRAME_HEIGHT:
-            return structure.get_value("height")
-        elif prop == cv2.CAP_PROP_FPS:
-            framerate = structure.get_fraction("framerate")
-            if framerate:
-                return framerate.value_numerator / framerate.value_denominator
-            return 30.0  # Default fallback
-        elif prop == cv2.CAP_PROP_FRAME_COUNT:
-            # For files, try to get duration
-            duration = self._pipeline.query_duration(Gst.Format.TIME)
-            if duration[0]:
-                fps = self.get(cv2.CAP_PROP_FPS)
-                return int((duration[1] / Gst.SECOND) * fps)
-            return 0
-        return None
-
-    def set(self, prop: int, value: float) -> bool:
-        """Set capture properties (mimics cv2.VideoCapture.set).
-
-        Note: GStreamer pipelines are typically configured at creation time.
-        Most properties cannot be changed dynamically after the pipeline is created.
-        This method provides limited support for interface compatibility.
-
-        Args:
-            prop: OpenCV property constant (e.g., cv2.CAP_PROP_FPS)
-            value: Property value to set
-
-        Returns:
-            bool: True if property was acknowledged, False if not supported
-        """
-        # GStreamer pipelines are configured at creation time via the pipeline string
-        # Most properties (like FPS) are set in the pipeline and cannot be changed dynamically
-        # For FPS override, it's typically handled in the pipeline string or metadata
-        if prop == cv2.CAP_PROP_FPS:
-            # FPS is set in the pipeline configuration, so we can't change it here
-            # Return True to indicate "acknowledged" but don't actually change anything
-            # The actual FPS comes from the pipeline configuration
-            return True
-        # For other properties, return False (not supported)
-        return False
-
-    def isOpened(self):
-        """Check if the capture is opened.
-
-        Returns:
-            bool: True if pipeline is running
-        """
-        return self._running
-
-    def release(self):
-        """Release the GStreamer pipeline."""
-        if self._running:
-            self._pipeline.set_state(Gst.State.NULL)
-            self._running = False
-
-
 def create_video_stream(
     video_source: Union[int, str, Path, None, VideoCaptureProtocol] = None,
     *,
     max_yt_quality: int = 0,
     use_gstreamer: bool = False,
+    **kwargs,
 ) -> VideoCaptureProtocol:
     """Create a video stream from various sources.
 
@@ -420,6 +148,8 @@ def create_video_stream(
             If 0, use best quality. Defaults to 0.
         use_gstreamer: If True, use GStreamer backend for video files.
             Only applies to .mp4 files. Defaults to False.
+        **kwargs: Additional keyword arguments passed to cv2.VideoCapture constructor
+            (e.g., apiPreference=cv2.CAP_V4L2, params=[cv2.CAP_PROP_FRAME_WIDTH, 1280]).
 
     Returns:
         cv2.VideoCapture or VideoCaptureGst: Video capture object.
@@ -491,8 +221,8 @@ def create_video_stream(
             else:
                 video_source = pafy.new(video_source).getbest(preftype="mp4").url
 
-    # Use GStreamer if requested and available
-    if use_gstreamer and GST_AVAILABLE:
+    # Use GStreamer if requested
+    if use_gstreamer:
         try:
             pipeline_str = build_gst_pipeline(video_source)
             stream = VideoCaptureGst(pipeline_str)
@@ -505,7 +235,7 @@ def create_video_stream(
             raise Exception(f"GStreamer failed: {e}")
 
     # Default to OpenCV
-    opencv_stream: VideoCaptureProtocol = cv2.VideoCapture(video_source)  # type: ignore[arg-type]
+    opencv_stream: VideoCaptureProtocol = cv2.VideoCapture(video_source, **kwargs)  # type: ignore[arg-type]
     if not opencv_stream.isOpened():
         raise Exception(f"Error opening '{video_source}' video stream")
     return opencv_stream
@@ -517,6 +247,7 @@ def open_video_stream(
     *,
     max_yt_quality: int = 0,
     use_gstreamer: bool = False,
+    **kwargs,
 ) -> Generator[VideoCaptureProtocol, None, None]:
     """Open a video stream from various sources.
 
@@ -536,7 +267,10 @@ def open_video_stream(
         Exception: If the video stream cannot be opened.
     """
     stream = create_video_stream(
-        video_source, max_yt_quality=max_yt_quality, use_gstreamer=use_gstreamer
+        video_source,
+        max_yt_quality=max_yt_quality,
+        use_gstreamer=use_gstreamer,
+        **kwargs,
     )
     try:
         yield stream
@@ -590,7 +324,8 @@ def video_source(
             containing 'timestamp', 'frame_id', 'fps', 'frame_width', 'frame_height'.
     """
 
-    is_file = stream.get(cv2.CAP_PROP_FRAME_COUNT) > 0
+    frame_count = stream.get(cv2.CAP_PROP_FRAME_COUNT)
+    is_file = frame_count is not None and frame_count > 0
     report_error = False if env.get_test_mode() or is_file else True
 
     if fps:
@@ -1184,7 +919,11 @@ class MediaServer:
         stderr = None if self._verbose else subprocess.DEVNULL
 
         self._process = subprocess.Popen(
-            cmd, cwd=self._working_dir, stdout=stdout, stderr=stderr
+            cmd,
+            cwd=self._working_dir,
+            stdout=stdout,
+            stderr=stderr,
+            start_new_session=True,
         )
 
     def stop(self):
@@ -1224,6 +963,7 @@ class VideoStreamer:
         *,
         fps: float = 30.0,
         pix_fmt="bgr24",
+        vcodec: str = "",
         gop_size: int = 10,
         verbose: bool = False,
     ):
@@ -1237,17 +977,20 @@ class VideoStreamer:
             height (int): Height of the video frames in pixels.
             fps (float, optional): Frames per second for the stream. Defaults to 30.
             pix_fmt (str, optional): Pixel format for the input frames. Defaults to 'bgr24'. Can be 'rgb24'.
+            vcodec (str, optional): Video codec for the stream. Defaults to "" which uses "libx264".
             gop_size (int, optional): GOP size for the video stream. Defaults to 50.
             verbose (bool, optional): If True, shows FFmpeg output in the console. Defaults to False.
         """
         self._width = width
         self._height = height
 
+        effective_vcodec = vcodec if vcodec else "libx264"
+
         # Common FFmpeg input arguments
         input_stream = ffmpeg.input(
             "pipe:0",
             format="rawvideo",
-            pix_fmt="bgr24",
+            pix_fmt=pix_fmt,
             s=f"{width}x{height}",
             framerate=fps,
         )
@@ -1257,7 +1000,7 @@ class VideoStreamer:
         if stream_url.startswith("rtmp://"):
             output_args = {
                 "pix_fmt": "yuv420p",
-                "vcodec": "libx264",
+                "vcodec": effective_vcodec,
                 "preset": "ultrafast",
                 "tune": "zerolatency",
                 "fflags": "nobuffer",
@@ -1270,7 +1013,7 @@ class VideoStreamer:
             output_args = {
                 "format": "rtsp",
                 "pix_fmt": "yuv420p",
-                "vcodec": "libx264",
+                "vcodec": effective_vcodec,
                 "preset": "ultrafast",
                 "tune": "zerolatency",
                 "rtsp_transport": "tcp",  # low latency transport

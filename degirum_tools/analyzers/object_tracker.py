@@ -910,13 +910,15 @@ class _Tracer:
         self.active_trails.clear()
         self.trail_classes.clear()
 
-    def update(self, result):
+    def update(self, result, predicted_bboxes=None):
         """
         Update object traces with current frame result.
 
         Args:
             result: PySDK result object to update with.
                 result.results[] dictionaries containing "track_id" and "bbox" keys will be used to update taces
+            predicted_bboxes: optional dictionary mapping track_id to predicted bbox tuple
+                for tracks that are not detected in the current frame
         """
 
         # array of tracked object indexes and bboxes
@@ -950,8 +952,14 @@ class _Tracer:
         else:
             inactive_set = set(self._timeout_count_dict.keys())
 
-        # remove inactive trails
+        # update inactive trails with predicted bboxes, then handle timeouts
         for tid in inactive_set:
+            if predicted_bboxes and tid in predicted_bboxes:
+                trail = self.active_trails.get(tid)
+                if trail is not None:
+                    trail.append(predicted_bboxes[tid])
+                    if len(trail) > self._trace_depth:
+                        trail.pop(0)
             self._timeout_count_dict[tid] -= 1
             if self._timeout_count_dict[tid] == 0:
                 del (
@@ -1062,7 +1070,11 @@ class ObjectTracker(ResultAnalyzerBase):
         if self._tracer is None:
             result.trails = {}
         else:
-            self._tracer.update(result)
+            predicted_bboxes = {
+                track.track_id: tuple(map(int, track.tlbr))
+                for track in self._tracker._lost_tracks
+            }
+            self._tracer.update(result, predicted_bboxes)
             result.trails = {k: list(v) for k, v in self._tracer.active_trails.items()}
             result.trail_classes = copy.copy(self._tracer.trail_classes)
 
