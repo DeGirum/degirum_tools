@@ -15,7 +15,7 @@ GstAiElement
 A GStreamer filter element that consumes raw BGR or RGB video frames, runs AI inference
 via a DeGirum model, and forwards the annotated frames downstream.
 
-The element exposes four GObject properties:
+The element exposes seven GObject properties:
 
 - **model** (Python object): A pre-constructed :class:`ModelLike` instance.
   When set, ``model_name``, ``zoo_url``, and ``inference_host_address`` are ignored.
@@ -60,13 +60,8 @@ class GstAiElement(GstElementBase):
     """GStreamer filter element with AI inference support.
 
     Accepts raw BGR or RGB video on a single sink pad and forwards frames
-    (optionally annotated with inference results) on a single source pad of the
+    (optionally annotated with inference results) on a source pad of the
     same type.
-
-    This class is intended to be used with multiple inheritance alongside
-    ``Gst.Element``::
-
-        class MyElement(GstAiElement, Gst.Element): ...
 
     Properties
     ----------
@@ -78,7 +73,7 @@ class GstAiElement(GstElementBase):
     zoo_url : str
         Zoo URL for loading the model (used when *model* is ``None``).
     inference_host_address : str
-        Inference host address, e.g. ``"@cloud"`` or an AI-server hostname
+        Inference host address, e.g. ``"@local"``, ``"@cloud"`` or an AI-server hostname
         (used when *model* is ``None``).
     ai_overlay : bool
         When ``True`` (default), push the model's annotated ``image_overlay`` downstream.
@@ -127,7 +122,7 @@ class GstAiElement(GstElementBase):
 
     @classmethod
     def get_pads(cls) -> List[GstElementBase.PadInfo]:
-        """Return sink, optional sink_full, and src pads."""
+        """Return sink, optional sink_full, src, and optional src_json pads."""
         return [
             cls.PadInfo(
                 name="sink",

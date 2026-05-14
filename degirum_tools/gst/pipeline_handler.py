@@ -76,7 +76,8 @@ class GstPipelineHandler:
     """Manages a single GStreamer pipeline lifecycle.
 
     Pass a fully-formed gst-launch pipeline string to the constructor;
-    the pipeline starts immediately. Use `wait()` to block until it ends
+    the pipeline is configured but not started. Call `start()` to set it
+    to PLAYING state. Use `wait()` to block until it ends
     or `stop()` to tear it down early.
 
     A single GLib main loop shared across all instances is started
@@ -199,9 +200,10 @@ class GstPipelineHandler:
                 Defaults to `False`.
 
         Raises:
-            ValueError: If `probe_element_name` is set but the element or its
-                `src` pad is not found, or if any name in `appsink_names` does
-                not match an element in the pipeline.
+            KeyError: If `probe_element_name` is set but the element is not found,
+                or if any name in `appsink_names` does not match an element in the
+                pipeline.
+            ValueError: If `probe_element_name` is set but the element has no `src` pad.
         """
         from gi.repository import Gst
 

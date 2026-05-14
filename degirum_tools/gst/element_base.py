@@ -17,9 +17,10 @@ manager for building custom GStreamer Python elements with minimal boilerplate.
 Key Features
 
 - Declare element metadata and pad templates via ``get_metadata()`` and ``get_pads()``;
-  ``__gstmetadata__`` and ``__gsttemplates__`` are built automatically at class creation time.
+  ``__gstmetadata__``, ``__gsttemplates__``, and ``__gproperties__`` are built automatically
+  when ``register()`` is called.
 - Sink pads are backed by ``streams.Stream`` queues with configurable depth and drop policy;
-  iterate in a worker thread without additional synchronisation code.
+  iterate in a worker thread without additional synchronization code.
 - Source pads expose helpers for pushing stream-start, segment, EOS events, and raw buffers.
 - Worker thread is started on ``READY → PAUSED`` so that Python-object properties
   set between ``parse_launch()`` and ``start()`` are visible to it, and joined on
@@ -45,7 +46,7 @@ Example::
 
     from degirum_tools.gst import setup_gst_environment, GstElementBase
 
-    setup_gst_environment("/path/to/plugin_dir")
+    setup_gst_environment()
 
     from gi.repository import Gst
 
@@ -72,7 +73,7 @@ Example::
             for buf in self.sinks["sink"].queue:
                 self.sources["src"].push(buf)
 
-    Passthrough.register()
+    Passthrough.register("my_passthrough") # use this name in gst pipeline string
 
 Public API
 
@@ -158,13 +159,14 @@ class GstElementBase:
 
     * `get_properties()` — return a list of `PropInfo` instances to expose GObject properties.
 
-    `__init_subclass__` automatically builds `__gstmetadata__` and `__gsttemplates__` from those declarations
-    so that gst-python can register the element.
+    `register()` builds `__gstmetadata__`, `__gsttemplates__`, and `__gproperties__` from those declarations
+    and registers the element with GStreamer.
 
     `__init__` creates all pads (SRC first so SINK pads can resolve `forward_to` by name), populates `self.sources`
-    and `self.sinks`, then starts the worker thread.
+    and `self.sinks`, then creates (but does not start) the worker thread.
 
-    `do_change_state` closes all sink queues and joins the worker thread when the element transitions to NULL.
+    `do_change_state` starts the worker thread on ``READY → PAUSED``, and closes all sink queues
+    and joins the worker thread on ``PAUSED → READY``.
     """
 
     # ------------------------------------------------------------------
@@ -339,6 +341,9 @@ class GstElementBase:
                     a ``caps`` event is pushed between ``stream-start`` and ``segment``,
                     which is required for source pads that have no upstream sink pad to
                     forward caps automatically.
+
+            Returns:
+                ``True`` if all events were pushed successfully, ``False`` otherwise.
             """
             if not self.push_event(self._Gst.Event.new_stream_start(self._stream_id)):
                 return False
