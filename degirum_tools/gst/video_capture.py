@@ -146,7 +146,7 @@ class VideoCaptureGst:
         elif format_str in ["UYVY"]:
             return lambda frame: cv2.cvtColor(frame, cv2.COLOR_YUV2BGR_UYVY)
         elif format_str in ["BGRA"]:
-            return lambda frame: frame[:, :, :3]  # Remove alpha channel
+            return lambda frame: frame[:, :, :3].copy()  # Remove alpha channel
         else:
             # No conversion needed for BGR, BGRx, or unknown formats
             return None
@@ -155,7 +155,7 @@ class VideoCaptureGst:
         """Apply the pre-determined conversion to the frame."""
         if self._conversion_func:
             return self._conversion_func(frame)
-        return frame
+        return frame.copy()
 
     def read(self):
         """Read a frame from the GStreamer pipeline.
@@ -248,9 +248,9 @@ class VideoCaptureGst:
         elif prop == cv2.CAP_PROP_FRAME_HEIGHT:
             return structure.get_value("height")
         elif prop == cv2.CAP_PROP_FPS:
-            framerate = structure.get_fraction("framerate")
-            if framerate:
-                return framerate.value_numerator / framerate.value_denominator
+            ok, num, denom = structure.get_fraction("framerate")
+            if ok and denom:
+                return num / denom
             return None
         elif prop == cv2.CAP_PROP_FRAME_COUNT:
             duration = self._handler.pipeline.query_duration(self._Gst.Format.TIME)
