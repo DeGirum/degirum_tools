@@ -69,8 +69,6 @@ from typing import Dict, List
 
 import concurrent.futures
 
-from ..tools import Watchdog
-
 
 class GstPipelineHandler:
     """Manages a single GStreamer pipeline lifecycle.
@@ -206,6 +204,7 @@ class GstPipelineHandler:
             ValueError: If `probe_element_name` is set but the element has no `src` pad.
         """
         from gi.repository import Gst
+        from ..tools.time_tools import Watchdog
 
         self._Gst = Gst
         self._pipeline = self._Gst.parse_launch(pipeline_str)
@@ -245,6 +244,8 @@ class GstPipelineHandler:
             if message.type == Gst.MessageType.ERROR:
                 err, debug = message.parse_error()
                 self._pipeline.set_state(Gst.State.NULL)
+                for sink in self.appsinks.values():
+                    sink.queue.close(force=True)
                 if not self._future.done():
                     self._future.set_exception(RuntimeError(f"{err.message} ({debug})"))
             elif message.type == Gst.MessageType.EOS:

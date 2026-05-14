@@ -241,6 +241,7 @@ class GstElementBase:
             self.height: Optional[int] = None
             self.format: Optional[str] = None
             self.stride: Optional[List[int]] = None
+            self._caps_ready = threading.Event()
 
             # Holds Gst.Buffer items; None is the stop sentinel.
             from .. import streams
@@ -249,6 +250,14 @@ class GstElementBase:
 
         def is_initialized(self) -> bool:
             return self.width is not None and self.height is not None
+
+        def wait_for_caps(self, timeout: float = 30.0) -> bool:
+            """Block until CAPS have been negotiated (width/height/format are populated).
+
+            Call from the worker thread before reading ``width``, ``height``, or ``format``.
+            Returns ``True`` when CAPS are ready, ``False`` if *timeout* expires.
+            """
+            return self._caps_ready.wait(timeout=timeout)
 
         def is_linked(self) -> bool:
             """Return ``True`` if this pad is currently linked to a peer pad."""
@@ -293,6 +302,7 @@ class GstElementBase:
                 _, self.width = s.get_int("width")
                 _, self.height = s.get_int("height")
                 self.format = s.get_string("format")
+                self._caps_ready.set()
                 if self._forward_caps and self._forward_to:
                     return self._forward_to.push_event(event)
 

@@ -93,12 +93,6 @@ from __future__ import annotations
 import os
 import inspect
 
-# flake8: noqa
-from .element_base import *
-from .ai_element import *
-from .pipeline_handler import *
-from .pipeline_builder import *
-
 
 def setup_gst_environment(*plugin_dirs):
     """Set GST_PLUGIN_PATH before gi is imported, then import and return gi.
@@ -129,7 +123,7 @@ def setup_gst_environment(*plugin_dirs):
         existing = os.environ.get("GST_PLUGIN_PATH", "")
         all_dirs = abs_dirs + ([existing] if existing else [])
         if all_dirs:
-            os.environ["GST_PLUGIN_PATH"] = ":".join(all_dirs)
+            os.environ["GST_PLUGIN_PATH"] = os.pathsep.join(all_dirs)
 
     import gi
 
@@ -141,3 +135,11 @@ def setup_gst_environment(*plugin_dirs):
     Gst.init(None)
 
     return gi
+
+
+# flake8: noqa
+from .element_base import *
+from .ai_element import *
+from .pipeline_handler import *
+from .pipeline_builder import *
+from .video_capture import *

@@ -281,7 +281,7 @@ class GstAiElement(GstElementBase):
 
         model = self.props.model
         if model is not None and (
-            not isinstance(model, ModelLike) or not isinstance(model, dg.model.Model)
+            not (isinstance(model, ModelLike) or isinstance(model, dg.model.Model))
         ):
             raise TypeError(
                 f"'model' property must be a Model-like instance, got {type(model).__name__}"
@@ -332,6 +332,8 @@ class GstAiElement(GstElementBase):
 
         ai_overlay: bool = self.props.ai_overlay
 
+        if not sink.wait_for_caps():
+            return  # pipeline torn down before caps arrived
         h, w = sink.height, sink.width
         assert h is not None and w is not None, "sink CAPS not yet negotiated"
 
@@ -342,6 +344,8 @@ class GstAiElement(GstElementBase):
         h_full = w_full = 0
         scale_x = scale_y = 1.0
         if has_full_input and ai_overlay:
+            if not sink_full.wait_for_caps():
+                return  # pipeline torn down before caps arrived
             h_full = sink_full.height or 0
             w_full = sink_full.width or 0
             assert h_full and w_full, "sink_full CAPS not yet negotiated"
