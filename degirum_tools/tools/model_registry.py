@@ -111,6 +111,7 @@ class ModelSpec:
         model_name (str): Exact model identifier expected by the zoo. Ignored
             when ``model_url`` is provided.
         zoo_url (str): Zoo location that hosts this model. When left empty,
+            ``inference_host_address`` must specify an AI Server host; otherwise,
             registry defaults or explicit overrides must supply the value.
         model_url (str): Direct URL to the model file. When set, overrides
             ``model_name`` and ``zoo_url``.
@@ -165,10 +166,10 @@ class ModelSpec:
                 )
         if not self.model_name:
             raise ValueError("model_name cannot be empty")
-        if not self.zoo_url:
-            raise ValueError("zoo_url cannot be empty")
         if not self.inference_host_address:
             raise ValueError("inference_host_address cannot be empty")
+        if not self.zoo_url and self.inference_host_address.startswith("@"):
+            raise ValueError("zoo_url cannot be empty")
         if self.model_properties is None:
             self.model_properties = {}
 
